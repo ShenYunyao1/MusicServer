@@ -6,7 +6,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
+	"net/http"
 	"sort"
 	"strings"
 	"unicode/utf16"
@@ -20,7 +25,18 @@ const maxMetadataReadBytes = 32 << 20
 type audioMetadata struct {
 	Title, Artist, Album, Genre, Comment, Lyrics string
 	LyricsSource                                 string
+	// Cover contains a validated image selected from embedded metadata. The
+	// store persists it as a content-addressed asset and exposes only its ID.
+	// CoverSource is embedded or external and is useful for diagnostics/UI.
+	Cover       []byte
+	CoverMIME   string
+	CoverSource string
 }
+
+const (
+	maxEmbeddedCoverBytes = 8 << 20
+	maxCoverPixels        = 20_000_000
+)
 
 // readAudioMetadata reads tags without decoding audio or invoking external programs.
 // Missing or malformed tags are nonfatal to callers, which can use filename defaults.
@@ -78,6 +94,11 @@ func readAudioMetadata(reader io.ReadSeeker) (result audioMetadata, err error) {
 	result.Album = cleanMetadataText(metadata.Album())
 	result.Genre = cleanMetadataText(metadata.Genre())
 	result.Comment = cleanMetadataText(metadata.Comment())
+	if picture := metadata.Picture(); picture != nil {
+		if data, mime, ok := validateCover(picture.Data, picture.MIMEType); ok {
+			result.Cover, result.CoverMIME, result.CoverSource = data, mime, "embedded"
+		}
+	}
 	raw := metadata.Raw()
 	keys := make([]string, 0, len(raw))
 	for key := range raw {
@@ -150,6 +171,72 @@ func readAudioMetadata(reader io.ReadSeeker) (result audioMetadata, err error) {
 		}
 	}
 	return result, err
+}
+
+// validateCover bounds both the bytes retained in the database and the image
+// dimensions. DecodeConfig reads headers only, so a malicious cover cannot
+// force a full decoded bitmap into memory. MIME is derived from magic bytes;
+// the tag supplied MIME is used only for formats whose signature is known.
+func validateCover(data []byte, declaredMIME string) ([]byte, string, bool) {
+	if len(data) == 0 || len(data) > maxEmbeddedCoverBytes {
+		return nil, "", false
+	}
+	mime := strings.ToLower(strings.TrimSpace(strings.SplitN(declaredMIME, ";", 2)[0]))
+	if detected := http.DetectContentType(data); detected != "application/octet-stream" {
+		mime = detected
+	}
+	if len(data) >= 12 && string(data[:4]) == "RIFF" && string(data[8:12]) == "WEBP" {
+		if w, h, ok := webpDimensions(data); ok && int64(w)*int64(h) <= maxCoverPixels {
+			return append([]byte(nil), data...), "image/webp", true
+		}
+		return nil, "", false
+	}
+	if mime != "image/jpeg" && mime != "image/png" && mime != "image/gif" {
+		return nil, "", false
+	}
+	config, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil || config.Width <= 0 || config.Height <= 0 || int64(config.Width)*int64(config.Height) > maxCoverPixels {
+		return nil, "", false
+	}
+	return append([]byte(nil), data...), mime, true
+}
+
+func webpDimensions(data []byte) (int, int, bool) {
+	if len(data) < 30 || string(data[:4]) != "RIFF" || string(data[8:12]) != "WEBP" {
+		return 0, 0, false
+	}
+	chunk := 12
+	for chunk+8 <= len(data) {
+		typ := string(data[chunk : chunk+4])
+		size := int(binary.LittleEndian.Uint32(data[chunk+4 : chunk+chunk+8]))
+		if size < 0 || chunk+8+size > len(data) {
+			return 0, 0, false
+		}
+		body := data[chunk+8 : chunk+8+size]
+		switch typ {
+		case "VP8X":
+			if len(body) < 10 {
+				return 0, 0, false
+			}
+			w := 1 + int(body[4]) | int(body[5])<<8 | int(body[6])<<16
+			h := 1 + int(body[7]) | int(body[8])<<8 | int(body[9])<<16
+			return w, h, true
+		case "VP8 ":
+			if len(body) < 10 || body[3] != 0x9d || body[4] != 0x01 || body[5] != 0x2a {
+				return 0, 0, false
+			}
+			return int(binary.LittleEndian.Uint16(body[6:8]) & 0x3fff), int(binary.LittleEndian.Uint16(body[8:10]) & 0x3fff), true
+		case "VP8L":
+			if len(body) < 5 || body[0] != 0x2f {
+				return 0, 0, false
+			}
+			w := 1 + int(body[1]) | int(body[2]&0x3f)<<8
+			h := 1 + int(body[2]>>6) | int(body[3])<<2 | int(body[4]&0xf)<<10
+			return w, h, true
+		}
+		chunk += 8 + size + size%2
+	}
+	return 0, 0, false
 }
 
 // WAV stores ID3v2 in a RIFF chunk, often after a large audio payload. Seek over
