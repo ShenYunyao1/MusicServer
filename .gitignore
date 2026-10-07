@@ -1,0 +1,24 @@
+# MusicPlayer2 is maintained in its own existing Git repository.
+/MusicPlayer2/
+
+# Local music, credentials, mutable databases and generated builds.
+/测试音乐资源/
+/server/data/
+/server/media/
+*.exe
+*.exe~
+*.dll
+*.pdb
+*.obj
+*.log
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.db
+.env
+.env.*
+__pycache__/
+
+# Local screenshots from previous manual verification.
+/Docs/*.png
