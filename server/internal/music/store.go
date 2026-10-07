@@ -347,6 +347,12 @@ func (s *Store) readTrackWithMetadata(path, originalName string) (Track, audioMe
 	contentDigest := hex.EncodeToString(hasher.Sum(nil))
 	// Invalid or absent tags retain filename defaults without rejecting audio.
 	metadata, _ := readAudioMetadata(file)
+	// Embedded artwork wins; when absent, use a validated same-basename or
+	// conventional folder image. Asset persistence is performed by the caller
+	// that owns the SQLite assets table; this reader returns the bytes in the
+	// metadata value for that purpose.
+	metadata = selectCover(root, relativePath, metadata)
+	technical := technicalMetadata(path, "")
 	baseName := strings.TrimSuffix(filepath.Base(originalName), filepath.Ext(originalName))
 	title, artist := baseName, ""
 	if parts := strings.SplitN(baseName, " - ", 2); len(parts) == 2 {
@@ -383,6 +389,13 @@ func (s *Store) readTrackWithMetadata(path, originalName string) (Track, audioMe
 		Lyrics:         lyrics,
 		EmbeddedLyrics: metadata.Lyrics != "",
 		LyricsSource:   lyricsSource,
+		CoverMIME:      metadata.CoverMIME,
+		CoverSource:    metadata.CoverSource,
+		DurationMS:     technical.DurationMS,
+		BitrateKbps:    int64(technical.BitrateKbps),
+		SampleRate:     technical.SampleRate,
+		Channels:       technical.Channels,
+		BitsPerSample:  technical.BitsPerSample,
 		Path:           relativePath,
 		Size:           info.Size(),
 		ContentHash:    contentDigest,

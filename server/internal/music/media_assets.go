@@ -20,7 +20,7 @@ func externalCoverNames(relativeAudioPath string) []string {
 		}
 		names = append(names, name)
 	}
-	for _, stem := range []string{"cover", "folder"} {
+	for _, stem := range []string{"cover", "folder", "albumcover"} {
 		for _, ext := range []string{".jpg", ".jpeg", ".png", ".gif", ".webp"} {
 			name := stem + ext
 			if dir != "." {
@@ -40,6 +40,30 @@ func readExternalCover(root *os.Root, relativeAudioPath string) (data []byte, mi
 		return nil, "", ""
 	}
 	candidates := externalCoverNames(relativeAudioPath)
+	// Collections exported by download tools commonly use names such as
+	// "AlbumCover - artist - album.jpg". Add those prefixed files after the
+	// exact conventional names while preserving deterministic directory order.
+	dir := filepath.ToSlash(filepath.Dir(relativeAudioPath))
+	if directory, err := root.Open(dir); err == nil {
+		if entries, readErr := directory.Readdir(-1); readErr == nil {
+			for _, entry := range entries {
+				name := strings.ToLower(entry.Name())
+				ext := strings.ToLower(filepath.Ext(name))
+				if entry.IsDir() || (ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".gif" && ext != ".webp") {
+					continue
+				}
+				stem := strings.TrimSuffix(name, ext)
+				if strings.HasPrefix(stem, "albumcover") || strings.HasPrefix(stem, "cover") || strings.HasPrefix(stem, "folder") {
+					candidate := entry.Name()
+					if dir != "." {
+						candidate = filepath.ToSlash(filepath.Join(dir, candidate))
+					}
+					candidates = append(candidates, candidate)
+				}
+			}
+		}
+		_ = directory.Close()
+	}
 	for _, candidate := range candidates {
 		for _, actual := range []string{candidate, findCaseInsensitive(root, candidate)} {
 			if actual == "" {
