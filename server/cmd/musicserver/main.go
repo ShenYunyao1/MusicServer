@@ -29,6 +29,25 @@ func main() {
 		log.Fatal(err)
 	}
 	defer store.Close()
+	if err := store.CleanupUploadStages(); err != nil {
+		log.Printf("clean expired uploads: %v", err)
+	}
+	stopCleanup := make(chan struct{})
+	defer close(stopCleanup)
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := store.CleanupUploadStages(); err != nil {
+					log.Printf("clean expired uploads: %v", err)
+				}
+			case <-stopCleanup:
+				return
+			}
+		}
+	}()
 	if !*noScan {
 		if _, err := store.Scan(); err != nil {
 			log.Printf("initial scan skipped: %v", err)

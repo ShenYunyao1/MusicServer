@@ -180,7 +180,7 @@ func TestSQLiteRejectsNewerSchemaVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.db.Exec("PRAGMA user_version = 2"); err != nil {
+	if _, err := store.db.Exec("PRAGMA user_version = 3"); err != nil {
 		t.Fatal(err)
 	}
 	closeStoreForTest(t, store)

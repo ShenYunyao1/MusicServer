@@ -2,6 +2,7 @@ package music
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -14,7 +15,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const sqliteSchemaVersion = 1
+const sqliteSchemaVersion = 2
 
 // The store retains its in-memory snapshot API. Each durable mutation replaces
 // the relational snapshot in one transaction; the mutex and commitLocked keep
@@ -35,6 +36,14 @@ CREATE TABLE IF NOT EXISTS tracks (
     lyrics TEXT NOT NULL,
     embedded_lyrics INTEGER NOT NULL DEFAULT 0 CHECK (embedded_lyrics IN (0, 1)),
     lyrics_source TEXT NOT NULL DEFAULT '',
+    cover_id TEXT NOT NULL DEFAULT '',
+    cover_mime TEXT NOT NULL DEFAULT '',
+    cover_source TEXT NOT NULL DEFAULT '',
+    duration_ms INTEGER NOT NULL DEFAULT 0,
+    bitrate_kbps INTEGER NOT NULL DEFAULT 0,
+    sample_rate INTEGER NOT NULL DEFAULT 0,
+    channels INTEGER NOT NULL DEFAULT 0,
+    bits_per_sample INTEGER NOT NULL DEFAULT 0,
     path TEXT NOT NULL,
     size INTEGER NOT NULL,
     content_hash TEXT NOT NULL,
@@ -46,6 +55,7 @@ CREATE TABLE IF NOT EXISTS playlists (
     name TEXT NOT NULL,
     description TEXT NOT NULL,
     updated_at TEXT NOT NULL
+    ,sort_order INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS playlist_tracks (
     playlist_id TEXT NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
@@ -93,12 +103,45 @@ CREATE TABLE IF NOT EXISTS excluded_tracks (
     track_id TEXT PRIMARY KEY NOT NULL,
     excluded INTEGER NOT NULL CHECK (excluded IN (0, 1))
 );
+CREATE TABLE IF NOT EXISTS cover_assets (
+    id TEXT PRIMARY KEY NOT NULL,
+    mime TEXT NOT NULL,
+    source TEXT NOT NULL,
+    data BLOB NOT NULL,
+    content_hash TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY NOT NULL,
+    value TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS upload_staging (
+    id TEXT PRIMARY KEY NOT NULL,
+    original_name TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    content_hash TEXT NOT NULL,
+    temp_path TEXT NOT NULL,
+    track_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS api_call_stats (
+    key_id TEXT PRIMARY KEY NOT NULL,
+    total_requests INTEGER NOT NULL DEFAULT 0,
+    success_requests INTEGER NOT NULL DEFAULT 0,
+    failure_requests INTEGER NOT NULL DEFAULT 0,
+    total_bytes INTEGER NOT NULL DEFAULT 0,
+    total_duration_ms INTEGER NOT NULL DEFAULT 0,
+    last_called_at TEXT NOT NULL DEFAULT '',
+    last_status INTEGER NOT NULL DEFAULT 0
+);
 `
 
 func emptyLibrary() Library {
 	return Library{
 		Tracks: map[string]Track{}, Playlists: map[string]Playlist{}, Keys: map[string]APIKey{},
-		Overrides: map[string]map[string]string{}, Excluded: map[string]bool{},
+		Overrides: map[string]map[string]string{}, Excluded: map[string]bool{}, CoverAssets: map[string]CoverAsset{},
+		Settings: ServerSettings{MaxUploadBytes: 512 << 20, ScanExternalLyrics: true, ScanExternalCovers: true},
 	}
 }
 
@@ -117,6 +160,15 @@ func normalizeLibrary(data *Library) {
 	}
 	if data.Excluded == nil {
 		data.Excluded = map[string]bool{}
+	}
+	if data.CoverAssets == nil {
+		data.CoverAssets = map[string]CoverAsset{}
+	}
+	if data.Settings.MaxUploadBytes <= 0 {
+		data.Settings.MaxUploadBytes = 512 << 20
+	}
+	if data.Settings.MediaRoot == "" {
+		data.Settings.MediaRoot = ""
 	}
 }
 
@@ -170,6 +222,7 @@ func (s *Store) loadSQLite() error {
 	if errors.Is(err, sql.ErrNoRows) {
 		// A new database starts with a clean empty snapshot.
 		s.data = emptyLibrary()
+		s.data.Settings.MediaRoot = s.mediaRoot
 		if err := s.saveLocked(); err != nil {
 			return fmt.Errorf("initialize SQLite snapshot: %w", err)
 		}
@@ -181,6 +234,12 @@ func (s *Store) loadSQLite() error {
 		return fmt.Errorf("read SQLite snapshot: %w", err)
 	}
 	normalizeLibrary(&data)
+	if data.Settings.MediaRoot == "" {
+		data.Settings.MediaRoot = s.mediaRoot
+	}
+	if data.Settings.MaxUploadBytes <= 0 {
+		data.Settings.MaxUploadBytes = 512 << 20
+	}
 	s.data = data
 	return nil
 }
@@ -195,11 +254,35 @@ func initializeSQLiteSchema(db *sql.DB) error {
 	if err := tx.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return fmt.Errorf("read SQLite schema version: %w", err)
 	}
-	if version != 0 && version != sqliteSchemaVersion {
-		return fmt.Errorf("unsupported SQLite schema version %d (supported: %d)", version, sqliteSchemaVersion)
+	if version != 0 && version != 1 && version != sqliteSchemaVersion {
+		return fmt.Errorf("unsupported SQLite schema version %d (supported: 0, 1, %d)", version, sqliteSchemaVersion)
 	}
-	if _, err := tx.Exec(sqliteSchema); err != nil {
-		return fmt.Errorf("create SQLite schema: %w", err)
+	if version == 0 {
+		if _, err := tx.Exec(sqliteSchema); err != nil {
+			return fmt.Errorf("create SQLite schema: %w", err)
+		}
+	} else if version == 1 {
+		// v1 kept the relational snapshot but predated artwork, technical
+		// metadata, staging, settings, ordering and call statistics.
+		for _, statement := range []string{
+			"ALTER TABLE tracks ADD COLUMN cover_id TEXT NOT NULL DEFAULT ''",
+			"ALTER TABLE tracks ADD COLUMN cover_mime TEXT NOT NULL DEFAULT ''",
+			"ALTER TABLE tracks ADD COLUMN cover_source TEXT NOT NULL DEFAULT ''",
+			"ALTER TABLE tracks ADD COLUMN duration_ms INTEGER NOT NULL DEFAULT 0",
+			"ALTER TABLE tracks ADD COLUMN bitrate_kbps INTEGER NOT NULL DEFAULT 0",
+			"ALTER TABLE tracks ADD COLUMN sample_rate INTEGER NOT NULL DEFAULT 0",
+			"ALTER TABLE tracks ADD COLUMN channels INTEGER NOT NULL DEFAULT 0",
+			"ALTER TABLE tracks ADD COLUMN bits_per_sample INTEGER NOT NULL DEFAULT 0",
+			"ALTER TABLE playlists ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
+			"CREATE TABLE IF NOT EXISTS cover_assets (id TEXT PRIMARY KEY NOT NULL, mime TEXT NOT NULL, source TEXT NOT NULL, data BLOB NOT NULL, content_hash TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)",
+			"CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)",
+			"CREATE TABLE IF NOT EXISTS upload_staging (id TEXT PRIMARY KEY NOT NULL, original_name TEXT NOT NULL, size INTEGER NOT NULL, content_hash TEXT NOT NULL, temp_path TEXT NOT NULL, track_json TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL)",
+			"CREATE TABLE IF NOT EXISTS api_call_stats (key_id TEXT PRIMARY KEY NOT NULL, total_requests INTEGER NOT NULL DEFAULT 0, success_requests INTEGER NOT NULL DEFAULT 0, failure_requests INTEGER NOT NULL DEFAULT 0, total_bytes INTEGER NOT NULL DEFAULT 0, total_duration_ms INTEGER NOT NULL DEFAULT 0, last_called_at TEXT NOT NULL DEFAULT '', last_status INTEGER NOT NULL DEFAULT 0)",
+		} {
+			if _, err := tx.Exec(statement); err != nil {
+				return fmt.Errorf("migrate SQLite schema v1 to v2: %w", err)
+			}
+		}
 	}
 	if _, err := tx.Exec("INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?)", strconv.Itoa(sqliteSchemaVersion)); err != nil {
 		return fmt.Errorf("write SQLite schema version: %w", err)
@@ -209,9 +292,17 @@ func initializeSQLiteSchema(db *sql.DB) error {
 		return fmt.Errorf("read SQLite schema metadata: %w", err)
 	}
 	if metadataVersion != strconv.Itoa(sqliteSchemaVersion) {
+		if version == 1 && metadataVersion == "1" {
+			if _, err := tx.Exec("UPDATE meta SET value = ? WHERE key = 'schema_version'", strconv.Itoa(sqliteSchemaVersion)); err != nil {
+				return fmt.Errorf("update SQLite schema metadata version: %w", err)
+			}
+			metadataVersion = strconv.Itoa(sqliteSchemaVersion)
+		}
+	}
+	if metadataVersion != strconv.Itoa(sqliteSchemaVersion) {
 		return fmt.Errorf("unsupported SQLite schema metadata version %q", metadataVersion)
 	}
-	if _, err := tx.Exec("PRAGMA user_version = 1"); err != nil {
+	if _, err := tx.Exec("PRAGMA user_version = 2"); err != nil {
 		return fmt.Errorf("set SQLite schema version: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -278,7 +369,7 @@ func (writer *sqliteInserter) close() {
 	}
 }
 
-func saveSQLiteSnapshot(db *sql.DB, data Library) error {
+func saveSQLiteSnapshot(db *sql.DB, data Library, committedStages ...string) error {
 	if db == nil {
 		return errors.New("SQLite database is not open")
 	}
@@ -287,7 +378,7 @@ func saveSQLiteSnapshot(db *sql.DB, data Library) error {
 		return fmt.Errorf("begin SQLite snapshot: %w", err)
 	}
 	defer tx.Rollback()
-	for _, table := range []string{"scopes", "key_playlist_grants", "playlist_tracks", "tracks", "playlists", "api_keys", "metadata_overrides", "excluded_tracks"} {
+	for _, table := range []string{"scopes", "key_playlist_grants", "playlist_tracks", "tracks", "playlists", "api_keys", "metadata_overrides", "excluded_tracks", "cover_assets", "settings"} {
 		if _, err := tx.Exec("DELETE FROM " + table); err != nil {
 			return fmt.Errorf("clear SQLite %s: %w", table, err)
 		}
@@ -298,15 +389,23 @@ func saveSQLiteSnapshot(db *sql.DB, data Library) error {
 		if id != track.ID {
 			return fmt.Errorf("track map ID %q differs from record ID %q", id, track.ID)
 		}
-		if err := writer.insert(`INSERT INTO tracks (id, title, artist, album, genre, comment, lyrics, embedded_lyrics, lyrics_source, path, size, content_hash, format, modified_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, track.Title, track.Artist, track.Album, track.Genre, track.Comment, track.Lyrics, track.EmbeddedLyrics, track.LyricsSource, track.Path, track.Size, track.ContentHash, track.Format, persistedTime(track.ModifiedAt)); err != nil {
+		if err := writer.insert(`INSERT INTO tracks (id, title, artist, album, genre, comment, lyrics, embedded_lyrics, lyrics_source, cover_id, cover_mime, cover_source, duration_ms, bitrate_kbps, sample_rate, channels, bits_per_sample, path, size, content_hash, format, modified_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, track.Title, track.Artist, track.Album, track.Genre, track.Comment, track.Lyrics, track.EmbeddedLyrics, track.LyricsSource, track.CoverID, track.CoverMIME, track.CoverSource, track.DurationMS, track.BitrateKbps, track.SampleRate, track.Channels, track.BitsPerSample, track.Path, track.Size, track.ContentHash, track.Format, persistedTime(track.ModifiedAt)); err != nil {
 			return fmt.Errorf("write SQLite track %q: %w", id, err)
+		}
+	}
+	for id, asset := range data.CoverAssets {
+		if id == "" || asset.ID != id || len(asset.Data) == 0 || asset.MIME == "" {
+			continue
+		}
+		if err := writer.insert("INSERT INTO cover_assets (id, mime, source, data, content_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)", id, asset.MIME, "scan", asset.Data, id, persistedTime(time.Now().UTC())); err != nil {
+			return fmt.Errorf("write SQLite cover asset %q: %w", id, err)
 		}
 	}
 	for id, playlist := range data.Playlists {
 		if id != playlist.ID {
 			return fmt.Errorf("playlist map ID %q differs from record ID %q", id, playlist.ID)
 		}
-		if err := writer.insert("INSERT INTO playlists (id, name, description, updated_at) VALUES (?, ?, ?, ?)", id, playlist.Name, playlist.Description, persistedTime(playlist.UpdatedAt)); err != nil {
+		if err := writer.insert("INSERT INTO playlists (id, name, description, updated_at, sort_order) VALUES (?, ?, ?, ?, ?)", id, playlist.Name, playlist.Description, persistedTime(playlist.UpdatedAt), playlist.SortOrder); err != nil {
 			return fmt.Errorf("write SQLite playlist %q: %w", id, err)
 		}
 		for position, trackID := range playlist.TrackIDs {
@@ -349,8 +448,26 @@ func saveSQLiteSnapshot(db *sql.DB, data Library) error {
 			return fmt.Errorf("write SQLite exclusion %q: %w", trackID, err)
 		}
 	}
+	settings := map[string]any{
+		"media_root":           data.Settings.MediaRoot,
+		"ffprobe_path":         data.Settings.FFprobePath,
+		"max_upload_bytes":     data.Settings.MaxUploadBytes,
+		"scan_external_lyrics": data.Settings.ScanExternalLyrics,
+		"scan_external_covers": data.Settings.ScanExternalCovers,
+	}
+	for key, value := range settings {
+		encoded, _ := json.Marshal(value)
+		if err := writer.insert("INSERT INTO settings (key, value) VALUES (?, ?)", key, string(encoded)); err != nil {
+			return fmt.Errorf("write SQLite setting %q: %w", key, err)
+		}
+	}
 	if err := writer.insert("INSERT INTO meta (key, value) VALUES ('revision', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value", strconv.FormatInt(data.Revision, 10)); err != nil {
 		return fmt.Errorf("write SQLite snapshot metadata: %w", err)
+	}
+	for _, id := range committedStages {
+		if _, err := tx.Exec("DELETE FROM upload_staging WHERE id = ?", id); err != nil {
+			return fmt.Errorf("commit upload stage: %w", err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit SQLite snapshot: %w", err)
@@ -386,10 +503,10 @@ func readSQLiteSnapshot(db *sql.DB) (Library, error) {
 	if data.Revision, err = strconv.ParseInt(revision, 10, 64); err != nil {
 		return data, fmt.Errorf("parse revision: %w", err)
 	}
-	if err := querySQLiteRows(tx, `SELECT id, title, artist, album, genre, comment, lyrics, embedded_lyrics, lyrics_source, path, size, content_hash, format, modified_at FROM tracks`, func(rows *sql.Rows) error {
+	if err := querySQLiteRows(tx, `SELECT id, title, artist, album, genre, comment, lyrics, embedded_lyrics, lyrics_source, cover_id, cover_mime, cover_source, duration_ms, bitrate_kbps, sample_rate, channels, bits_per_sample, path, size, content_hash, format, modified_at FROM tracks`, func(rows *sql.Rows) error {
 		var track Track
 		var modified string
-		if err := rows.Scan(&track.ID, &track.Title, &track.Artist, &track.Album, &track.Genre, &track.Comment, &track.Lyrics, &track.EmbeddedLyrics, &track.LyricsSource, &track.Path, &track.Size, &track.ContentHash, &track.Format, &modified); err != nil {
+		if err := rows.Scan(&track.ID, &track.Title, &track.Artist, &track.Album, &track.Genre, &track.Comment, &track.Lyrics, &track.EmbeddedLyrics, &track.LyricsSource, &track.CoverID, &track.CoverMIME, &track.CoverSource, &track.DurationMS, &track.BitrateKbps, &track.SampleRate, &track.Channels, &track.BitsPerSample, &track.Path, &track.Size, &track.ContentHash, &track.Format, &modified); err != nil {
 			return err
 		}
 		var err error
@@ -401,10 +518,10 @@ func readSQLiteSnapshot(db *sql.DB) (Library, error) {
 	}); err != nil {
 		return data, err
 	}
-	if err := querySQLiteRows(tx, "SELECT id, name, description, updated_at FROM playlists", func(rows *sql.Rows) error {
+	if err := querySQLiteRows(tx, "SELECT id, name, description, updated_at, sort_order FROM playlists ORDER BY sort_order, id", func(rows *sql.Rows) error {
 		playlist := Playlist{TrackIDs: []string{}}
 		var updated string
-		if err := rows.Scan(&playlist.ID, &playlist.Name, &playlist.Description, &updated); err != nil {
+		if err := rows.Scan(&playlist.ID, &playlist.Name, &playlist.Description, &updated, &playlist.SortOrder); err != nil {
 			return err
 		}
 		var err error
@@ -499,6 +616,40 @@ func readSQLiteSnapshot(db *sql.DB) (Library, error) {
 			return err
 		}
 		data.Excluded[trackID] = excluded
+		return nil
+	}); err != nil {
+		return data, err
+	}
+	if err := querySQLiteRows(tx, "SELECT id, mime, data FROM cover_assets", func(rows *sql.Rows) error {
+		var asset CoverAsset
+		if err := rows.Scan(&asset.ID, &asset.MIME, &asset.Data); err != nil {
+			return err
+		}
+		if data.CoverAssets == nil {
+			data.CoverAssets = map[string]CoverAsset{}
+		}
+		data.CoverAssets[asset.ID] = asset
+		return nil
+	}); err != nil {
+		return data, err
+	}
+	if err := querySQLiteRows(tx, "SELECT key, value FROM settings", func(rows *sql.Rows) error {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return err
+		}
+		switch key {
+		case "media_root":
+			_ = json.Unmarshal([]byte(value), &data.Settings.MediaRoot)
+		case "ffprobe_path":
+			_ = json.Unmarshal([]byte(value), &data.Settings.FFprobePath)
+		case "max_upload_bytes":
+			_ = json.Unmarshal([]byte(value), &data.Settings.MaxUploadBytes)
+		case "scan_external_lyrics":
+			_ = json.Unmarshal([]byte(value), &data.Settings.ScanExternalLyrics)
+		case "scan_external_covers":
+			_ = json.Unmarshal([]byte(value), &data.Settings.ScanExternalCovers)
+		}
 		return nil
 	}); err != nil {
 		return data, err

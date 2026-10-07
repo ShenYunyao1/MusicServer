@@ -186,7 +186,7 @@ func validateCover(data []byte, declaredMIME string) ([]byte, string, bool) {
 		mime = detected
 	}
 	if len(data) >= 12 && string(data[:4]) == "RIFF" && string(data[8:12]) == "WEBP" {
-		if w, h, ok := webpDimensions(data); ok && int64(w)*int64(h) <= maxCoverPixels {
+		if w, h, ok := webpDimensions(data); ok && w > 0 && h > 0 && int64(w)*int64(h) <= maxCoverPixels {
 			return append([]byte(nil), data...), "image/webp", true
 		}
 		return nil, "", false
@@ -202,13 +202,13 @@ func validateCover(data []byte, declaredMIME string) ([]byte, string, bool) {
 }
 
 func webpDimensions(data []byte) (int, int, bool) {
-	if len(data) < 30 || string(data[:4]) != "RIFF" || string(data[8:12]) != "WEBP" {
+	if len(data) < 20 || string(data[:4]) != "RIFF" || string(data[8:12]) != "WEBP" || uint64(binary.LittleEndian.Uint32(data[4:8]))+8 != uint64(len(data)) {
 		return 0, 0, false
 	}
 	chunk := 12
 	for chunk+8 <= len(data) {
 		typ := string(data[chunk : chunk+4])
-		size := int(binary.LittleEndian.Uint32(data[chunk+4 : chunk+chunk+8]))
+		size := int(binary.LittleEndian.Uint32(data[chunk+4 : chunk+8]))
 		if size < 0 || chunk+8+size > len(data) {
 			return 0, 0, false
 		}
@@ -218,8 +218,8 @@ func webpDimensions(data []byte) (int, int, bool) {
 			if len(body) < 10 {
 				return 0, 0, false
 			}
-			w := 1 + int(body[4]) | int(body[5])<<8 | int(body[6])<<16
-			h := 1 + int(body[7]) | int(body[8])<<8 | int(body[9])<<16
+			w := 1 + (int(body[4]) | int(body[5])<<8 | int(body[6])<<16)
+			h := 1 + (int(body[7]) | int(body[8])<<8 | int(body[9])<<16)
 			return w, h, true
 		case "VP8 ":
 			if len(body) < 10 || body[3] != 0x9d || body[4] != 0x01 || body[5] != 0x2a {
@@ -230,8 +230,8 @@ func webpDimensions(data []byte) (int, int, bool) {
 			if len(body) < 5 || body[0] != 0x2f {
 				return 0, 0, false
 			}
-			w := 1 + int(body[1]) | int(body[2]&0x3f)<<8
-			h := 1 + int(body[2]>>6) | int(body[3])<<2 | int(body[4]&0xf)<<10
+			w := 1 + (int(body[1]) | int(body[2]&0x3f)<<8)
+			h := 1 + (int(body[2]>>6) | int(body[3])<<2 | int(body[4]&0xf)<<10)
 			return w, h, true
 		}
 		chunk += 8 + size + size%2

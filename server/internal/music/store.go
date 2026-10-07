@@ -100,16 +100,26 @@ func (s *Store) CreateAPIKey(request APIKeyCreateRequest) (APIKeyView, error) {
 	if err != nil {
 		return APIKeyView{}, err
 	}
+	scopes := cloneStrings(request.Scopes)
+	if request.Scopes == nil {
+		scopes = defaultScopes()
+		if normalizeRole(request.Role) == "admin" {
+			scopes = []string{ScopeLibraryRead, ScopeLibraryWrite, ScopeMediaRead, ScopeUploadsWrite, ScopeKeysManage, ScopeSettingsManage, ScopeStatsRead}
+		}
+	}
+	if err := validateScopes(scopes); err != nil {
+		return APIKeyView{}, err
+	}
 	id, err := randomToken(12)
 	if err != nil {
 		return APIKeyView{}, err
 	}
-	key := APIKey{ID: id, Name: name, SecretHash: hashSecret(secret), Role: normalizeRole(request.Role), Scopes: cloneStrings(request.Scopes), AllowedPlaylistIDs: cloneStrings(request.AllowedPlaylistIDs), DeviceID: strings.TrimSpace(request.DeviceID), MaxDevices: request.MaxDevices, MaxConcurrency: request.MaxConcurrency, CreatedAt: time.Now().UTC(), ExpiresAt: request.ExpiresAt}
+	key := APIKey{ID: id, Name: name, SecretHash: hashSecret(secret), Role: normalizeRole(request.Role), Scopes: scopes, AllowedPlaylistIDs: cloneStrings(request.AllowedPlaylistIDs), DeviceID: strings.TrimSpace(request.DeviceID), MaxDevices: request.MaxDevices, MaxConcurrency: request.MaxConcurrency, CreatedAt: time.Now().UTC(), ExpiresAt: request.ExpiresAt}
 	if key.MaxDevices < 1 {
 		key.MaxDevices = 1
 	}
 	if key.MaxConcurrency < 1 {
-		key.MaxConcurrency = 4
+		key.MaxConcurrency = 1
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -215,6 +225,9 @@ func (s *Store) UpdateAPIKey(id string, request APIKeyUpdateRequest) (APIKey, er
 		key.Role = normalizeRole(*request.Role)
 	}
 	if request.Scopes != nil {
+		if err := validateScopes(*request.Scopes); err != nil {
+			return APIKey{}, err
+		}
 		key.Scopes = cloneStrings(*request.Scopes)
 	}
 	if request.AllowedPlaylistIDs != nil {
@@ -258,6 +271,13 @@ func (s *Store) saveLocked() error {
 func (s *Store) Scan() (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	previous := s.cloneLocked()
+	success := false
+	defer func() {
+		if !success {
+			s.data = previous
+		}
+	}()
 	if _, err := os.Stat(s.mediaRoot); err != nil {
 		return 0, fmt.Errorf("media root: %w", err)
 	}
@@ -266,12 +286,25 @@ func (s *Store) Scan() (int, error) {
 		if walkErr != nil {
 			return walkErr
 		}
-		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 || !audioExtensions[strings.ToLower(filepath.Ext(entry.Name()))] {
+		if entry.IsDir() {
+			if entry.Name() == ".staging" {
+				return filepath.SkipDir
+			}
 			return nil
 		}
-		track, err := s.readTrack(path)
+		if entry.Type()&os.ModeSymlink != 0 || !audioExtensions[strings.ToLower(filepath.Ext(entry.Name()))] {
+			return nil
+		}
+		track, metadata, err := s.readTrackWithMetadata(path, filepath.Base(path))
 		if err != nil {
 			return err
+		}
+		if metadata.CoverSource != "" {
+			coverID, coverErr := s.saveCoverLocked(metadata.Cover, metadata.CoverMIME, metadata.CoverSource)
+			if coverErr != nil {
+				return coverErr
+			}
+			track.CoverID = coverID
 		}
 		if !s.data.Excluded[track.ID] {
 			applyMetadata(&track, s.data.Overrides[track.ID])
@@ -282,7 +315,6 @@ func (s *Store) Scan() (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("scan media: %w", err)
 	}
-	previous := s.cloneLocked()
 	s.data.Tracks = tracks
 	s.data.Revision++
 	if playlist, ok := s.data.Playlists["library"]; !ok || playlist.Name == "" {
@@ -310,6 +342,7 @@ func (s *Store) Scan() (int, error) {
 	if err := s.commitLocked(previous); err != nil {
 		return 0, err
 	}
+	success = true
 	return len(tracks), nil
 }
 
@@ -351,8 +384,10 @@ func (s *Store) readTrackWithMetadata(path, originalName string) (Track, audioMe
 	// conventional folder image. Asset persistence is performed by the caller
 	// that owns the SQLite assets table; this reader returns the bytes in the
 	// metadata value for that purpose.
-	metadata = selectCover(root, relativePath, metadata)
-	technical := technicalMetadata(path, "")
+	if s.data.Settings.ScanExternalCovers {
+		metadata = selectCover(root, relativePath, metadata)
+	}
+	technical := technicalMetadata(path, s.data.Settings.FFprobePath)
 	baseName := strings.TrimSuffix(filepath.Base(originalName), filepath.Ext(originalName))
 	title, artist := baseName, ""
 	if parts := strings.SplitN(baseName, " - ", 2); len(parts) == 2 {
@@ -364,19 +399,11 @@ func (s *Store) readTrackWithMetadata(path, originalName string) (Track, audioMe
 	if metadata.Artist != "" {
 		artist = metadata.Artist
 	}
+	embeddedLyrics := metadata.Lyrics != ""
 	lyrics, lyricsSource := metadata.Lyrics, metadata.LyricsSource
-	for _, extension := range []string{".lrc", ".elrc", ".txt"} {
-		lyricsPath := strings.TrimSuffix(relativePath, filepath.Ext(relativePath)) + extension
-		lyricsFile, openErr := root.Open(lyricsPath)
-		if openErr != nil {
-			continue
-		}
-		content, readErr := io.ReadAll(io.LimitReader(lyricsFile, (2<<20)+1))
-		_ = lyricsFile.Close()
-		if readErr == nil && len(content) <= 2<<20 {
-			lyrics = strings.TrimPrefix(string(content), "\xef\xbb\xbf")
-			lyricsSource = "sidecar"
-			break
+	if s.data.Settings.ScanExternalLyrics {
+		if value, source := readExternalLyrics(root, relativePath); source != "" {
+			lyrics, lyricsSource = value, source
 		}
 	}
 	return Track{
@@ -387,7 +414,7 @@ func (s *Store) readTrackWithMetadata(path, originalName string) (Track, audioMe
 		Genre:          metadata.Genre,
 		Comment:        metadata.Comment,
 		Lyrics:         lyrics,
-		EmbeddedLyrics: metadata.Lyrics != "",
+		EmbeddedLyrics: embeddedLyrics,
 		LyricsSource:   lyricsSource,
 		CoverMIME:      metadata.CoverMIME,
 		CoverSource:    metadata.CoverSource,
@@ -449,7 +476,12 @@ func (s *Store) Playlists() []Playlist {
 	for _, playlist := range s.data.Playlists {
 		playlists = append(playlists, clonePlaylist(playlist))
 	}
-	sort.Slice(playlists, func(i, j int) bool { return playlists[i].Name < playlists[j].Name })
+	sort.SliceStable(playlists, func(i, j int) bool {
+		if playlists[i].SortOrder == playlists[j].SortOrder {
+			return playlists[i].Name < playlists[j].Name
+		}
+		return playlists[i].SortOrder < playlists[j].SortOrder
+	})
 	return playlists
 }
 
@@ -486,10 +518,79 @@ func (s *Store) PutPlaylist(playlist Playlist) error {
 	}
 	previous := s.cloneLocked()
 	playlist.UpdatedAt = time.Now().UTC()
+	if existing, exists := s.data.Playlists[playlist.ID]; exists {
+		// Display order changes only through ReorderPlaylists, never a stale PUT.
+		playlist.SortOrder = existing.SortOrder
+	} else if playlist.ID != "library" {
+		maxOrder := 0
+		for _, existing := range s.data.Playlists {
+			if existing.SortOrder > maxOrder {
+				maxOrder = existing.SortOrder
+			}
+		}
+		playlist.SortOrder = maxOrder + 1
+	}
 	if playlist.TrackIDs == nil {
 		playlist.TrackIDs = []string{}
 	}
 	s.data.Playlists[playlist.ID] = playlist
+	s.data.Revision++
+	return s.commitLocked(previous)
+}
+
+func (s *Store) ReorderPlaylists(order []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	seen := map[string]bool{}
+	next := make([]string, 0, len(s.data.Playlists))
+	for _, id := range order {
+		if _, ok := s.data.Playlists[id]; !ok || seen[id] {
+			continue
+		}
+		seen[id] = true
+		next = append(next, id)
+	}
+	for id := range s.data.Playlists {
+		if !seen[id] {
+			next = append(next, id)
+		}
+	}
+	previous := s.cloneLocked()
+	for position, id := range next {
+		playlist := s.data.Playlists[id]
+		playlist.SortOrder = position
+		playlist.UpdatedAt = time.Now().UTC()
+		s.data.Playlists[id] = playlist
+	}
+	s.data.Revision++
+	return s.commitLocked(previous)
+}
+
+func (s *Store) Settings() ServerSettings {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	settings := s.data.Settings
+	settings.MediaRoot = s.mediaRoot
+	return settings
+}
+
+func (s *Store) UpdateSettings(settings ServerSettings) error {
+	if settings.MediaRoot != "" && filepath.Clean(settings.MediaRoot) != s.mediaRoot {
+		return errors.New("media_root is a startup setting; change -media-root and restart the server")
+	}
+	if settings.FFprobePath != "" {
+		if info, err := os.Stat(settings.FFprobePath); err != nil || info.IsDir() {
+			return errors.New("ffprobe_path must point to an existing executable")
+		}
+	}
+	if settings.MaxUploadBytes < 1<<20 || settings.MaxUploadBytes > 4<<30 {
+		return errors.New("max_upload_bytes must be between 1 MiB and 4 GiB")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	previous := s.cloneLocked()
+	settings.MediaRoot = s.mediaRoot
+	s.data.Settings = settings
 	s.data.Revision++
 	return s.commitLocked(previous)
 }
@@ -510,6 +611,16 @@ func (s *Store) Sync(since int64) SyncResponse {
 	for _, playlist := range s.data.Playlists {
 		response.Playlists = append(response.Playlists, clonePlaylist(playlist))
 	}
+	sort.Slice(response.Playlists, func(i, j int) bool {
+		first, second := response.Playlists[i], response.Playlists[j]
+		if first.SortOrder != second.SortOrder {
+			return first.SortOrder < second.SortOrder
+		}
+		if first.Name != second.Name {
+			return first.Name < second.Name
+		}
+		return first.ID < second.ID
+	})
 	return response
 }
 
@@ -545,6 +656,10 @@ func (s *Store) cloneLocked() Library {
 	var copy Library
 	_ = json.Unmarshal(encoded, &copy)
 	normalizeLibrary(&copy)
+	for id, asset := range s.data.CoverAssets {
+		asset.Data = append([]byte(nil), asset.Data...)
+		copy.CoverAssets[id] = asset
+	}
 	return copy
 }
 
@@ -572,6 +687,12 @@ func applyMetadata(track *Track, values map[string]string) {
 		case "lyrics":
 			track.Lyrics = value
 			track.LyricsSource = "manual"
+		case "cover_id":
+			track.CoverID = value
+		case "cover_mime":
+			track.CoverMIME = value
+		case "cover_source":
+			track.CoverSource = value
 		}
 	}
 }
@@ -684,7 +805,21 @@ func (s *Store) ImportAudioWithMetadata(name string, reader io.Reader, fields ma
 		_ = root.Remove(storedName)
 		return Track{}, err
 	}
+	for _, existing := range s.data.Tracks {
+		if existing.ContentHash != "" && existing.ContentHash == track.ContentHash {
+			_ = root.Remove(storedName)
+			return existing, nil
+		}
+	}
 	previous := s.cloneLocked()
+	if metadata.CoverSource != "" {
+		coverID, coverErr := s.saveCoverLocked(metadata.Cover, metadata.CoverMIME, metadata.CoverSource)
+		if coverErr != nil {
+			_ = root.Remove(storedName)
+			return Track{}, coverErr
+		}
+		track.CoverID = coverID
+	}
 	overrides := map[string]string{}
 	// Preserve original-name defaults when the stored filename is a timestamp.
 	if metadata.Title == "" {

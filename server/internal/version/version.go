@@ -4,5 +4,5 @@ package version
 
 const (
 	// Version is the current music server API and management UI version.
-	Version = "0.5.0"
+	Version = "0.6.0"
 )

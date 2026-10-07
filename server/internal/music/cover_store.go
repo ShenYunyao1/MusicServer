@@ -3,6 +3,8 @@ package music
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"os"
 )
 
 // saveCoverLocked content-addresses validated artwork in the in-memory
@@ -12,8 +14,7 @@ func (s *Store) saveCoverLocked(data []byte, mime, source string) (string, error
 	if len(data) == 0 || mime == "" {
 		return "", nil
 	}
-	digest := sha256.Sum256(data)
-	id := hex.EncodeToString(digest[:])
+	id := hashBytes(data)
 	if s.data.CoverAssets == nil {
 		s.data.CoverAssets = map[string]CoverAsset{}
 	}
@@ -21,6 +22,36 @@ func (s *Store) saveCoverLocked(data []byte, mime, source string) (string, error
 		s.data.CoverAssets[id] = CoverAsset{ID: id, MIME: mime, Data: append([]byte(nil), data...)}
 	}
 	return id, nil
+}
+
+func hashBytes(data []byte) string {
+	digest := sha256.Sum256(data)
+	return hex.EncodeToString(digest[:])
+}
+
+func (s *Store) SetTrackCover(id string, data []byte) error {
+	validated, mime, ok := validateCover(data, "")
+	if !ok {
+		return errors.New("invalid cover (maximum 8 MiB and 20 MP)")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	track, exists := s.data.Tracks[id]
+	if !exists {
+		return os.ErrNotExist
+	}
+	previous := s.cloneLocked()
+	track.CoverID, _ = s.saveCoverLocked(validated, mime, "manual")
+	track.CoverMIME, track.CoverSource = mime, "manual"
+	if s.data.Overrides[id] == nil {
+		s.data.Overrides[id] = map[string]string{}
+	}
+	s.data.Overrides[id]["cover_id"] = track.CoverID
+	s.data.Overrides[id]["cover_mime"] = mime
+	s.data.Overrides[id]["cover_source"] = "manual"
+	s.data.Tracks[id] = track
+	s.data.Revision++
+	return s.commitLocked(previous)
 }
 
 // Cover returns a copy of a stored artwork asset for HTTP handlers. Assets are

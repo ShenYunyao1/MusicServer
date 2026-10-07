@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,13 +26,13 @@ type audioTechnical struct {
 
 type ffprobeOutput struct {
 	Streams []struct {
-		CodecType     string `json:"codec_type"`
-		Duration      string `json:"duration"`
-		BitRate       string `json:"bit_rate"`
-		SampleRate    string `json:"sample_rate"`
-		Channels      int    `json:"channels"`
-		BitsPerSample int    `json:"bits_per_sample"`
-		BitsPerRaw    int    `json:"bits_per_raw_sample"`
+		CodecType     string      `json:"codec_type"`
+		Duration      string      `json:"duration"`
+		BitRate       string      `json:"bit_rate"`
+		SampleRate    string      `json:"sample_rate"`
+		Channels      int         `json:"channels"`
+		BitsPerSample int         `json:"bits_per_sample"`
+		BitsPerRaw    json.Number `json:"bits_per_raw_sample"`
 	} `json:"streams"`
 	Format struct {
 		Duration string `json:"duration"`
@@ -42,16 +43,18 @@ type ffprobeOutput struct {
 // technicalMetadata probes ffprobe when configured, then falls back to the
 // compact WAV/FLAC stream headers. A missing probe is nonfatal to scanning.
 func technicalMetadata(path, ffprobePath string) audioTechnical {
-	if ffprobePath == "" {
-		ffprobePath = os.Getenv("MUSIC_SERVER_FFPROBE")
+	candidates := []string{ffprobePath, os.Getenv("MUSIC_SERVER_FFPROBE")}
+	if found, err := exec.LookPath("ffprobe"); err == nil {
+		candidates = append(candidates, found)
 	}
-	if ffprobePath == "" {
-		if found, err := exec.LookPath("ffprobe"); err == nil {
-			ffprobePath = found
+	seen := make(map[string]bool)
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || seen[candidate] {
+			continue
 		}
-	}
-	if ffprobePath != "" {
-		if result, ok := probeWithFFprobe(path, ffprobePath); ok {
+		seen[candidate] = true
+		if result, ok := probeWithFFprobe(path, candidate); ok {
 			return result
 		}
 	}
@@ -68,22 +71,28 @@ func probeWithFFprobe(path, ffprobePath string) (audioTechnical, bool) {
 	if err := command.Run(); err != nil || output.overflow || ctx.Err() != nil {
 		return audioTechnical{}, false
 	}
+	return parseFFprobeOutput(output.data)
+}
+
+func parseFFprobeOutput(data []byte) (audioTechnical, bool) {
 	var parsed ffprobeOutput
-	if json.Unmarshal(output.data, &parsed) != nil {
+	if json.Unmarshal(data, &parsed) != nil {
 		return audioTechnical{}, false
 	}
 	result := audioTechnical{}
+	audioFound := false
 	for _, stream := range parsed.Streams {
 		if stream.CodecType != "audio" {
 			continue
 		}
+		audioFound = true
 		result.DurationMS = durationMilliseconds(stream.Duration)
 		result.BitrateKbps = bitrateKbps(stream.BitRate)
 		result.SampleRate = positiveInt(stream.SampleRate)
 		result.Channels = stream.Channels
 		result.BitsPerSample = stream.BitsPerSample
 		if result.BitsPerSample == 0 {
-			result.BitsPerSample = stream.BitsPerRaw
+			result.BitsPerSample = positiveInt(stream.BitsPerRaw.String())
 		}
 		break
 	}
@@ -93,12 +102,12 @@ func probeWithFFprobe(path, ffprobePath string) (audioTechnical, bool) {
 	if result.BitrateKbps == 0 {
 		result.BitrateKbps = bitrateKbps(parsed.Format.BitRate)
 	}
-	return result, true
+	return result, audioFound && result.SampleRate > 0 && result.Channels > 0
 }
 
 func durationMilliseconds(value string) int64 {
 	seconds, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
-	if err != nil || seconds <= 0 {
+	if err != nil || seconds <= 0 || math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds > float64(math.MaxInt64)/1000 {
 		return 0
 	}
 	return int64(seconds*1000 + 0.5)
@@ -212,7 +221,9 @@ func flacTechnical(file *os.File) audioTechnical {
 			if _, err := io.ReadFull(file, stream); err != nil {
 				return audioTechnical{}
 			}
-			value := uint64(stream[10])<<40 | uint64(stream[11])<<32 | uint64(stream[12])<<24 | uint64(stream[13])<<16 | uint64(stream[14])<<8 | uint64(stream[15])
+			// STREAMINFO packs rate (20), channels (3), depth (5), and total
+			// samples (36) into eight big-endian bytes.
+			value := binary.BigEndian.Uint64(stream[10:18])
 			sampleRate := int(value >> 44)
 			channels := int((value>>41)&7) + 1
 			bits := int((value>>36)&31) + 1
@@ -220,6 +231,11 @@ func flacTechnical(file *os.File) audioTechnical {
 			result := audioTechnical{SampleRate: sampleRate, Channels: channels, BitsPerSample: bits}
 			if sampleRate > 0 {
 				result.DurationMS = int64((totalSamples*1000 + uint64(sampleRate)/2) / uint64(sampleRate))
+			}
+			if result.DurationMS > 0 {
+				if info, err := file.Stat(); err == nil {
+					result.BitrateKbps = int((info.Size()*8 + result.DurationMS/2) / result.DurationMS)
+				}
 			}
 			return result
 		}

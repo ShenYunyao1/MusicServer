@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"musicserver/internal/version"
 )
@@ -18,21 +21,50 @@ import (
 var managementPage []byte
 
 type API struct {
-	store  *Store
-	apiKey string
+	store         *Store
+	apiKey        string
+	concurrencyMu sync.Mutex
+	active        map[string]int
 }
 
 type authContext struct {
 	role             string
 	allowedPlaylists map[string]bool
+	scopes           []string
+	keyID            string
+	maxConcurrency   int
+	startup          bool
 	legacy           bool
 }
 
 func NewAPI(store *Store, apiKey string) *API {
-	return &API{store: store, apiKey: apiKey}
+	api := &API{store: store, apiKey: apiKey, active: map[string]int{}}
+	return api
 }
 
 func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
+	isAPIRequest := strings.HasPrefix(request.URL.Path, "/api/v1/")
+	trackCall := isAPIRequest && request.URL.Path != "/api/v1/health"
+	started := time.Now()
+	callKeyID := "anonymous"
+	var release func()
+	defer func() {
+		if release != nil {
+			release()
+		}
+	}()
+	var tracked *trackingResponseWriter
+	if trackCall {
+		tracked = &trackingResponseWriter{ResponseWriter: response}
+		response = tracked
+		defer func() {
+			status := tracked.status
+			if status == 0 {
+				status = http.StatusOK
+			}
+			a.recordCall(callKeyID, status, tracked.bytes, time.Since(started))
+		}()
+	}
 	response.Header().Set("X-Content-Type-Options", "nosniff")
 	requestID, err := randomToken(8)
 	if err == nil {
@@ -43,16 +75,33 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		_, _ = response.Write(managementPage)
 		return
 	}
-	if request.URL.Path != "/api/v1/uploads" {
+	resourceUpload := strings.HasPrefix(request.URL.Path, "/api/v1/tracks/") && (strings.HasSuffix(request.URL.Path, "/cover") || strings.HasSuffix(request.URL.Path, "/lyrics"))
+	if !strings.HasPrefix(request.URL.Path, "/api/v1/uploads") && !resourceUpload {
 		request.Body = http.MaxBytesReader(response, request.Body, 2<<20)
 	}
+	var auth authContext
 	if request.URL.Path != "/api/v1/health" {
-		auth, ok := a.authenticate(request)
+		var ok bool
+		auth, ok = a.authenticate(request)
 		if !ok {
 			writeErrorWithID(response, http.StatusUnauthorized, "AUTH_INVALID", "authentication required", requestID)
 			return
 		}
 		request = request.WithContext(withAuth(request.Context(), auth))
+		callKeyID = auth.keyID
+		if !auth.startup {
+			if !a.acquire(auth) {
+				response.Header().Set("Retry-After", "1")
+				writeError(response, http.StatusTooManyRequests, "KEY_CONCURRENCY_LIMIT", "key concurrency limit reached")
+				return
+			}
+			release = func() { a.release(auth) }
+			required := endpointScope(request.URL.Path, request.Method)
+			if required != "" && !hasScope(auth, required) {
+				writeError(response, http.StatusForbidden, "SCOPE_DENIED", "API key does not grant the required scope")
+				return
+			}
+		}
 	}
 	if request.URL.Path == "/api/v1/auth/keys" || strings.HasPrefix(request.URL.Path, "/api/v1/auth/keys/") {
 		a.keys(response, request)
@@ -69,6 +118,8 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		a.sync(response, request)
 	case request.URL.Path == "/api/v1/playlists":
 		a.playlists(response, request)
+	case request.URL.Path == "/api/v1/playlists/order":
+		a.playlistOrder(response, request)
 	case request.URL.Path == "/api/v1/tracks":
 		if request.Method != http.MethodGet {
 			writeError(response, 405, "method not allowed")
@@ -87,17 +138,112 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		writeJSON(response, http.StatusOK, tracks)
 	case request.URL.Path == "/api/v1/uploads":
 		a.upload(response, request)
+	case request.URL.Path == "/api/v1/uploads/stage":
+		a.stageUpload(response, request)
+	case strings.HasPrefix(request.URL.Path, "/api/v1/uploads/stage/"):
+		a.stagedUpload(response, request)
 	case strings.HasPrefix(request.URL.Path, "/api/v1/playlists/"):
 		a.playlist(response, request)
 	case strings.HasPrefix(request.URL.Path, "/api/v1/tracks/"):
 		a.track(response, request)
 	case strings.HasPrefix(request.URL.Path, "/api/v1/media/"):
 		a.media(response, request)
+	case strings.HasPrefix(request.URL.Path, "/api/v1/covers/"):
+		a.cover(response, request)
 	case request.URL.Path == "/api/v1/admin/scan":
 		a.scan(response, request)
+	case request.URL.Path == "/api/v1/admin/stats":
+		a.adminStats(response, request)
+	case request.URL.Path == "/api/v1/admin/settings":
+		a.adminSettings(response, request)
 	default:
 		writeErrorWithID(response, http.StatusNotFound, "NOT_FOUND", "endpoint not found", requestID)
 	}
+}
+
+func (a *API) playlistOrder(response http.ResponseWriter, request *http.Request) {
+	if !a.requireAdmin(response, request) {
+		return
+	}
+	if request.Method != http.MethodPut {
+		writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+		return
+	}
+	var body struct {
+		Order []string `json:"order"`
+	}
+	if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+		writeError(response, http.StatusBadRequest, "INVALID_ORDER", "invalid playlist order JSON")
+		return
+	}
+	if err := a.store.ReorderPlaylists(body.Order); err != nil {
+		writeError(response, http.StatusBadRequest, "ORDER_FAILED", err.Error())
+		return
+	}
+	writeJSON(response, http.StatusOK, a.store.Playlists())
+}
+
+func (a *API) adminSettings(response http.ResponseWriter, request *http.Request) {
+	if !a.requireAdmin(response, request) {
+		return
+	}
+	switch request.Method {
+	case http.MethodGet:
+		writeJSON(response, http.StatusOK, a.store.Settings())
+	case http.MethodPatch, http.MethodPut:
+		settings := a.store.Settings()
+		if err := json.NewDecoder(request.Body).Decode(&settings); err != nil {
+			writeError(response, http.StatusBadRequest, "INVALID_SETTINGS", "invalid settings JSON")
+			return
+		}
+		if err := a.store.UpdateSettings(settings); err != nil {
+			writeError(response, http.StatusBadRequest, "INVALID_SETTINGS", err.Error())
+			return
+		}
+		writeJSON(response, http.StatusOK, a.store.Settings())
+	default:
+		writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+	}
+}
+
+func (a *API) cover(response http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodGet && request.Method != http.MethodHead {
+		writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+		return
+	}
+	id := strings.TrimPrefix(request.URL.Path, "/api/v1/covers/")
+	if id == "" || strings.ContainsAny(id, "/\\") {
+		writeError(response, http.StatusBadRequest, "INVALID_COVER", "invalid cover id")
+		return
+	}
+	auth := authFromRequest(request)
+	if auth.role != "admin" {
+		allowed := false
+		for _, track := range a.store.Tracks() {
+			if track.CoverID == id && canReadTrack(auth, a.store, track.ID) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			writeError(response, http.StatusForbidden, "COVER_ACCESS_DENIED", "current key cannot access this cover")
+			return
+		}
+	}
+	asset, ok := a.store.Cover(id)
+	if !ok {
+		writeError(response, http.StatusNotFound, "COVER_NOT_FOUND", "cover not found")
+		return
+	}
+	response.Header().Set("Content-Type", asset.MIME)
+	response.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	response.Header().Set("Vary", "X-API-Key, Authorization")
+	response.Header().Set("ETag", fmt.Sprintf("\"%s\"", id))
+	if request.Method == http.MethodHead {
+		response.WriteHeader(http.StatusOK)
+		return
+	}
+	_, _ = response.Write(asset.Data)
 }
 
 type authContextKey struct{}
@@ -112,7 +258,7 @@ func authFromRequest(request *http.Request) authContext {
 	if value, ok := request.Context().Value(authContextKey{}).(authContext); ok {
 		return value
 	}
-	return authContext{role: "admin", legacy: true}
+	return authContext{role: "admin", keyID: "startup-admin", startup: true, legacy: true}
 }
 
 func (a *API) authenticate(request *http.Request) (authContext, bool) {
@@ -121,10 +267,10 @@ func (a *API) authenticate(request *http.Request) (authContext, bool) {
 		provided = strings.TrimPrefix(request.Header.Get("Authorization"), "Bearer ")
 	}
 	if a.apiKey == "" && provided == "" && len(a.store.APIKeys()) == 0 {
-		return authContext{role: "admin", legacy: true}, true
+		return authContext{role: "admin", keyID: "startup-admin", startup: true, legacy: true}, true
 	}
 	if provided != "" && a.apiKey != "" && provided == a.apiKey {
-		return authContext{role: "admin", legacy: true}, true
+		return authContext{role: "admin", keyID: "startup-admin", startup: true, legacy: true}, true
 	}
 	key, ok := a.store.AuthenticateSecret(provided)
 	if !ok {
@@ -134,15 +280,49 @@ func (a *API) authenticate(request *http.Request) (authContext, bool) {
 	for _, id := range key.AllowedPlaylistIDs {
 		allowed[id] = true
 	}
-	return authContext{role: key.Role, allowedPlaylists: allowed}, true
+	return authContext{role: key.Role, allowedPlaylists: allowed, scopes: cloneStrings(key.Scopes), keyID: key.ID, maxConcurrency: key.MaxConcurrency}, true
 }
 
 func (a *API) requireAdmin(response http.ResponseWriter, request *http.Request) bool {
-	if authFromRequest(request).role == "admin" {
+	auth := authFromRequest(request)
+	if auth.startup || auth.role == "admin" {
 		return true
 	}
 	writeError(response, http.StatusForbidden, "ADMIN_REQUIRED", "administrator access required")
 	return false
+}
+
+func (a *API) acquire(auth authContext) bool {
+	limit := auth.maxConcurrency
+	if limit < 1 {
+		limit = 1
+	}
+	a.concurrencyMu.Lock()
+	defer a.concurrencyMu.Unlock()
+	if a.active == nil {
+		a.active = map[string]int{}
+	}
+	if a.active[auth.keyID] >= limit {
+		return false
+	}
+	a.active[auth.keyID]++
+	return true
+}
+
+func (a *API) release(auth authContext) {
+	a.concurrencyMu.Lock()
+	defer a.concurrencyMu.Unlock()
+	if count := a.active[auth.keyID]; count <= 1 {
+		delete(a.active, auth.keyID)
+	} else {
+		a.active[auth.keyID] = count - 1
+	}
+}
+
+func (a *API) activeRequests(keyID string) int {
+	a.concurrencyMu.Lock()
+	defer a.concurrencyMu.Unlock()
+	return a.active[keyID]
 }
 
 func canReadPlaylist(auth authContext, id string) bool {
@@ -289,6 +469,10 @@ func (a *API) playlist(response http.ResponseWriter, request *http.Request) {
 
 func (a *API) track(response http.ResponseWriter, request *http.Request) {
 	id := strings.TrimPrefix(request.URL.Path, "/api/v1/tracks/")
+	if strings.HasSuffix(id, "/cover") || strings.HasSuffix(id, "/lyrics") {
+		a.trackResource(response, request, id)
+		return
+	}
 	track, ok := a.store.Track(id)
 	if !ok {
 		writeError(response, http.StatusNotFound, "TRACK_NOT_FOUND", "track not found")
@@ -331,6 +515,72 @@ func (a *API) track(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writeJSON(response, http.StatusOK, track)
+}
+
+func (a *API) trackResource(response http.ResponseWriter, request *http.Request, path string) {
+	if !a.requireAdmin(response, request) {
+		return
+	}
+	if request.Method != http.MethodPut {
+		writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+		return
+	}
+	parts := strings.Split(path, "/")
+	if len(parts) != 2 {
+		writeError(response, http.StatusBadRequest, "INVALID_TRACK", "invalid track id")
+		return
+	}
+	id, kind := parts[0], parts[1]
+	if _, ok := a.store.Track(id); !ok {
+		writeError(response, http.StatusNotFound, "TRACK_NOT_FOUND", "track not found")
+		return
+	}
+	limit, field := int64(maxEmbeddedCoverBytes), "cover"
+	if kind == "lyrics" {
+		limit, field = maxEmbeddedLyricsBytes, "lyrics_file"
+	}
+	request.Body = http.MaxBytesReader(response, request.Body, limit+(1<<20))
+	if err := request.ParseMultipartForm(1 << 20); err != nil {
+		writeError(response, http.StatusBadRequest, "INVALID_RESOURCE", "invalid resource upload")
+		return
+	}
+	defer request.MultipartForm.RemoveAll()
+	data, err := uploadedResource(request, field, limit)
+	if err != nil || data == nil {
+		writeError(response, http.StatusBadRequest, "INVALID_RESOURCE", "resource file is required or exceeds the limit")
+		return
+	}
+	if kind == "cover" {
+		err = a.store.SetTrackCover(id, data)
+	} else {
+		var text string
+		text, err = decodeLyricsFile(data)
+		if err == nil {
+			err = a.store.UpdateTrack(id, map[string]string{"lyrics": text})
+		}
+	}
+	if err != nil {
+		writeError(response, http.StatusBadRequest, "INVALID_RESOURCE", err.Error())
+		return
+	}
+	track, _ := a.store.Track(id)
+	writeJSON(response, http.StatusOK, track)
+}
+
+func uploadedResource(request *http.Request, field string, limit int64) ([]byte, error) {
+	file, _, err := request.FormFile(field)
+	if errors.Is(err, http.ErrMissingFile) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil || int64(len(data)) > limit {
+		return nil, errors.New("resource exceeds the size limit")
+	}
+	return data, nil
 }
 
 func (a *API) media(response http.ResponseWriter, request *http.Request) {
@@ -403,9 +653,13 @@ func (a *API) upload(response http.ResponseWriter, request *http.Request) {
 		writeError(response, 405, "method not allowed")
 		return
 	}
-	request.Body = http.MaxBytesReader(response, request.Body, 512<<20)
+	maxUpload := a.store.Settings().MaxUploadBytes
+	if maxUpload <= 0 {
+		maxUpload = 512 << 20
+	}
+	request.Body = http.MaxBytesReader(response, request.Body, maxUpload)
 	if err := request.ParseMultipartForm(8 << 20); err != nil {
-		writeError(response, 400, "invalid upload or file exceeds 512 MiB")
+		writeError(response, 400, "invalid upload or file exceeds configured limit")
 		return
 	}
 	defer request.MultipartForm.RemoveAll()
@@ -427,6 +681,135 @@ func (a *API) upload(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writeJSON(response, http.StatusCreated, track)
+}
+
+func (a *API) stageUpload(response http.ResponseWriter, request *http.Request) {
+	if !a.requireAdmin(response, request) {
+		return
+	}
+	if request.Method != http.MethodPost {
+		writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+		return
+	}
+	max := a.store.Settings().MaxUploadBytes
+	if max <= 0 {
+		max = 512 << 20
+	}
+	request.Body = http.MaxBytesReader(response, request.Body, max+(12<<20))
+	if err := request.ParseMultipartForm(8 << 20); err != nil {
+		writeError(response, http.StatusBadRequest, "INVALID_UPLOAD", "invalid upload or file exceeds configured limit")
+		return
+	}
+	defer request.MultipartForm.RemoveAll()
+	file, header, err := request.FormFile("file")
+	if err != nil {
+		writeError(response, http.StatusBadRequest, "FILE_REQUIRED", "file is required")
+		return
+	}
+	defer file.Close()
+	fields := map[string]string{}
+	for _, field := range []string{"title", "artist", "album", "genre", "lyrics", "comment"} {
+		if value := strings.TrimSpace(request.FormValue(field)); value != "" {
+			fields[field] = value
+		}
+	}
+	lyrics, err := uploadedResource(request, "lyrics_file", maxEmbeddedLyricsBytes)
+	if err != nil {
+		writeError(response, http.StatusBadRequest, "INVALID_LYRICS", err.Error())
+		return
+	}
+	cover, err := uploadedResource(request, "cover", maxEmbeddedCoverBytes)
+	if err != nil {
+		writeError(response, http.StatusBadRequest, "INVALID_COVER", err.Error())
+		return
+	}
+	coverSource := request.FormValue("cover_source")
+	if coverSource != "" && coverSource != "manual" && coverSource != "external" {
+		writeError(response, http.StatusBadRequest, "INVALID_COVER_SOURCE", "cover_source must be manual or external")
+		return
+	}
+	preview, err := a.store.stageAudioWithAssets(header.Filename, file, fields, uploadAssets{Lyrics: lyrics, Cover: cover, CoverSource: coverSource})
+	if err != nil {
+		writeError(response, http.StatusBadRequest, "STAGE_FAILED", err.Error())
+		return
+	}
+	writeJSON(response, http.StatusCreated, preview)
+}
+
+func (a *API) stagedUpload(response http.ResponseWriter, request *http.Request) {
+	if !a.requireAdmin(response, request) {
+		return
+	}
+	path := strings.TrimPrefix(request.URL.Path, "/api/v1/uploads/stage/")
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) == 0 || !validID.MatchString(parts[0]) || len(parts) > 2 || (len(parts) == 2 && parts[1] != "commit" && parts[1] != "cover") {
+		writeError(response, http.StatusBadRequest, "INVALID_STAGE", "invalid upload stage id")
+		return
+	}
+	id := parts[0]
+	if len(parts) == 2 && parts[1] == "cover" {
+		if request.Method != http.MethodGet {
+			writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+			return
+		}
+		asset, err := a.store.UploadStageCover(id)
+		if err != nil {
+			writeError(response, http.StatusNotFound, "COVER_NOT_FOUND", "staged cover not found")
+			return
+		}
+		response.Header().Set("Content-Type", asset.MIME)
+		response.Header().Set("Cache-Control", "no-store")
+		_, _ = response.Write(asset.Data)
+		return
+	}
+	if len(parts) == 2 {
+		if request.Method != http.MethodPost {
+			writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+			return
+		}
+		fields := map[string]string{}
+		if request.Body != nil && request.ContentLength != 0 {
+			request.Body = http.MaxBytesReader(response, request.Body, 2<<20)
+			if err := json.NewDecoder(request.Body).Decode(&fields); err != nil {
+				writeError(response, http.StatusBadRequest, "INVALID_METADATA", "invalid metadata JSON")
+				return
+			}
+		}
+		track, duplicate, err := a.store.commitUploadStageWithMetadata(id, fields)
+		if errors.Is(err, os.ErrNotExist) {
+			writeError(response, http.StatusNotFound, "STAGE_NOT_FOUND", "upload stage not found or expired")
+			return
+		}
+		if err != nil {
+			writeError(response, http.StatusBadRequest, "COMMIT_FAILED", err.Error())
+			return
+		}
+		writeJSON(response, http.StatusOK, map[string]any{"track": track, "duplicate": duplicate})
+		return
+	}
+	switch request.Method {
+	case http.MethodGet:
+		preview, ok, err := a.store.UploadStage(id)
+		if err != nil {
+			writeError(response, http.StatusInternalServerError, "STAGE_READ_FAILED", err.Error())
+			return
+		}
+		if !ok {
+			writeError(response, http.StatusNotFound, "STAGE_NOT_FOUND", "upload stage not found or expired")
+			return
+		}
+		writeJSON(response, http.StatusOK, preview)
+	case http.MethodDelete:
+		if err := a.store.DeleteUploadStage(id); errors.Is(err, os.ErrNotExist) {
+			writeError(response, http.StatusNotFound, "STAGE_NOT_FOUND", "upload stage not found")
+		} else if err != nil {
+			writeError(response, http.StatusInternalServerError, "STAGE_DELETE_FAILED", err.Error())
+		} else {
+			response.WriteHeader(http.StatusNoContent)
+		}
+	default:
+		writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+	}
 }
 
 func (a *API) keys(response http.ResponseWriter, request *http.Request) {
@@ -509,6 +892,49 @@ func (a *API) keys(response http.ResponseWriter, request *http.Request) {
 	} else {
 		response.WriteHeader(http.StatusNoContent)
 	}
+}
+
+func (a *API) adminStats(response http.ResponseWriter, request *http.Request) {
+	if !a.requireAdmin(response, request) {
+		return
+	}
+	if request.Method != http.MethodGet {
+		writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+		return
+	}
+	stats := a.readCallStats()
+	if stats.err != nil {
+		writeError(response, http.StatusInternalServerError, "STATS_READ_FAILED", "failed to read API call statistics")
+		return
+	}
+	writeJSON(response, http.StatusOK, stats)
+}
+
+// trackingResponseWriter records the wire-level status and bytes without
+// changing handler signatures.  It intentionally implements only the
+// ResponseWriter contract; handlers in this package do not require hijacking
+// or server-sent events.
+type trackingResponseWriter struct {
+	http.ResponseWriter
+	status int
+	bytes  int64
+}
+
+func (w *trackingResponseWriter) WriteHeader(status int) {
+	if w.status != 0 {
+		return
+	}
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *trackingResponseWriter) Write(value []byte) (int, error) {
+	if w.status == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
+	n, err := w.ResponseWriter.Write(value)
+	w.bytes += int64(n)
+	return n, err
 }
 
 func contentType(format string) string {
