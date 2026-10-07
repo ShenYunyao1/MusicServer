@@ -383,7 +383,7 @@ func validatePictureBlock(reader io.ReadSeeker, start, end int64) error {
 	if err != nil {
 		return err
 	}
-	if int64(size) != end-position || size > maxMetadataReadBytes {
+	if int64(size) != end-position || size > maxEmbeddedCoverBytes {
 		return errors.New("invalid or oversized embedded picture length")
 	}
 	return skipMetadataBytes(reader, end, int64(size))
