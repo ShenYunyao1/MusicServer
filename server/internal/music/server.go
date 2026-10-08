@@ -20,6 +20,9 @@ import (
 //go:embed index.html
 var managementPage []byte
 
+//go:embed vendor/jsmediatags-3.9.7.min.js
+var browserTagReader []byte
+
 type API struct {
 	store         *Store
 	apiKey        string
@@ -73,6 +76,12 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	if request.URL.Path == "/" && request.Method == http.MethodGet {
 		response.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = response.Write(managementPage)
+		return
+	}
+	if request.URL.Path == "/assets/jsmediatags-3.9.7.min.js" && request.Method == http.MethodGet {
+		response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		response.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		_, _ = response.Write(browserTagReader)
 		return
 	}
 	resourceUpload := strings.HasPrefix(request.URL.Path, "/api/v1/tracks/") && (strings.HasSuffix(request.URL.Path, "/cover") || strings.HasSuffix(request.URL.Path, "/lyrics"))

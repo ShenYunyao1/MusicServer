@@ -1,4 +1,4 @@
-# 音乐服务器 0.6.0
+# 音乐服务器 0.6.1
 
 Go 1.26+，使用 SQLite 和音频标签依赖。提供 HTTP API 和内置中文 Web 管理页；Windows 和 Linux 均可构建运行。
 
@@ -30,7 +30,7 @@ cd D:\Develop\Study\MusicPlayer\server
 
 - 启动扫描音频目录，包括子目录；读取 MP3/FLAC/Ogg/Opus/MP4/WAV 的标题、作者、专辑、风格、备注及支持的内嵌歌词；关联同路径同名 `.lrc`、`.elrc`、`.txt` 歌词，支持 UTF-8/BOM、带 BOM 的 UTF-16 和 GB18030。不请求外部歌词平台。
 - 没有音频标签时按文件名 `标题 - 歌手` 提取标题和作者，专辑与风格保持为空，不使用上传文件夹名。信息可在管理页修改，人工修改在重扫后保留。
-- 上传页面支持多文件、文件夹和拖放目录；先暂存并解析标签、歌词、封面及技术参数，确认后才入库。可以修改预览字段、手动指定歌词/封面附件；相同 SHA-256 的音频使用已存在曲目，不覆盖其元数据。
+- 上传页面支持多文件、文件夹和拖放目录；MP3 添加后立即在浏览器预览 ID3v2 标签、内嵌歌词和封面，并展示已选择的外置附件；其他格式及本地未支持的 MP3 标签帧等待服务端确认。本地预览不上传音频，点击“上传校验”后才暂存，由服务端最终解析、校验和去重，确认后才入库；已有暂存可“重新校验”。可以修改预览字段，展开“歌词与注释”查看和编辑文本，手动指定歌词/封面附件；相同 SHA-256 的音频使用已存在曲目，不覆盖其元数据。
 - 编辑标题、歌手、专辑、风格、注释和歌词；创建、编辑、删除歌单，API 支持歌单成员顺序与成员注释，网页支持多选曲目右键加入歌单。歌单拖拽排序保存到 SQLite。
 - 外置歌词按同名 `.lrc`、`.elrc`、`.txt` 自动关联，来源返回为 `sidecar`；封面支持内嵌图片、同名图片、精确匹配作者和专辑的 `AlbumCover - 作者 - 专辑` 图片，以及同目录 `cover`、`folder`、`albumcover` 图片，返回 `cover_id`、`cover_source` 和 `cover_mime`。详细规则见 `Docs/外置歌词与封面处理.md`。
 - 曲目返回 `duration_ms`、`bitrate_kbps`、`sample_rate`、`channels`、`bits_per_sample` 等技术参数；封面可通过 `/api/v1/covers/{cover_id}` 获取。
@@ -44,6 +44,8 @@ cd D:\Develop\Study\MusicPlayer\server
 上传限制默认 512 MiB（含 multipart 请求），可在服务器设置页调整；元数据请求限制 2 MiB；内嵌标签读取预算 32 MiB、单条歌词上限 2 MiB。同名歌词读取上限 2 MiB。上传按照文件扩展名接收，当前不验证完整音频解码有效性。
 
 技术参数优先调用设置的 ffprobe、环境变量 `MUSIC_SERVER_FFPROBE` 或 PATH 中的 ffprobe；没有 ffprobe 时使用 WAV、FLAC、MP3 的有限解析。读取不到的参数保持为空，MP3 没有定义 PCM 位深时不会显示伪造的位深。
+
+浏览器本地标签解析使用随服务端打包的 jsmediatags 3.9.7，不依赖 CDN。BSD-3-Clause 许可见 `internal/music/vendor/jsmediatags-LICENSE.md`，本地 UTF-16 文本解码补丁说明见 `internal/music/vendor/README.md`。
 
 ## Key 权限与并发
 
