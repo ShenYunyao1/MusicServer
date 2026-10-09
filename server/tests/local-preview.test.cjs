@@ -651,3 +651,16 @@ test('local parsing finishing later cannot hide a failed server upload', async (
   assert.equal(upload.status, '\u5931\u8d25');
   assert.equal(upload.error, 'Server rejected upload');
 });
+
+test('playlist membership index excludes library and retains every user playlist', () => {
+  const { context, state } = harness();
+  state.playlists = [
+    { id: 'library', name: 'All music', track_ids: ['track-a', 'track-orphan'] },
+    { id: 'mix-a', name: '测试', track_ids: ['track-a'] },
+    { id: 'mix-b', name: '收藏', track_ids: ['track-a', 'track-b'] },
+  ];
+  const membership = context.playlistMembershipIndex();
+  assert.deepEqual([...membership.get('track-a')], ['测试', '收藏']);
+  assert.deepEqual([...membership.get('track-b')], ['收藏']);
+  assert.equal(membership.has('track-orphan'), false);
+});

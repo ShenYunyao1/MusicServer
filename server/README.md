@@ -1,4 +1,4 @@
-# 音乐服务器 0.6.2
+# 音乐服务器 0.6.3
 
 Go 1.26+，使用 SQLite 和音频标签依赖。提供 HTTP API 和内置中文 Web 管理页；Windows 和 Linux 均可构建运行。
 
@@ -31,7 +31,7 @@ cd D:\Develop\Study\MusicPlayer\server
 - 启动扫描音频目录，包括子目录；读取 MP3/FLAC/Ogg/Opus/MP4/WAV 的标题、作者、专辑、风格、备注及支持的内嵌歌词；关联同路径同名 `.lrc`、`.elrc`、`.txt` 歌词，支持 UTF-8/BOM、带 BOM 的 UTF-16 和 GB18030。不请求外部歌词平台。
 - 没有音频标签时按文件名 `标题 - 歌手` 提取标题和作者，专辑与风格保持为空，不使用上传文件夹名。信息可在管理页修改，人工修改在重扫后保留。
 - 上传页面支持多文件、文件夹和拖放目录；MP3 添加后立即在浏览器预览 ID3v2 标签、内嵌歌词和封面，并展示已选择的外置附件；其他格式及本地未支持的 MP3 标签帧等待服务端确认。本地预览不上传音频，点击“上传校验”后才暂存，由服务端最终解析、校验和去重，确认后才入库；已有暂存可“重新校验”。可以修改预览字段，展开“歌词与注释”查看和编辑文本，手动指定歌词/封面附件；相同 SHA-256 的音频使用已存在曲目，不覆盖其元数据。
-- 编辑标题、歌手、专辑、风格、注释和歌词；创建、编辑、删除歌单，API 支持歌单成员顺序与成员注释，网页支持多选曲目右键加入歌单。歌单拖拽排序保存到 SQLite。
+- 编辑曲目元数据；创建、编辑、删除歌单，并在歌单详情中添加、移出曲目、编辑成员备注和拖拽排序。曲目列表显示所属用户歌单并支持筛选孤立曲目，不把系统 `All music` 计作歌单归属。
 - 外置歌词按同名 `.lrc`、`.elrc`、`.txt` 自动关联，来源返回为 `sidecar`；封面支持内嵌图片、同名图片、精确匹配作者和专辑的 `AlbumCover - 作者 - 专辑` 图片，以及同目录 `cover`、`folder`、`albumcover` 图片，返回 `cover_id`、`cover_source` 和 `cover_mime`。详细规则见 `Docs/外置歌词与封面处理.md`。
 - 曲目返回 `duration_ms`、`bitrate_kbps`、`sample_rate`、`channels`、`bits_per_sample` 等技术参数；封面可通过 `/api/v1/covers/{cover_id}` 获取。
 - 删除曲目只移除库记录并保留原文件，重扫不会重新加入已移除记录。第一版尚未提供恢复移除记录的界面。
@@ -83,7 +83,10 @@ cd D:\Develop\Study\MusicPlayer\server
 | GET | `/api/v1/uploads/stage/{id}/cover` | 暂存封面预览 |
 | POST | `/api/v1/uploads/stage/{id}/commit` | 可选 JSON 元数据，确认入库；返回 `track` 与 `duplicate` |
 | GET / POST | `/api/v1/playlists` | 列出、创建歌单 |
-| GET / PUT / DELETE | `/api/v1/playlists/{id}` | 歌单详情、替换、删除 |
+| GET / PATCH / PUT / DELETE | `/api/v1/playlists/{id}` | 歌单详情、修改元数据、兼容替换、删除 |
+| POST | `/api/v1/playlists/{id}/tracks` | 批量添加歌单成员 |
+| PATCH / DELETE | `/api/v1/playlists/{id}/tracks/{trackID}` | 修改成员备注、移出歌单（不删除曲目） |
+| PUT | `/api/v1/playlists/{id}/tracks/order` | 排序成员，需提交预期成员列表 |
 | GET / HEAD | `/api/v1/media/{id}` | 音频下载，支持 Range |
 | GET / HEAD | `/api/v1/covers/{id}` | 获取封面图片 |
 | POST | `/api/v1/admin/scan` | 重新扫描目录 |
@@ -116,8 +119,8 @@ $env:MUSIC_SERVER_GITHUB_TOKEN = (& gh auth token)
 .\musicserver.exe -api-key 'your-admin-key'
 ```
 
-发布包资产名固定为 `musicserver-windows-amd64.zip` 和 `musicserver-linux-amd64.tar.gz`。Release 标签使用 `v主版本.次版本.修订版本`，例如 `v0.6.2`。GitHub API 必须返回资产的 `sha256:` digest；服务器只接受 HTTPS、校验文件大小与 SHA-256，并将包原子写入数据库文件旁的 `updates/版本/` 目录。下载成功后需要停服、备份数据库与程序，并由管理员解压替换可执行文件再重启；服务器不会自动替换自身或执行下载包。
+发布包资产名固定为 `musicserver-windows-amd64.zip` 和 `musicserver-linux-amd64.tar.gz`。Release 标签使用 `v主版本.次版本.修订版本`，例如 `v0.6.3`。GitHub API 必须返回资产的 `sha256:` digest；服务器只接受 HTTPS、校验文件大小与 SHA-256，并将包原子写入数据库文件旁的 `updates/版本/` 目录。下载成功后需要停服、备份数据库与程序，并由管理员解压替换可执行文件再重启；服务器不会自动替换自身或执行下载包。
 
 维护者在 Windows 上运行 `./package-release.ps1`，完成测试、vet、Windows/Linux 构建并生成两个资产包；发布前核对脚本输出的 SHA-256。运行中的旧程序不会因新包下载而中断。
 
-本版仍是单进程原型：没有转码、外部歌词平台匹配、OpenSubsonic 兼容、后台目录监听、编辑冲突检测和完整管理操作审计。扫描会读取所有音频计算哈希并占用媒体库锁，较大媒体库的重扫可能较慢；暂存文件保留 30 分钟，启动及每分钟清理过期文件和无记录的服务暂存文件。网页尚未提供歌单成员排序与成员注释的完整编辑页面。
+本版仍是单进程原型：没有转码、外部歌词平台匹配、OpenSubsonic 兼容、后台目录监听和完整管理操作审计。扫描会读取所有音频计算哈希并占用媒体库锁，较大媒体库的重扫可能较慢；暂存文件保留 30 分钟，启动及每分钟清理过期文件和无记录的服务暂存文件。
