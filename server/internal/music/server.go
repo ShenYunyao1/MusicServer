@@ -457,6 +457,10 @@ func (a *API) playlists(response http.ResponseWriter, request *http.Request) {
 
 func (a *API) playlist(response http.ResponseWriter, request *http.Request) {
 	id := strings.TrimPrefix(request.URL.Path, "/api/v1/playlists/")
+	if strings.Contains(id, "/tracks") {
+		a.playlistTracks(response, request, id)
+		return
+	}
 	playlist, ok := a.store.Playlist(id)
 	if !ok {
 		writeError(response, http.StatusNotFound, "playlist not found")
@@ -464,6 +468,26 @@ func (a *API) playlist(response http.ResponseWriter, request *http.Request) {
 	}
 	if !canReadPlaylist(authFromRequest(request), id) {
 		writeError(response, http.StatusForbidden, "PLAYLIST_ACCESS_DENIED", "current key cannot access this playlist")
+		return
+	}
+	if request.Method == http.MethodPatch {
+		if !a.requireAdmin(response, request) {
+			return
+		}
+		var patch struct {
+			Name        *string `json:"name"`
+			Description *string `json:"description"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&patch); err != nil {
+			writeError(response, http.StatusBadRequest, "invalid playlist JSON")
+			return
+		}
+		stored, err := a.store.UpdatePlaylistMetadata(id, patch.Name, patch.Description)
+		if err != nil {
+			writePlaylistMutationError(response, err)
+			return
+		}
+		writeJSON(response, http.StatusOK, stored)
 		return
 	}
 	if request.Method == http.MethodPut {
@@ -506,6 +530,90 @@ func (a *API) playlist(response http.ResponseWriter, request *http.Request) {
 		}
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"playlist": playlist, "tracks": tracks})
+}
+
+func writePlaylistMutationError(response http.ResponseWriter, err error) {
+	status := http.StatusBadRequest
+	switch {
+	case errors.Is(err, errPlaylistNotFound), errors.Is(err, errMemberNotFound):
+		status = http.StatusNotFound
+	case errors.Is(err, errLibraryMembers), errors.Is(err, errPlaylistConflict):
+		status = http.StatusConflict
+	}
+	writeError(response, status, err.Error())
+}
+
+func (a *API) playlistTracks(response http.ResponseWriter, request *http.Request, path string) {
+	parts := strings.Split(path, "/")
+	if (len(parts) != 2 && len(parts) != 3) || parts[1] != "tracks" || !validID.MatchString(parts[0]) {
+		writeError(response, http.StatusNotFound, "playlist endpoint not found")
+		return
+	}
+	if !a.requireAdmin(response, request) {
+		return
+	}
+	id := parts[0]
+	if len(parts) == 2 && request.Method == http.MethodPost {
+		var body struct {
+			TrackIDs []string `json:"track_ids"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil || body.TrackIDs == nil {
+			writeError(response, http.StatusBadRequest, "track_ids are required")
+			return
+		}
+		playlist, err := a.store.AddPlaylistTracks(id, body.TrackIDs)
+		if err != nil {
+			writePlaylistMutationError(response, err)
+			return
+		}
+		writeJSON(response, http.StatusOK, playlist)
+		return
+	}
+	if len(parts) == 3 && parts[2] == "order" && request.Method == http.MethodPut {
+		var body struct {
+			TrackIDs         []string `json:"track_ids"`
+			ExpectedTrackIDs []string `json:"expected_track_ids"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil || body.TrackIDs == nil || body.ExpectedTrackIDs == nil {
+			writeError(response, http.StatusBadRequest, "track_ids and expected_track_ids are required")
+			return
+		}
+		playlist, err := a.store.ReorderPlaylistTracks(id, body.ExpectedTrackIDs, body.TrackIDs)
+		if err != nil {
+			writePlaylistMutationError(response, err)
+			return
+		}
+		writeJSON(response, http.StatusOK, playlist)
+		return
+	}
+	if len(parts) == 3 && validID.MatchString(parts[2]) {
+		trackID := parts[2]
+		switch request.Method {
+		case http.MethodPatch:
+			var body struct {
+				Note *string `json:"note"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil || body.Note == nil {
+				writeError(response, http.StatusBadRequest, "note is required")
+				return
+			}
+			playlist, err := a.store.UpdatePlaylistTrackNote(id, trackID, *body.Note)
+			if err != nil {
+				writePlaylistMutationError(response, err)
+				return
+			}
+			writeJSON(response, http.StatusOK, playlist)
+			return
+		case http.MethodDelete:
+			if err := a.store.RemovePlaylistTrack(id, trackID); err != nil {
+				writePlaylistMutationError(response, err)
+				return
+			}
+			response.WriteHeader(http.StatusNoContent)
+			return
+		}
+	}
+	writeError(response, http.StatusMethodNotAllowed, "method not allowed")
 }
 
 func (a *API) track(response http.ResponseWriter, request *http.Request) {

@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -504,10 +505,15 @@ func (s *Store) PutPlaylist(playlist Playlist) error {
 	if playlist.ID == "library" {
 		playlist.TrackIDs = sortedTrackIDs(s.data.Tracks)
 	}
+	seen := make(map[string]bool, len(playlist.TrackIDs))
 	for _, trackID := range playlist.TrackIDs {
 		if _, ok := s.data.Tracks[trackID]; !ok {
 			return fmt.Errorf("unknown track: %s", trackID)
 		}
+		if seen[trackID] {
+			return fmt.Errorf("duplicate playlist track: %s", trackID)
+		}
+		seen[trackID] = true
 	}
 	members := make(map[string]struct{}, len(playlist.TrackIDs))
 	for _, trackID := range playlist.TrackIDs {
@@ -538,6 +544,123 @@ func (s *Store) PutPlaylist(playlist Playlist) error {
 	s.data.Playlists[playlist.ID] = playlist
 	s.data.Revision++
 	return s.commitLocked(previous)
+}
+
+// mutatePlaylist keeps read, edit, and durable save under one lock.
+func (s *Store) mutatePlaylist(id string, members bool, edit func(*Playlist) error) (Playlist, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	playlist, ok := s.data.Playlists[id]
+	if !ok {
+		return Playlist{}, errPlaylistNotFound
+	}
+	if members && id == "library" {
+		return Playlist{}, errLibraryMembers
+	}
+	playlist = clonePlaylist(playlist)
+	if err := edit(&playlist); err != nil {
+		return Playlist{}, err
+	}
+	previous := s.cloneLocked()
+	playlist.UpdatedAt = time.Now().UTC()
+	s.data.Playlists[id] = playlist
+	s.data.Revision++
+	if err := s.commitLocked(previous); err != nil {
+		return Playlist{}, err
+	}
+	return clonePlaylist(playlist), nil
+}
+
+func (s *Store) UpdatePlaylistMetadata(id string, name, description *string) (Playlist, error) {
+	return s.mutatePlaylist(id, false, func(p *Playlist) error {
+		if name != nil {
+			if strings.TrimSpace(*name) == "" {
+				return errors.New("playlist name is required")
+			}
+			p.Name = *name
+		}
+		if description != nil {
+			p.Description = *description
+		}
+		return nil
+	})
+}
+
+func (s *Store) AddPlaylistTracks(id string, ids []string) (Playlist, error) {
+	return s.mutatePlaylist(id, true, func(p *Playlist) error {
+		for _, trackID := range ids {
+			if _, ok := s.data.Tracks[trackID]; !ok {
+				return fmt.Errorf("unknown track: %s", trackID)
+			}
+		}
+		seen := make(map[string]bool, len(p.TrackIDs))
+		for _, trackID := range p.TrackIDs {
+			seen[trackID] = true
+		}
+		for _, trackID := range ids {
+			if !seen[trackID] {
+				p.TrackIDs = append(p.TrackIDs, trackID)
+				seen[trackID] = true
+			}
+		}
+		return nil
+	})
+}
+
+func (s *Store) UpdatePlaylistTrackNote(id, trackID, note string) (Playlist, error) {
+	return s.mutatePlaylist(id, true, func(p *Playlist) error {
+		for _, member := range p.TrackIDs {
+			if member == trackID {
+				if p.TrackNotes == nil {
+					p.TrackNotes = map[string]string{}
+				}
+				if note == "" {
+					delete(p.TrackNotes, trackID)
+				} else {
+					p.TrackNotes[trackID] = note
+				}
+				return nil
+			}
+		}
+		return errMemberNotFound
+	})
+}
+
+func (s *Store) RemovePlaylistTrack(id, trackID string) error {
+	_, err := s.mutatePlaylist(id, true, func(p *Playlist) error {
+		for index, member := range p.TrackIDs {
+			if member == trackID {
+				p.TrackIDs = append(p.TrackIDs[:index], p.TrackIDs[index+1:]...)
+				delete(p.TrackNotes, trackID)
+				return nil
+			}
+		}
+		return errMemberNotFound
+	})
+	return err
+}
+
+func (s *Store) ReorderPlaylistTracks(id string, expected, order []string) (Playlist, error) {
+	return s.mutatePlaylist(id, true, func(p *Playlist) error {
+		if !slices.Equal(p.TrackIDs, expected) {
+			return errPlaylistConflict
+		}
+		if len(order) != len(expected) {
+			return errors.New("track_ids must contain every member exactly once")
+		}
+		seen := make(map[string]bool, len(expected))
+		for _, member := range expected {
+			seen[member] = true
+		}
+		for _, member := range order {
+			if !seen[member] {
+				return errors.New("track_ids must contain every member exactly once")
+			}
+			delete(seen, member)
+		}
+		p.TrackIDs = cloneStrings(order)
+		return nil
+	})
 }
 
 func (s *Store) ReorderPlaylists(order []string) error {
@@ -643,6 +766,11 @@ func (s *Store) MediaPath(track Track) (string, error) {
 }
 
 var validID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+
+var errPlaylistNotFound = errors.New("playlist not found")
+var errMemberNotFound = errors.New("playlist member not found")
+var errLibraryMembers = errors.New("the library playlist manages its own tracks")
+var errPlaylistConflict = errors.New("playlist members changed; reload before reordering")
 
 func clonePlaylist(value Playlist) Playlist {
 	value.TrackIDs = append([]string{}, value.TrackIDs...)
