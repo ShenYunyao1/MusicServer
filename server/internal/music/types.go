@@ -40,6 +40,7 @@ type Playlist struct {
 type ServerSettings struct {
 	MediaRoot          string `json:"media_root"`
 	FFprobePath        string `json:"ffprobe_path,omitempty"`
+	UpdateRepository   string `json:"update_repository,omitempty"`
 	MaxUploadBytes     int64  `json:"max_upload_bytes"`
 	ScanExternalLyrics bool   `json:"scan_external_lyrics"`
 	ScanExternalCovers bool   `json:"scan_external_covers"`

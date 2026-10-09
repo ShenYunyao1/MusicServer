@@ -451,6 +451,7 @@ func saveSQLiteSnapshot(db *sql.DB, data Library, committedStages ...string) err
 	settings := map[string]any{
 		"media_root":           data.Settings.MediaRoot,
 		"ffprobe_path":         data.Settings.FFprobePath,
+		"update_repository":    data.Settings.UpdateRepository,
 		"max_upload_bytes":     data.Settings.MaxUploadBytes,
 		"scan_external_lyrics": data.Settings.ScanExternalLyrics,
 		"scan_external_covers": data.Settings.ScanExternalCovers,
@@ -643,6 +644,8 @@ func readSQLiteSnapshot(db *sql.DB) (Library, error) {
 			_ = json.Unmarshal([]byte(value), &data.Settings.MediaRoot)
 		case "ffprobe_path":
 			_ = json.Unmarshal([]byte(value), &data.Settings.FFprobePath)
+		case "update_repository":
+			_ = json.Unmarshal([]byte(value), &data.Settings.UpdateRepository)
 		case "max_upload_bytes":
 			_ = json.Unmarshal([]byte(value), &data.Settings.MaxUploadBytes)
 		case "scan_external_lyrics":

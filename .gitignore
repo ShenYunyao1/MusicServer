@@ -5,6 +5,7 @@
 /测试音乐资源/
 /server/data/
 /server/media/
+/server/dist/
 *.exe
 *.exe~
 *.dll

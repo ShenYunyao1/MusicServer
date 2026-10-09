@@ -85,7 +85,7 @@ func endpointScope(path, method string) string {
 	if path == "/api/v1/admin/stats" {
 		return ScopeStatsRead
 	}
-	if path == "/api/v1/settings" || strings.HasPrefix(path, "/api/v1/settings/") || path == "/api/v1/admin/settings" || strings.HasPrefix(path, "/api/v1/admin/settings/") {
+	if path == "/api/v1/settings" || strings.HasPrefix(path, "/api/v1/settings/") || path == "/api/v1/admin/settings" || strings.HasPrefix(path, "/api/v1/admin/settings/") || path == "/api/v1/admin/update" || strings.HasPrefix(path, "/api/v1/admin/update/") {
 		return ScopeSettingsManage
 	}
 	return ""

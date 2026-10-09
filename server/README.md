@@ -1,4 +1,4 @@
-# 音乐服务器 0.6.1
+# 音乐服务器 0.6.2
 
 Go 1.26+，使用 SQLite 和音频标签依赖。提供 HTTP API 和内置中文 Web 管理页；Windows 和 Linux 均可构建运行。
 
@@ -104,5 +104,20 @@ cd D:\Develop\Study\MusicPlayer\server
 ```
 
 脚本使用工作机器已验证的独立 Go 工具链，并运行测试、vet 和构建。也可以自行使用 `go test ./...`、`go vet ./...`、`go build -o musicserver.exe ./cmd/musicserver`。
+
+## 程序更新
+
+管理员在“服务器设置”填写本项目仓库地址 `https://github.com/ShenYunyao1/MusicServer`。服务器在启动后、保存设置后，以及之后每 6 小时检查一次该仓库的最新正式版 Release；有更高版本时自动下载当前系统对应的升级包。管理页显示当前版本、最新版本、下载结果和文件路径，也可手动点击“检查更新”。未配置仓库时不会访问 GitHub。
+
+私有仓库需要在启动服务的进程环境中设置 `MUSIC_SERVER_GITHUB_TOKEN`，该令牌须具备该仓库的读取权限；令牌不保存在服务器设置或数据库。已经通过 GitHub CLI 登录的本机可在启动服务前执行：
+
+```powershell
+$env:MUSIC_SERVER_GITHUB_TOKEN = (& gh auth token)
+.\musicserver.exe -api-key 'your-admin-key'
+```
+
+发布包资产名固定为 `musicserver-windows-amd64.zip` 和 `musicserver-linux-amd64.tar.gz`。Release 标签使用 `v主版本.次版本.修订版本`，例如 `v0.6.2`。GitHub API 必须返回资产的 `sha256:` digest；服务器只接受 HTTPS、校验文件大小与 SHA-256，并将包原子写入数据库文件旁的 `updates/版本/` 目录。下载成功后需要停服、备份数据库与程序，并由管理员解压替换可执行文件再重启；服务器不会自动替换自身或执行下载包。
+
+维护者在 Windows 上运行 `./package-release.ps1`，完成测试、vet、Windows/Linux 构建并生成两个资产包；发布前核对脚本输出的 SHA-256。运行中的旧程序不会因新包下载而中断。
 
 本版仍是单进程原型：没有转码、外部歌词平台匹配、OpenSubsonic 兼容、后台目录监听、编辑冲突检测和完整管理操作审计。扫描会读取所有音频计算哈希并占用媒体库锁，较大媒体库的重扫可能较慢；暂存文件保留 30 分钟，启动及每分钟清理过期文件和无记录的服务暂存文件。网页尚未提供歌单成员排序与成员注释的完整编辑页面。

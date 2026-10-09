@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"musicserver/internal/update"
 	"musicserver/internal/version"
 )
 
@@ -26,6 +27,7 @@ var browserTagReader []byte
 type API struct {
 	store         *Store
 	apiKey        string
+	updater       *update.Manager
 	concurrencyMu sync.Mutex
 	active        map[string]int
 }
@@ -44,6 +46,8 @@ func NewAPI(store *Store, apiKey string) *API {
 	api := &API{store: store, apiKey: apiKey, active: map[string]int{}}
 	return api
 }
+
+func (a *API) SetUpdater(manager *update.Manager) { a.updater = manager }
 
 func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	isAPIRequest := strings.HasPrefix(request.URL.Path, "/api/v1/")
@@ -165,6 +169,8 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		a.adminStats(response, request)
 	case request.URL.Path == "/api/v1/admin/settings":
 		a.adminSettings(response, request)
+	case request.URL.Path == "/api/v1/admin/update" || request.URL.Path == "/api/v1/admin/update/check":
+		a.adminUpdate(response, request)
 	default:
 		writeErrorWithID(response, http.StatusNotFound, "NOT_FOUND", "endpoint not found", requestID)
 	}
@@ -209,10 +215,36 @@ func (a *API) adminSettings(response http.ResponseWriter, request *http.Request)
 			writeError(response, http.StatusBadRequest, "INVALID_SETTINGS", err.Error())
 			return
 		}
+		if a.updater != nil {
+			a.updater.Trigger()
+		}
 		writeJSON(response, http.StatusOK, a.store.Settings())
 	default:
 		writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
 	}
+}
+
+func (a *API) adminUpdate(response http.ResponseWriter, request *http.Request) {
+	if !a.requireAdmin(response, request) {
+		return
+	}
+	if a.updater == nil {
+		writeError(response, http.StatusServiceUnavailable, "UPDATE_UNAVAILABLE", "update manager is unavailable")
+		return
+	}
+	if request.URL.Path == "/api/v1/admin/update" && request.Method == http.MethodGet {
+		writeJSON(response, http.StatusOK, a.updater.Status())
+		return
+	}
+	if request.URL.Path == "/api/v1/admin/update/check" && request.Method == http.MethodPost {
+		if !a.updater.Trigger() {
+			writeError(response, http.StatusConflict, "UPDATE_BUSY", "update check is already running")
+			return
+		}
+		writeJSON(response, http.StatusAccepted, a.updater.Status())
+		return
+	}
+	writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
 }
 
 func (a *API) cover(response http.ResponseWriter, request *http.Request) {

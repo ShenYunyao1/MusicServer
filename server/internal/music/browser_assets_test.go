@@ -40,6 +40,11 @@ func TestBrowserPageReferencesBundledTagReader(t *testing.T) {
 	if strings.Count(response.Body.String(), reference) != 1 {
 		t.Fatal("management page must reference the bundled tag reader exactly once")
 	}
+	for _, element := range []string{`id="checkUpdate"`, `id="updateStatus"`, `update_repository`, `admin/update/check`} {
+		if !strings.Contains(response.Body.String(), element) {
+			t.Fatalf("management page is missing update control %q", element)
+		}
+	}
 }
 
 func TestBrowserAssetRouteDoesNotExposeOtherPathsOrMethods(t *testing.T) {

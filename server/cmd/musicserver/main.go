@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"musicserver/internal/music"
+	"musicserver/internal/update"
 	"musicserver/internal/version"
 )
 
@@ -54,6 +56,13 @@ func main() {
 		}
 	}
 	handler := music.NewAPI(store, *apiKey)
+	updater := update.NewManager(filepath.Join(filepath.Dir(store.DataPath()), "updates"), func() string {
+		return store.Settings().UpdateRepository
+	})
+	handler.SetUpdater(updater)
+	updateContext, stopUpdates := context.WithCancel(context.Background())
+	defer stopUpdates()
+	updater.Start(updateContext)
 	server := &http.Server{Addr: *address, Handler: handler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	log.Printf("music server v%s listening on %s, media root %s, SQLite database %s", version.Version, *address, filepath.Clean(*mediaRoot), store.DataPath())
 	if *apiKey != "" {

@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"musicserver/internal/update"
 )
 
 var audioExtensions = map[string]bool{
@@ -585,6 +587,9 @@ func (s *Store) UpdateSettings(settings ServerSettings) error {
 	}
 	if settings.MaxUploadBytes < 1<<20 || settings.MaxUploadBytes > 4<<30 {
 		return errors.New("max_upload_bytes must be between 1 MiB and 4 GiB")
+	}
+	if err := update.ValidateRepository(settings.UpdateRepository); err != nil {
+		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
