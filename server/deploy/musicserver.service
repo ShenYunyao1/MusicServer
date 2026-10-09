@@ -1,0 +1,25 @@
+[Unit]
+Description=MusicServer music library service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=musicserver
+Group=musicserver
+EnvironmentFile=/etc/musicserver/musicserver.env
+ExecStart=/opt/musicserver/current/musicserver -addr 127.0.0.1:8080 -media-root /srv/musicserver/media -data /var/lib/musicserver/library.sqlite
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+
+# Keep the binary and host system read-only while allowing the configured
+# database, update staging directory, and media library to remain writable.
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ReadWritePaths=/var/lib/musicserver /srv/musicserver/media
+
+[Install]
+WantedBy=multi-user.target

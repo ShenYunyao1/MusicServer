@@ -30,7 +30,7 @@ try {
     $linuxBinary = Join-Path $dist 'musicserver'
     & $go build -o $linuxBinary ./cmd/musicserver
     if ($LASTEXITCODE -ne 0) { throw 'Linux release build failed' }
-    & tar -czf $linuxArchive -C $dist musicserver -C $PSScriptRoot README.md
+    & tar -czf $linuxArchive -C $dist musicserver -C $PSScriptRoot README.md deploy/musicserver.service deploy/musicserver.env.example
     if ($LASTEXITCODE -ne 0) { throw 'Linux release archive failed' }
 
     Get-FileHash -Algorithm SHA256 -LiteralPath $windowsArchive,$linuxArchive | Select-Object Path,Hash

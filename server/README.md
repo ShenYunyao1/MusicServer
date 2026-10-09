@@ -121,6 +121,10 @@ $env:MUSIC_SERVER_GITHUB_TOKEN = (& gh auth token)
 
 发布包资产名固定为 `musicserver-windows-amd64.zip` 和 `musicserver-linux-amd64.tar.gz`。Release 标签使用 `v主版本.次版本.修订版本`，例如 `v0.6.3`。GitHub API 必须返回资产的 `sha256:` digest；服务器只接受 HTTPS、校验文件大小与 SHA-256，并将包原子写入数据库文件旁的 `updates/版本/` 目录。下载成功后需要停服、备份数据库与程序，并由管理员解压替换可执行文件再重启；服务器不会自动替换自身或执行下载包。
 
+### Ubuntu 长期运行
+
+云服务器不要通过 SSH 终端前台运行程序。Linux 发布包包含 `deploy/musicserver.service` 和 `deploy/musicserver.env.example`，建议使用 systemd 托管：复制二进制到 `/opt/musicserver/current/musicserver`，将数据库放在 `/var/lib/musicserver`、媒体目录放在 `/srv/musicserver/media`，创建 `musicserver` 系统用户后安装服务单元并执行 `systemctl enable --now musicserver`。这样退出 SSH 后服务继续运行，异常退出时 systemd 会自动重启；管理命令使用 `systemctl status musicserver`、`journalctl -u musicserver` 和 `systemctl restart musicserver`。
+
 维护者在 Windows 上运行 `./package-release.ps1`，完成测试、vet、Windows/Linux 构建并生成两个资产包；发布前核对脚本输出的 SHA-256。运行中的旧程序不会因新包下载而中断。
 
 本版仍是单进程原型：没有转码、外部歌词平台匹配、OpenSubsonic 兼容、后台目录监听和完整管理操作审计。扫描会读取所有音频计算哈希并占用媒体库锁，较大媒体库的重扫可能较慢；暂存文件保留 30 分钟，启动及每分钟清理过期文件和无记录的服务暂存文件。
