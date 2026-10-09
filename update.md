@@ -6,6 +6,7 @@
 - 仅下载当前系统架构对应的发布包，限制大小并校验 GitHub Release 资产的 SHA-256，原子写入数据库旁的待安装目录。
 - 私有仓库通过进程环境变量读取 GitHub 令牌；管理页显示版本、下载状态和待安装路径，提供手动检查入口，实际安装仍由管理员停服操作。
 - 增加 Windows/Linux 发布包脚本及本地 GitHub API 回归，覆盖无新版、下载、校验失败、私有仓库与管理员权限。
+- 已发布到私有仓库 `ShenYunyao1/MusicServer` 的正式版 `v0.6.2`；Windows 包 SHA-256：`95E25651104499F8F00851C61045FFF7A775021C8597CBBBAD2E86A0D0C60AC1`，Linux 包 SHA-256：`902FCE56EA650D10E7ECFD4FE50048F51C3AB6B29D86AA42814CC23BAB9884D8`。已从私有 Release 重新下载 Windows 包并核对哈希。
 
 ## 0.7.0 - 2026-10-08（MusicPlayer2 客户端适配）
 
