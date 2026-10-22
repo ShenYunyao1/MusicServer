@@ -12,7 +12,8 @@ const vendorPath = path.join(__dirname, '../internal/music/vendor/jsmediatags-3.
 
 function harness() {
   const html = fs.readFileSync(htmlPath, 'utf8');
-  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+  assert.ok(html.includes('/assets/management.js'), 'management page must load its application script');
+  const script = fs.readFileSync(path.join(__dirname, '../internal/music/management.js'), 'utf8');
   assert.ok(script, 'management page must contain its application script');
   const eventOffset = script.indexOf("$('refreshStats').onclick");
   assert.ok(eventOffset > 0, 'application event bindings must follow its functions');

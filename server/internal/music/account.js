@@ -11,6 +11,8 @@ for(const [filter,label] of [['mine','我的上传'],['managed','我管理的曲
  button.onclick=()=>{state.trackFilter=filter;document.querySelectorAll('[data-filter]').forEach(el=>el.classList.toggle('active',el===button));renderTracks()};document.querySelector('#page-tracks .filter-tabs').append(button);
 }
 function applyAccountRole(){
+	 document.querySelectorAll('.nav-group[data-admin]').forEach(group=>group.hidden=!isAdministrator());
+	 if($('accountRole'))$('accountRole').textContent=isAdministrator()?'管理员':'普通用户';
 	if(typeof renderStatsUsers==='function')renderStatsUsers();
  document.querySelector('[data-page="settings"]').hidden=!isAdministrator();
  if(document.querySelector('[data-page="users"]'))document.querySelector('[data-page="users"]').hidden=!isAdministrator();
@@ -40,10 +42,12 @@ function setLoggedOut() {
   state.attachments = [];
   state.user = null;
   state.stats=null;state.settings={};state.playlistDetailId=null;state.trackFilter="all";state.revision=null;
+  state.page='tracks';$('trackSearch').value='';$('playlistSearch').value='';
   state.users=[];state.statsUserID="";state.managedUserID=null;state.userResources=[];state.resourceOffset=0;
   $("firstPasswordScreen").hidden=true;$("firstPasswordForm").reset();
   const player=$("memberPlayer");if(player){player.pause();player.removeAttribute("src");player.load();player.hidden=true;}
   if($('previewBar'))$('previewBar').hidden=true;
+  if($('previewTitle'))$('previewTitle').textContent='';
   if($('notifications'))$('notifications').replaceChildren();
   state.csrf = '';
   state.tracks = [];
@@ -56,7 +60,10 @@ function setLoggedOut() {
   document.querySelector('.app').hidden = true;
   $('loginScreen').hidden = false;
   $('accountName').textContent = '';
-  $('maintenanceResults').replaceChildren();
+  for(const id of ['removedResults','missingResults','auditResults','backupResult'])if($(id))$(id).replaceChildren();
+  state.statsScope='self';state.auditEntries=[];state.auditOffset=0;
+  if($('userDetailHeader'))$('userDetailHeader').hidden=true;
+  for(const id of ['managedUserName','managedUserStatus','userResourcesTitle','userDetailActions','accountRole','copyFeedback','editorError'])if($(id))$(id).replaceChildren();
   $('password').value = '';
   $('secretValue').textContent = '';
   $('statsTable').replaceChildren();$('keyRows').replaceChildren();$('settingsForm').replaceChildren();

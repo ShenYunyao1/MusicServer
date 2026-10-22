@@ -1,0 +1,34 @@
+const assert=require('node:assert/strict');
+const path=require('node:path');
+module.exports=async function({page,directory,accounts}){
+ const user=accounts[1].user;
+ await page.click('[data-page="users"]');await page.locator('[data-user-id="'+user.id+'"] [data-user-action="resources"]').click();
+ await page.waitForFunction(id=>state.managedUserID===id&&!document.querySelector('#userDetailHeader').hidden,user.id);
+ assert.equal(await page.locator('#userList').isVisible(),false);
+ await page.click('[data-resource-kind="playlists"]');await page.waitForFunction(()=>location.hash.includes('kind=playlists')&&document.querySelector('#userResourceKind').value==='playlists');
+ await page.reload();await page.waitForFunction(()=>state.managedUserID&&document.querySelector('#status').textContent==='已登录');
+ assert.equal(await page.locator('#userResourceKind').inputValue(),'playlists');assert.ok((await page.locator('#userResourcesTitle').textContent()).includes('browser-bob'));
+ await page.screenshot({path:path.join(directory,'user-detail.png'),fullPage:true});
+ await page.click('#userStatsLink');await page.waitForFunction(id=>state.statsScope==='admin'&&state.statsUserID===id&&state.stats.keys.every(k=>k.user_id===id),user.id);
+ assert.ok((await page.locator('#statsScopeLabel').textContent()).includes('browser-bob'));
+ await page.click('[data-page="maintenance"]');await page.locator('#maintenanceTabs a[href="#/admin/library/missing"]').click();await page.locator('#missingResults').waitFor({state:'visible'});
+ await page.click('[data-page="settings"]');await page.waitForFunction(()=>document.querySelector('[data-setting="max_upload_bytes"]'));
+ const previous=await page.locator('[data-setting="max_upload_bytes"]').inputValue();await page.fill('[data-setting="max_upload_bytes"]','64');await page.click('#saveSettings');await page.waitForFunction(()=>state.settings.max_upload_bytes===64*1048576);
+ await page.fill('[data-setting="max_upload_bytes"]',previous);await page.click('#saveSettings');await page.waitForFunction(value=>state.settings.max_upload_bytes===Number(value)*1048576,previous);
+ await page.locator('#settingsTabs a[href="#/admin/settings/update"]').click();await page.locator('#updateSource input').waitFor({state:'visible'});
+ assert.equal(await page.locator('#settingsForm').isVisible(),false);
+ await page.locator('#settingsTabs a[href="#/admin/settings/backup"]').click();await page.click('#createBackup');await page.waitForFunction(()=>document.querySelector('#backupResult').textContent.includes('.sqlite'));const backupText=await page.locator('#backupResult').textContent();
+ await page.locator('#settingsTabs a[href="#/admin/settings/audit"]').click();await page.waitForFunction(()=>document.querySelectorAll('#auditResults details').length>0);assert.equal(await page.locator('#auditResults details[open]').count(),0);
+ assert.ok(await page.locator('#auditResults details').count()<=15);
+ const nextAudit=page.locator('#auditResults button').filter({hasText:'下一页'});if(await nextAudit.isEnabled()){const first=await page.locator('#auditResults summary').first().textContent();await nextAudit.click();assert.notEqual(await page.locator('#auditResults summary').first().textContent(),first)}
+ await page.locator('#settingsTabs a[href="#/admin/settings/backup"]').click();assert.equal(await page.locator('#backupResult').textContent(),backupText);
+ await page.locator('#settingsTabs a[href="#/admin/settings/audit"]').click();
+ await page.setViewportSize({width:390,height:844});await page.waitForFunction(()=>document.querySelector('#sidebar').getBoundingClientRect().right<=1&&document.querySelector('.main').getBoundingClientRect().left<=1);
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'System tabs must fit a mobile viewport');
+ await page.screenshot({path:path.join(directory,'settings-mobile.png'),fullPage:true});
+ await page.evaluate(()=>location.hash='#/player/keys');await page.waitForFunction(()=>state.page==='keys');assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'Key cards must fit mobile width');
+ await page.evaluate(()=>location.hash='#/admin/users/'+state.users.find(u=>u.username==='browser-bob').id);await page.waitForFunction(()=>state.managedUserID&&!document.querySelector('#userDetailHeader').hidden);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'User details must fit mobile width');
+ await page.setViewportSize({width:1440,height:1100});await page.waitForFunction(()=>document.querySelector('.main').getBoundingClientRect().left>=231);
+ await page.click('[data-page="overview"]');await page.waitForFunction(()=>state.page==='overview');assert.equal(await page.locator('#metricPlaylists').textContent(),String((await page.evaluate(()=>state.users)).length));
+ console.log('Admin layout UI passed: independent user detail/tabs/reload, scoped statistics, missing files, settings save, persistent backup output, collapsed audit and mobile viewport.');
+};

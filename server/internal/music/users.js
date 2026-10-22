@@ -14,7 +14,7 @@ async function loadUsers(){
  state.users=await api('admin/users');renderUsers();
  const selected=state.managedUserID&&state.users.find(user=>user.id===state.managedUserID);
  if(selected)await loadUserResources();else {$('userResourcesPanel').hidden=true;state.managedUserID=null}
- renderStatsUsers();
+ renderStatsUsers();if(typeof renderManagedUserPage==='function')renderManagedUserPage();
 }
 function renderUsers(){
  $('userList').replaceChildren();
@@ -44,21 +44,22 @@ async function loadUserResources(){
  const user=managedUser();if(!user)return;
  const kind=$('userResourceKind').value,endpoint=kind==='owned'||kind==='uploaded'?'tracks?relation='+kind+'&':'playlists'===kind?'playlists?':'keys?';
  const result=await api('admin/users/'+user.id+'/'+endpoint+'offset='+(state.resourceOffset||0)+'&limit=50');
+ if(state.page!=='users'||state.managedUserID!==user.id)return;
  state.userResources=result.items;state.resourceTotal=result.total;
  $('userResourcesPanel').hidden=false;$('userResourcesTitle').textContent=user.username+' 的资源'+(user.enabled?'':'（账户已停用）');
- $('resourcesCount').textContent=(state.resourceOffset||0)+' / '+result.total;$('resourcesPrevious').disabled=!(state.resourceOffset>0);$('resourcesNext').disabled=(state.resourceOffset||0)+50>=result.total;
+ $('resourcesCount').textContent=(result.total?'第 '+((state.resourceOffset||0)+1)+'–'+Math.min((state.resourceOffset||0)+50,result.total)+' 条 / 共 '+result.total+' 条':'暂无资源');$('resourcesPrevious').disabled=!(state.resourceOffset>0);$('resourcesNext').disabled=(state.resourceOffset||0)+50>=result.total;
  $('userResources').replaceChildren();
  if(!result.items.length)$('userResources').textContent='暂无资源';
  for(const resource of result.items){
-  const row=document.createElement('div');row.className='toolbar';
+  const row=document.createElement('div');row.className='resource-item';
   if(['owned','playlists'].includes(kind)){const checkbox=document.createElement('input');checkbox.type='checkbox';checkbox.dataset.resourceId=resource.id;checkbox.setAttribute('aria-label','选择 '+(resource.title||resource.name));row.append(checkbox)}
-  const label=document.createElement('span');label.textContent=(resource.title||resource.name)+' · '+resource.id+(resource.removed?' · 已下架':resource.missing?' · 文件缺失':'');row.append(label);
+  const label=document.createElement('div');label.className='resource-title';const name=document.createElement('strong');name.textContent=resource.title||resource.name||'未命名';label.append(name);if(resource.removed||resource.missing){const status=document.createElement('span');status.className='badge warn';status.textContent=resource.removed?'已下架':'文件缺失';label.append(status)}const metadata=document.createElement('details');metadata.innerHTML='<summary>技术信息</summary>';const identifier=document.createElement('span');identifier.className='mono';identifier.textContent=resource.id;metadata.append(identifier);label.append(metadata);row.append(label);
   if(kind==='keys'){const status=document.createElement('span');status.className='badge';status.textContent=resource.revoked_at?'已主动撤销':resource.expires_at&&Date.parse(resource.expires_at)<=Date.now()?'已过期':!user.enabled?'账户已停用':'有效';row.append(status)}
   if(kind==='playlists'){const view=document.createElement('button');view.className='btn small';view.textContent='查看 / 编辑';view.onclick=()=>run(async()=>{const detail=await api('playlists/'+resource.id);openEditor('管理歌单：'+detail.playlist.name,{name:detail.playlist.name,description:detail.playlist.description||''},async fields=>{await api('playlists/'+resource.id,'PATCH',fields,undefined,detail.playlist.version);await loadUserResources()});const content=document.createElement('section');for(const track of detail.tracks){const row=document.createElement('p');row.textContent=(track.removed||track.missing?'不可用曲目':track.title)+' · '+(detail.playlist.track_notes?.[track.id]||'无个人备注');content.append(row)}$('modalBody').append(content)});row.append(view)}
   $('userResources').append(row);
  }
  const target=$('transferTarget'),previous=target.value;target.replaceChildren();for(const candidate of state.users.filter(candidate=>candidate.enabled&&candidate.id!==user.id)){const option=document.createElement('option');option.value=candidate.id;option.textContent=candidate.username;target.append(option)}if([...target.options].some(option=>option.value===previous))target.value=previous;
- $('transferControls').hidden=user.enabled;$('transferSelected').disabled=!['owned','playlists'].includes(kind);$('resourceNotice').textContent=user.enabled?'接管前先停用源账户。':'接管不转移 Key 或会话，原始上传者保持不变；旧私人歌单授权将移除。';
+ $('transferControls').hidden=user.enabled;$('transferSelected').disabled=!['owned','playlists'].includes(kind);$('resourceNotice').textContent=user.enabled?'接管前先停用源账户。':'接管不转移 Key 或会话，原始上传者保持不变；旧私人歌单授权将移除。';if(typeof renderManagedUserPage==='function')renderManagedUserPage();
 }
 $('userResourceKind').onchange=()=>run(async()=>{state.resourceOffset=0;await loadUserResources()});
 $('resourcesPrevious').onclick=()=>run(async()=>{state.resourceOffset=Math.max(0,(state.resourceOffset||0)-50);await loadUserResources()});

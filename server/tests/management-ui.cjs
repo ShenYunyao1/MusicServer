@@ -53,7 +53,7 @@ async function main() {
     browser = await chromium.launch({ headless: true });
     const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
     const pageErrors = [];
-    page.on('pageerror', error => pageErrors.push(error.message));
+    page.on('pageerror', error => {pageErrors.push(error.message);console.error('Browser error: '+error.stack)});
     await page.goto(base);
     if (lanIP) {
       assert.equal(await page.evaluate(() => isSecureContext), false, 'LAN regression must use an actual HTTP insecure context');
@@ -115,16 +115,16 @@ async function main() {
     await page.evaluate(() => refreshCore());
     await page.click('[data-page="maintenance"]');
     await page.evaluate(async () => { const track = state.tracks[0]; await api('tracks/' + track.id, 'DELETE', undefined, undefined, track.version); await refreshCore(); });
-    await page.click('#viewRemoved');
-    await page.locator('#maintenanceResults button').click();
+    await page.locator('#maintenanceTabs a[href="#/admin/library/removed"]').click();await page.locator('#viewRemoved').click();
+    await page.locator('#removedResults button').click();
     await page.waitForFunction(() => state.tracks.length === 1);
     assert.equal(await page.evaluate(() => state.playlists.find(playlist => playlist.name === 'Browser playlist').track_notes[state.tracks[0].id]), 'Browser cue');
-    await page.click('#createBackup');
-    await page.waitForFunction(() => document.querySelector('#maintenanceResults').textContent.includes('.sqlite'));
-    await page.click('#viewAudit');
-    await page.waitForFunction(() => document.querySelectorAll('#maintenanceResults details').length > 0);
-    await page.click('#scan');
-    await page.waitForFunction(() => document.querySelector('#scanProgress').textContent.includes('completed'));
+    await page.click('[data-page="settings"]');await page.locator('#settingsTabs a[href="#/admin/settings/backup"]').click();await page.click('#createBackup');
+    await page.waitForFunction(() => document.querySelector('#backupResult').textContent.includes('.sqlite'));
+    await page.locator('#settingsTabs a[href="#/admin/settings/audit"]').click();await page.click('#viewAudit');
+    await page.waitForFunction(() => document.querySelectorAll('#auditResults details').length > 0);
+    await page.click('[data-page="maintenance"]');await page.click('#scan');
+    await page.waitForFunction(() => document.querySelector('#scanProgress').dataset.state==='completed');
     await page.click('#fullScan');
     await page.waitForFunction(async () => (await api('admin/scan/status')).state === 'completed');
     await page.click('[data-page="keys"]');
@@ -146,6 +146,7 @@ async function main() {
     }, playerSecret);
     assert.equal(keyCheck, 403, 'Player key must not inherit the browser administrator session');
     await page.click('#doneSecret');
+    assert.ok((await page.locator('#secretValue').textContent())==='','One-time key must clear when the dialog closes');
     await page.click('[data-page="stats"]');
     await page.waitForFunction(() => state.stats?.total.total_requests === 1);
     assert.equal(await page.locator('#statsTable tbody tr').count(), 1);
@@ -204,9 +205,13 @@ async function main() {
     await page.waitForFunction(() => state.user?.username === 'admin');
     const members=await require('./multiuser-ui.cjs')({browser,adminPage:page,base,audio,directory});
     await require('./users-ui.cjs')({browser,page,base,directory,...members});
+    await require('./admin-layout-ui.cjs')({page,directory,...members});
     await page.locator('#accountMenu summary').click();
     await page.click('#logout');
     await page.waitForFunction(() => !state.user);
+    assert.equal(await page.evaluate(()=>state.auditEntries.length),0);
+    assert.equal(await page.locator('#secretValue').textContent(),'');
+    assert.equal(await page.locator('#trackDetailsBody').textContent(),'');
     assert.equal(await page.evaluate(async () => (await fetch('/api/v2/auth/me')).status), 401);
     assert.deepEqual(pageErrors, []);
     console.log('Management UI passed: hidden console bootstrap, account login/reload/logout, session revocation, password change, key isolation, editing, playlists, restore, backup, audit, scanning and upload.');

@@ -14,6 +14,8 @@ function routeLink(label, path) {
 }
 
 const nav = document.querySelector('.nav');
+$('trackFilterButton').hidden=true;
+const trackFilters=$('page-tracks').querySelector('.filter-tabs');for(const name of ['all','mine','managed','orphan'])trackFilters.append(document.querySelector('[data-filter="'+name+'"]'));
 const trackIntro=$('page-tracks').querySelector('.page-intro');trackIntro.append(routeLink('上传曲目','uploads'));
 const trackCount=document.createElement('p');trackCount.id='trackCount';trackCount.className='status';$('page-tracks').querySelector('.track-toolbar').append(trackCount);
 const trackBulk=document.createElement('div');trackBulk.id='trackBulkActions';trackBulk.className='bulk-actions';trackBulk.hidden=true;
@@ -51,7 +53,7 @@ const playerTabs = document.createElement('nav'); playerTabs.id = 'playerTabs'; 
 const keyTab = routeLink('API Key','player/keys');
 statsNav.textContent = '调用统计'; statsNav.className = 'btn'; playerTabs.append(keyTab, statsNav);
 document.querySelector('.content').prepend(playerTabs);
-const connectionChecks=$('keyTests').closest('.panel');connectionChecks.querySelector('h3').textContent='连接检查（需输入完整 Key）';$('page-keys').append(connectionChecks);
+$('keyTests').closest('.panel').remove();
 const playerHelp=document.createElement('div');playerHelp.className='notice';playerHelp.innerHTML='<strong>连接 MusicPlayer2</strong><p>服务器地址：<span id="playerServerAddress"></span></p><p>在播放器中填写服务器地址和完整 API Key，保存后测试连接。未授权任何歌单的 Key 可以连接，但曲库为空。</p>';
 playerHelp.querySelector('#playerServerAddress').textContent=location.origin;$('page-keys').querySelector('.page-intro').after(playerHelp);
 const secretAddress=document.createElement('p');secretAddress.className='notice';secretAddress.textContent='服务器地址：'+location.origin+(['localhost','127.0.0.1','[::1]'].includes(location.hostname)?'。其他设备请改用服务器的局域网 IP。':'');$('secretValue').before(secretAddress);
@@ -96,6 +98,7 @@ function displayWorkspacePage(page) {
   hideContextMenu(); closeMobileNav(); routeError.hidden=true;
   state.page=page;
   if(page!=='tracks')state.selectedTrackIds.clear();
+  if(page!=='users')state.managedUserID=null;
   document.querySelectorAll('.page').forEach(el=>el.classList.toggle('active',el.id==='page-'+page));
   document.querySelectorAll('.nav [data-page]').forEach(el=>el.classList.toggle('active',el.dataset.page===page || page==='stats'&&el.dataset.page==='keys'));
   document.querySelectorAll('.nav-group[data-admin]').forEach(el=>el.hidden=!isAdministrator());
@@ -118,8 +121,8 @@ async function restoreWorkspaceRoute() {
   let page=Object.keys(pageRoutes).find(key=>pageRoutes[key]===path.join('/'));
   if(path[0]==='playlists'&&path.length===2)page='playlists';
   if(path[0]==='admin'&&path[1]==='users'&&path.length===3)page='users';
-  if(path[0]==='admin'&&path[1]==='library')page='maintenance';
-  if(path[0]==='admin'&&path[1]==='settings')page='settings';
+  if(path[0]==='admin'&&path[1]==='library'&&path.length===3&&['scan','missing','removed'].includes(path[2]))page='maintenance';
+  if(path[0]==='admin'&&path[1]==='settings'&&path.length===3&&['general','backup','update','audit'].includes(path[2]))page='settings';
   if(path[0]==='admin'&&path[1]==='stats'&&path.length===2)page='stats';
   try {
     if(!page || (adminPages.has(page)||path[0]==='admin')&&!isAdministrator())throw new Error('页面不存在或当前账户无权访问。');
@@ -139,19 +142,23 @@ async function restoreWorkspaceRoute() {
     }
     if(page==='keys')await loadKeys();
     if(page==='stats')await loadStats();
-    if(page==='overview'){renderOverview();await loadStats(true)}
-    if(page==='settings'){await loadSettings();await loadUpdate()}
-    if(page==='maintenance')await pollScan();
+    if(page==='overview'){await loadUsers();renderOverview();await loadOverviewSummary()}
+    if(page==='settings')await showSettingsTab(path[2]);
+    if(page==='maintenance')await showMaintenanceTab(path[2]);
     if(page==='users') {
+      const kind=new URLSearchParams(location.hash.split('?')[1]||'').get('kind')||'owned';
+      $('userResourceKind').value=['owned','uploaded','playlists','keys'].includes(kind)?kind:'owned';
+      if(state.managedUserID!==(path[2]||null))state.resourceOffset=0;
       state.managedUserID=path[2]||null;await loadUsers();
       if(path[2]&&!managedUser())throw new Error('用户不存在或无法读取。');
     }
   } catch(error) {
     if(generation!==routeGeneration||!state.user)return;
-    document.querySelectorAll('.page').forEach(el=>el.classList.remove('active'));
+    state.page='unavailable';document.querySelectorAll('.page').forEach(el=>el.classList.remove('active'));
     playerTabs.hidden=true;routeError.hidden=false;$('routeErrorMessage').textContent=error.message;
   }
 }
 window.addEventListener('hashchange',()=>restoreWorkspaceRoute());
 // The layout must be ready before restoring a browser login.
+setupAdministration();
 api('auth/me').then(enterAccount).catch(()=>setLoggedOut());

@@ -40,9 +40,17 @@ func TestBrowserPageReferencesBundledTagReader(t *testing.T) {
 	if strings.Count(response.Body.String(), reference) != 1 {
 		t.Fatal("management page must reference the bundled tag reader exactly once")
 	}
-	for _, element := range []string{`id="checkUpdate"`, `id="updateStatus"`, `update_repository`, `admin/update/check`} {
+	for _, element := range []string{`id="checkUpdate"`, `id="updateStatus"`, `<script src="/assets/management.js"></script>`} {
 		if !strings.Contains(response.Body.String(), element) {
 			t.Fatalf("management page is missing update control %q", element)
+		}
+	}
+	// Update controls are rendered by the separately embedded application script.
+	script := httptest.NewRecorder()
+	api.ServeHTTP(script, httptest.NewRequest(http.MethodGet, "/assets/management.js", nil))
+	for _, element := range []string{`update_repository`, `admin/update/check`} {
+		if script.Code != http.StatusOK || !strings.Contains(script.Body.String(), element) {
+			t.Fatalf("management script is missing update behavior %q", element)
 		}
 	}
 }

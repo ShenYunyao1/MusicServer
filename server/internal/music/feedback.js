@@ -14,6 +14,7 @@ $('editor').querySelector('.modal-foot').before(editorError);
 function clearEditorError() { editorError.hidden = true; editorError.textContent = ''; }
 $('editor').addEventListener('close', () => {clearEditorError();$('modalBody').querySelectorAll('input[type="password"]').forEach(input=>input.value='');state.saveAction=null});
 $('secretDialog').addEventListener('close',()=>{$('secretValue').textContent=''});
+$('secretDialog').addEventListener('cancel',()=>{$('secretValue').textContent=''});
 function notifyStatus(message, type) {
   if (!state.user || !message || !['error', 'ok'].includes(type)) return;
   if (type === 'error' && $('editor').open) {

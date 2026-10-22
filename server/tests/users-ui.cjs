@@ -22,13 +22,13 @@ module.exports=async function runUsersUI({browser,page,base,directory,accounts,t
  assert.equal((await fetch(base+'/api/v2/tracks',{headers:{'X-API-Key':aliceSecret}})).status,401);
  const disabled=await page.evaluate(id=>api('admin/stats?user_id='+id),a.user.id);assert.equal(disabled.total.total_requests,before.total.total_requests);assert.equal(disabled.keys[0].account_enabled,false);
  await aliceRow.locator('[data-user-action="resources"]').click();await page.locator('#userResourcesPanel').waitFor({state:'visible'});
- await page.selectOption('#userResourceKind','keys');await page.waitForFunction(()=>document.querySelector('#userResources').textContent.includes('账户已停用'));
- await page.selectOption('#userResourceKind','owned');await page.waitForFunction(()=>state.userResources.some(t=>t.title==='Alice song'));
+ await page.click('[data-resource-kind="keys"]');await page.waitForFunction(()=>document.querySelector('#userResources').textContent.includes('账户已停用'));
+ await page.click('[data-resource-kind="owned"]');await page.waitForFunction(()=>state.userResources.some(t=>t.title==='Alice song'));
  await page.selectOption('#transferTarget',b.user.id);page.once('dialog',dialog=>dialog.accept());await page.click('#transferAll');await page.waitForFunction(()=>state.resourceTotal===0);
  const moved=await page.evaluate(id=>api('tracks/'+id),track.id);assert.equal(moved.owner_id,b.user.id);assert.equal(moved.uploaded_by,a.user.id);
- await page.selectOption('#userResourceKind','uploaded');await page.waitForFunction(()=>state.userResources.some(t=>t.title==='Alice song'));
+ await page.click('[data-resource-kind="uploaded"]');await page.waitForFunction(()=>state.userResources.some(t=>t.title==='Alice song'));
  await page.screenshot({path:path.join(directory,'users-takeover.png'),fullPage:true});
- await aliceRow.locator('[data-user-action="enabled"]').click();await page.waitForFunction(id=>state.users.some(u=>u.id===id&&u.enabled),a.user.id);
+ await page.locator('[data-account-action="enabled"]').click();await page.waitForFunction(id=>state.users.some(u=>u.id===id&&u.enabled),a.user.id);
  const resumed=await fetch(base+'/api/v2/tracks',{headers:{'X-API-Key':aliceSecret}});assert.equal(resumed.status,200);assert.deepEqual(await resumed.json(),[]);
  assert.equal((await fetch(base+'/api/v2/playlists/'+alicePlaylist.id,{headers:{'X-API-Key':aliceSecret}})).status,404);
  const after=await page.evaluate(id=>api('admin/stats?user_id='+id),a.user.id);assert.equal(after.keys[0].key_id,before.keys[0].key_id);assert.ok(after.total.total_requests>before.total.total_requests);
