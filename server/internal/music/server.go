@@ -3,6 +3,7 @@ package music
 import (
 	"context"
 	"crypto/subtle"
+	"database/sql"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -636,6 +637,14 @@ func (a *API) playlist(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	tracks := make([]Track, 0, len(playlist.TrackIDs))
+	if auth := authFromRequest(request); auth.session && auth.role == "admin" && !playlist.System && playlist.OwnerID != auth.userID {
+		if err := a.store.transaction(func(tx *sql.Tx) error {
+			return auditMutation(tx, "playlist.admin.read", playlist.ID, nil, map[string]string{"owner_id": playlist.OwnerID}, []MutationOptions{mutationOptions(request)})
+		}); err != nil {
+			writeError(response, 500, "AUDIT_FAILED", "unable to record management access")
+			return
+		}
+	}
 	for _, trackID := range playlist.TrackIDs {
 		if track, err := readTrackFrom(a.store.db, trackID, true); err == nil {
 			if track.Removed || track.Missing {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -82,6 +83,49 @@ func (a *API) adminUsers(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	parts := strings.Split(path, "/")
+	if len(parts) == 2 && (parts[1] == "tracks" || parts[1] == "playlists") && request.Method == "GET" {
+		offset, limit := 0, 100
+		var err error
+		if raw := request.URL.Query().Get("offset"); raw != "" {
+			offset, err = strconv.Atoi(raw)
+			if err != nil || offset < 0 {
+				writeError(response, 400, "INVALID_PAGE", "invalid offset")
+				return
+			}
+		}
+		if raw := request.URL.Query().Get("limit"); raw != "" {
+			limit, err = strconv.Atoi(raw)
+			if err != nil || limit < 1 || limit > 500 {
+				writeError(response, 400, "INVALID_PAGE", "limit must be 1..500")
+				return
+			}
+		}
+		result, err := a.store.UserResources(parts[0], parts[1], request.URL.Query().Get("relation"), offset, limit, mutationOptions(request))
+		if err != nil {
+			writeUserError(response, err)
+			return
+		}
+		writeJSON(response, 200, result)
+		return
+	}
+	if len(parts) == 2 && parts[1] == "transfer" && request.Method == "POST" {
+		options := mutationOptions(request)
+		if options.ExpectedVersion < 1 {
+			writeError(response, 428, "VERSION_REQUIRED", "If-Match is required")
+			return
+		}
+		var body TransferRequest
+		if decodeStrict(request, &body) != nil {
+			writeError(response, 400, "INVALID_TRANSFER", "invalid transfer request")
+			return
+		}
+		if err := a.store.TransferResources(parts[0], body, options); err != nil {
+			writeUserError(response, err)
+			return
+		}
+		writeJSON(response, 200, map[string]bool{"transferred": true})
+		return
+	}
 	if len(parts) == 1 && request.Method == "PATCH" {
 		options := mutationOptions(request)
 		if options.ExpectedVersion < 1 {
