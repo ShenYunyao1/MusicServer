@@ -1,40 +1,27 @@
-param([string]$GoRoot = 'D:\Develop\Runtimes\Go1.26.8Full')
+param([string]$GoRoot = '')
 $ErrorActionPreference = 'Stop'
-$go = Join-Path $GoRoot 'bin\go.exe'
-if (!(Test-Path -LiteralPath $go)) { throw "Go executable not found: $go" }
-$original = @{}
-foreach ($name in @('GOROOT','GOTOOLCHAIN','GOCACHE','GOPATH','GOENV','GOOS','GOARCH')) {
-    $original[$name] = [Environment]::GetEnvironmentVariable($name,'Process')
-}
 Push-Location $PSScriptRoot
 try {
-    $env:GOOS = 'windows'
-    $env:GOARCH = 'amd64'
-    & .\build.ps1 -GoRoot $GoRoot
-    $env:GOROOT = $GoRoot
-    $env:GOTOOLCHAIN = 'local'
-    $env:GOENV = 'off'
-    $env:GOCACHE = 'D:\Develop\Runtimes\GoBuildCache26'
-    $env:GOPATH = 'D:\Develop\Runtimes\GoPath26'
-    $dist = Join-Path $PSScriptRoot 'dist'
-    New-Item -ItemType Directory -Path $dist -Force | Out-Null
+    # Both platforms use the same validated build entry and stable binary names.
+    & .\build.ps1 -GoRoot $GoRoot -Target windows
+    if ($LASTEXITCODE -ne 0) { throw 'Windows build failed' }
+    & .\build.ps1 -GoRoot $GoRoot -Target linux
+    if ($LASTEXITCODE -ne 0) { throw 'Linux build failed' }
 
-    $windowsArchive = Join-Path $dist 'musicserver-windows-amd64.zip'
-    $linuxArchive = Join-Path $dist 'musicserver-linux-amd64.tar.gz'
-    # Replace prior release archives so no stale entries survive a rebuild.
-    Remove-Item -LiteralPath $windowsArchive,$linuxArchive -ErrorAction SilentlyContinue
-    Compress-Archive -LiteralPath (Join-Path $PSScriptRoot 'musicserver.exe'),(Join-Path $PSScriptRoot 'README.md') -DestinationPath $windowsArchive
-
-    $env:GOOS = 'linux'
-    $env:GOARCH = 'amd64'
-    $linuxBinary = Join-Path $dist 'musicserver'
-    & $go build -o $linuxBinary ./cmd/musicserver
-    if ($LASTEXITCODE -ne 0) { throw 'Linux release build failed' }
-    & tar -czf $linuxArchive -C $dist musicserver -C $PSScriptRoot README.md deploy/musicserver.service deploy/musicserver.env.example
+    $buildDirectory = Join-Path $PSScriptRoot 'build'
+    $packages = Join-Path $buildDirectory 'packages'
+    New-Item -ItemType Directory -Path $packages -Force | Out-Null
+    $windowsArchive = Join-Path $packages 'musicserver-windows-amd64.zip'
+    $linuxArchive = Join-Path $packages 'musicserver-linux-amd64.tar.gz'
+    # Explicit inputs keep databases, music, credentials and staging out of packages.
+    Compress-Archive -LiteralPath (Join-Path $buildDirectory 'musicserver.exe'),(Join-Path $PSScriptRoot 'README.md') -DestinationPath $windowsArchive -Force
+    & tar -czf $linuxArchive -C $buildDirectory musicserver -C $PSScriptRoot README.md deploy/musicserver.service deploy/musicserver.env.example
     if ($LASTEXITCODE -ne 0) { throw 'Linux release archive failed' }
-
     Get-FileHash -Algorithm SHA256 -LiteralPath $windowsArchive,$linuxArchive | Select-Object Path,Hash
+    Write-Host 'PACKAGING SUCCEEDED: build\packages\' -ForegroundColor Green
+} catch {
+    Write-Host "PACKAGING FAILED: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
 } finally {
     Pop-Location
-    foreach ($name in $original.Keys) { [Environment]::SetEnvironmentVariable($name,$original[$name],'Process') }
 }

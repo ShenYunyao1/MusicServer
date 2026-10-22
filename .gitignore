@@ -3,10 +3,7 @@
 
 # Local music, credentials, mutable databases and generated builds.
 /测试音乐资源/
-/server/data/
-/server/media/
-/server/dist/
-/server/.server-archive/
+/server/build/
 *.exe
 *.exe~
 *.dll

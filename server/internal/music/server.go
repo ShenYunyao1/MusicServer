@@ -171,7 +171,8 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 			writeError(response, 405, "method not allowed")
 			return
 		}
-		writeJSON(response, http.StatusOK, map[string]any{"status": "ok", "version": version.Version, "revision": a.store.Revision()})
+		commit, modified := version.Source()
+		writeJSON(response, http.StatusOK, map[string]any{"status": "ok", "version": version.Version, "revision": a.store.Revision(), "commit": commit, "modified": modified})
 	case request.URL.Path == "/api/v2/sync":
 		a.sync(response, request)
 	case request.URL.Path == "/api/v2/playlists":

@@ -1,5 +1,9 @@
-param([string]$GoRoot = '')
+param(
+    [string]$GoRoot = '',
+    [ValidateSet('windows', 'linux')][string]$Target = 'windows'
+)
 $ErrorActionPreference = 'Stop'
+trap { Write-Host "BUILD FAILED: $($_.Exception.Message)" -ForegroundColor Red; exit 1 }
 if (!$GoRoot) {
     if ($env:GOROOT -and (Test-Path -LiteralPath (Join-Path $env:GOROOT 'bin\go.exe'))) {
         $GoRoot = $env:GOROOT
@@ -14,12 +18,22 @@ if (!$GoRoot) {
 $go = Join-Path $GoRoot 'bin\go.exe'
 if (!(Test-Path -LiteralPath $go)) { throw "Go executable not found: $go" }
 $original = @{}
-foreach ($name in @('GOROOT','GOTOOLCHAIN','GOCACHE','GOPATH','GOENV')) { $original[$name] = [Environment]::GetEnvironmentVariable($name,'Process') }
+foreach ($name in @('GOROOT','GOTOOLCHAIN','GOCACHE','GOPATH','GOENV','GOOS','GOARCH','CGO_ENABLED')) { $original[$name] = [Environment]::GetEnvironmentVariable($name,'Process') }
 Push-Location $PSScriptRoot
 try {
+	$buildDirectory = Join-Path $PSScriptRoot 'build'
+	$binaryName = if ($Target -eq 'windows') { 'musicserver.exe' } else { 'musicserver' }
+	$outputPath = Join-Path $buildDirectory $binaryName
+	if ($Target -eq 'windows') {
+		$running = Get-Process -Name musicserver -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $outputPath }
+		if ($running) { throw 'Stop build\musicserver.exe before building. Runtime data will be retained.' }
+	}
     $env:GOROOT = $GoRoot
     $env:GOTOOLCHAIN = 'local'
     $env:GOENV = 'off'
+    $env:GOOS = 'windows'
+    $env:GOARCH = 'amd64'
+    $env:CGO_ENABLED = '0'
     $runtimeParent = Split-Path $GoRoot -Parent
     if (!$env:GOCACHE -and (Test-Path (Join-Path $runtimeParent 'GoBuildCache26'))) { $env:GOCACHE = Join-Path $runtimeParent 'GoBuildCache26' }
     if (!$env:GOPATH -and (Test-Path (Join-Path $runtimeParent 'GoPath26'))) { $env:GOPATH = Join-Path $runtimeParent 'GoPath26' }
@@ -29,13 +43,16 @@ try {
     Write-Host '[2/3] Checking code...' -ForegroundColor Cyan
     & $go vet ./...
     if ($LASTEXITCODE -ne 0) { throw 'Go vet failed' }
-    Write-Host '[3/3] Building musicserver.exe...' -ForegroundColor Cyan
-    & $go build -o musicserver.exe ./cmd/musicserver
+    New-Item -ItemType Directory -Path $buildDirectory -Force | Out-Null
+    $env:GOOS = $Target
+    Write-Host "[3/3] Building $Target/amd64 -> build\$binaryName..." -ForegroundColor Cyan
+    & $go build -trimpath -buildvcs=auto -o $outputPath ./cmd/musicserver
     if ($LASTEXITCODE -ne 0) { throw 'Go build failed' }
     Write-Host ''
     Write-Host 'BUILD SUCCEEDED' -ForegroundColor Green
-    Write-Host "Executable: $(Join-Path $PSScriptRoot 'musicserver.exe')"
-    Write-Host 'Next: run start.bat. First startup asks you to set the admin password.'
+    Write-Host "Executable: $outputPath"
+    Write-Host 'Runtime data in build\ is retained. First startup asks you to set the admin password.'
+    if ($Target -eq 'windows') { Write-Host 'Next: run start.bat.' }
 } catch {
     Write-Host "BUILD FAILED: $($_.Exception.Message)" -ForegroundColor Red
     exit 1

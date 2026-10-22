@@ -114,7 +114,8 @@ func main() {
 		case <-listenDone:
 		}
 	}()
-	log.Printf("music server v%s listening on %s, media root %s, SQLite database %s", version.Version, *address, filepath.Clean(*mediaRoot), store.DataPath())
+	commit, modified := version.Source()
+	log.Printf("music server v%s (commit %s, modified=%t) listening on %s, media root %s, SQLite database %s", version.Version, commit, modified, *address, filepath.Clean(*mediaRoot), store.DataPath())
 	log.Printf("Open http://%s/ in your browser. Press Ctrl+C to stop.", *address)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Printf("listen: %v", err)

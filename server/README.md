@@ -6,7 +6,7 @@ Go 1.26+，SQLite schema 4，HTTP API `/api/v2`，内置中文管理页。支持
 
 ## 启动
 
-Windows 使用两个批处理脚本：`build.bat` 执行测试、`go vet` 和编译，成功后明确输出 `BUILD SUCCEEDED` 和程序路径；失败输出 `BUILD FAILED` 并返回非零状态。`start.bat` 在前台启动编译后的程序，首次启动引导设置管理员密码。从其他目录调用也可；源码更新后先重新编译。
+Windows 使用两个批处理脚本：`build.bat` 执行测试、`go vet` 和编译，固定生成 `build/musicserver.exe`，成功后明确输出 `BUILD SUCCEEDED` 和程序路径；失败输出 `BUILD FAILED` 并返回非零状态。`start.bat` 固定启动该程序，首次启动引导设置管理员密码。从其他目录调用也可；源码更新后先停服再编译。
 
 ```bat
 cd server
@@ -14,20 +14,36 @@ call build.bat
 call start.bat
 ```
 
-首次启动自动在终端隐藏输入并确认密码，账号名为 `admin`，密码至少 12 个字符、最多 1024 字节；不设置默认密码。后续启动直接进入服务。也可提前执行 `musicserver.exe admin init`；`--data` 和 `--username` 仅用于覆盖默认值，均可省略。自定义用户名为 3–64 个 ASCII 字母、数字、点、短横线或下划线，首字符为字母或数字，忽略大小写。
+首次启动自动在终端隐藏输入并确认密码，账号名为 `admin`，密码至少 12 个字符、最多 1024 字节；不设置默认密码。后续启动直接进入服务。也可在 `server` 目录提前执行 `build\musicserver.exe admin init`；`--data` 和 `--username` 仅用于覆盖默认值，均可省略。自定义用户名为 3–64 个 ASCII 字母、数字、点、短横线或下划线，首字符为字母或数字，忽略大小写。
 
-程序默认监听 `127.0.0.1:8080`，媒体库为 **musicserver.exe 所在目录及其子目录**，数据库为该目录下的 `data\library-v4.sqlite`，无需显式传参。音频可直接放在程序旁，或放入 `音乐\专辑\`、`media\` 等子目录。数据库目录、`.staging` 和 `.server-archive` 不参与媒体扫描。上传音频保存在 `uploads`，备份和更新暂存在 `data` 下。
+程序默认监听 `127.0.0.1:8080`，媒体库为 **musicserver.exe 所在目录及其子目录，即 build/**，数据库为 `build/data/library-v4.sqlite`，无需显式传参。音频可直接放在程序旁，建议放入 `build/media/`。数据库目录、`.staging` 和 `.server-archive` 不参与媒体扫描。上传音频保存在 `build/uploads`，备份和更新暂存在 `build/data` 下。源码目录中的音频不会被默认扫描。
+
+```text
+server/
+  cmd/ internal/ scripts/ tests/ deploy/   源码、脚本和测试
+  build.bat build.ps1 start.bat            固定构建与启动入口
+  package-release.ps1                     可选发布打包入口
+  build/                                  Git 整体忽略
+    musicserver.exe                       Windows amd64 固定产物
+    musicserver                           Linux amd64 交叉编译产物（可选）
+    data/ media/ uploads/ .staging/        运行数据，按需创建
+    packages/                             发布压缩包（可选）
+```
+
+每次编译更新同一位置、同一名称的程序，保留运行数据，不生成带日期或版本后缀的可执行文件；不要将整个 `build/` 作为临时编译缓存自动清空。Git 只管理源码、脚本、测试和文档。构建嵌入 Go 的 VCS 信息，启动日志和 `/api/v2/health` 返回 `commit` 和 `modified`，用于辨认源码提交及构建时是否存在未提交修改；不在 Git 仓库内编译时提交号为 `unknown`。
+
+当前处于开发阶段，数据仅作测试，后续升级不提供旧数据格式兼容或迁移。需要重置时停服后删除 `build/data/`，下次启动重新设置管理员账号；媒体会重新扫描，但原 UUID、歌单和人工修改不保留。日常编译不会自动执行重置。
 
 默认路径和显式传入的相对路径都以 **程序所在目录** 为基准，不受终端当前目录影响。`start.bat` 支持全部可选参数，例如 `-media-root "D:\Music"`、`-data` 和 `-no-scan`；只有使用自定义数据库时，初始化/重置才需要传入相同的 `--data`。按 Ctrl+C 停止服务。
 
-`build.bat` 自动查找现有 Go 安装，也可传入 `-GoRoot "C:\Program Files\Go"`。依赖 ffprobe 的上传校验仍要求安装 ffprobe，见下文；远程部署仍需 HTTPS 和外部地址配置，本机默认使用无需这些参数。
+`build.bat` 自动查找现有 Go 安装，也可传入 `-GoRoot "C:\Program Files\Go"`。Windows 固定为 amd64；`build.bat -Target linux` 将 Linux amd64 程序写入同一 `build/` 目录，名称固定为 `musicserver`。依赖 ffprobe 的上传校验仍要求安装 ffprobe，见下文；远程部署仍需 HTTPS 和外部地址配置，本机默认使用无需这些参数。
 
 也可直接使用 Go 和 PowerShell 启动：
 
 ```powershell
 cd server
-go build -o musicserver.exe ./cmd/musicserver
-.\musicserver.exe
+go build -trimpath -buildvcs=auto -o ./build/musicserver.exe ./cmd/musicserver
+.\build\musicserver.exe
 ```
 
 浏览器打开 `http://127.0.0.1:8080/`，输入账号密码登录。管理页支持修改密码、查看和撤销登录会话、创建和撤销播放器 Key。Key 是播放器凭证，不能用于管理接口。首次启动若处于无交互的后台环境，退出并提示先在终端初始化，不创建默认密码。
@@ -41,7 +57,7 @@ go build -o musicserver.exe ./cmd/musicserver
 忘记密码时停服后在终端执行（可选 `--revoke-keys` 同时撤销该账号播放器凭证）：
 
 ```bat
-musicserver.exe admin reset-password
+build\musicserver.exe admin reset-password
 ```
 
 服务和本机管理命令共用 OS 文件锁，服务运行时拒绝初始化/重置同一库，进程退出时自动释放锁。初始化和重置要求真实交互终端，不接受密码参数或重定向密码输入。
@@ -52,7 +68,7 @@ musicserver.exe admin reset-password
 
 ## 曲目身份与数据
 
-曲目文件位置以媒体库根目录下的相对路径保存。停服后将 **整个服务器目录（含数据库、音频及其他子目录）一起移动**，再次启动即可继续使用，UUID、歌单、人工修改和账号保持不变。只复制音频到新库可重新扫描导入，但不会带回数据库中的 UUID、歌单等信息。若显式配置了外部绝对路径，该外部目录需要一起保留或重新指定；单独移动/重命名音频按下述哈希匹配规则识别，不保证重复文件的无歧义匹配。
+曲目文件位置以媒体库根目录下的相对路径保存。同一数据格式下，停服后将 **整个 build/ 运行目录（含程序、数据库、音频）一起移动**，直接运行其中的程序即可继续使用，UUID、歌单、人工修改和账号保持不变，不需要携带源码。只复制音频到新库可重新扫描导入，但不会带回数据库中的 UUID、歌单等信息。若显式配置了外部绝对路径，该外部目录需要一起保留或重新指定；单独移动/重命名音频按下述哈希匹配规则识别，不保证重复文件的无歧义匹配。
 
 - 曲目 `id` 是首次建库时生成的 UUID v4，与数据库记录一一对应。歌单和人工修改引用 UUID。
 - `path` 是媒体目录下的唯一相对路径，可变化；`content_hash` 是文件 SHA-256，用于完整性校验、上传去重和移动识别，不作为曲目主键。
@@ -168,6 +184,8 @@ Content-Type: application/json
 
 ## 备份、恢复和更新
 
+可选 `package-release.ps1` 复用统一构建入口，生成 `build/musicserver.exe`、`build/musicserver` 和 `build/packages/musicserver-windows-amd64.zip`、`build/packages/musicserver-linux-amd64.tar.gz`，文件名不随版本变化。Windows 包仅包含程序和 README；Linux 包另含部署模板；均不包含数据库、媒体、密码或运行配置。解压后可直接运行包内程序，默认数据目录仍跟随程序位置。
+
 管理页概览或备份接口使用 `VACUUM INTO` 生成一致的 SQLite 快照，运行 `integrity_check` 成功后才返回路径。文件位于数据库旁 `backups/`，包括曲目元数据、歌单、Key 哈希、覆盖、封面、审计等数据库内容；**不包含媒体和暂存文件**，这些目录须另外备份。未设置备份自动清理策略，应按实际容量归档或删除旧备份。
 
 恢复步骤：停止服务，保留当前数据库及媒体副本，将已校验的 schema 4 备份复制为启动 `-data` 指定的数据库，恢复匹配的媒体目录，再启动。启动会撤销旧会话；备份仍可能恢复旧密码和旧 Key，需核对并轮换。不要对运行中的数据库直接覆盖。schema 1–3 不能用于本版恢复，需配合原版本程序使用。
@@ -180,18 +198,20 @@ Content-Type: application/json
 go test ./...
 go vet ./...
 go test -race ./...
-go build ./cmd/musicserver
+go build -o ./build/musicserver ./cmd/musicserver
 ```
 
 Race 检查需要支持的 C 工具链。隔离浏览器回归 `tests/management-ui.cjs` 自建临时媒体、数据库和子进程，不连接现有服务器：
 
 ```powershell
-$env:MUSIC_SERVER_TEST_BINARY = 'C:\Temp\musicserver-validation.exe'
+$env:MUSIC_SERVER_TEST_BINARY = (Resolve-Path '.\build\musicserver.exe').Path
 $env:MUSIC_SERVER_PLAYWRIGHT = 'playwright'
 $env:MUSIC_SERVER_TEST_PYTHON = 'python'
 node tests/management-ui.cjs
 ```
 
 安装 Playwright 及其 Chromium、Python 后运行；终端初始化测试在 Windows 需要 pywinpty，其他系统需要 pexpect。`MUSIC_SERVER_PLAYWRIGHT` 也可为模块绝对路径。浏览器回归覆盖真实终端隐藏密码初始化、登录、刷新保持会话、改密、注销、撤销会话和原有管理流程。
+
+Windows 可另运行 `python tests/runtime-layout.py`（需要 pywinpty），用临时副本验证 `start.bat` 从其他工作目录启动时仍使用 `build/` 的程序、数据库和音乐，不扫描源码目录或在调用目录写入数据。
 
 `scripts/verify-management.cjs` 和 `scripts/verify-local-preview.cjs` 另依赖真实音乐样本，只能指向隔离测试服务，使用 `MUSIC_SERVER_UI_USERNAME`、`MUSIC_SERVER_UI_PASSWORD` 提供该隔离库的账号。
