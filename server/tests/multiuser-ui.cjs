@@ -34,9 +34,11 @@ module.exports=async function runMultiuserUI({browser,adminPage,base,audio,direc
   if(await a.page.evaluate(()=>!navigator.clipboard?.writeText)){
    // Inspect the selected value without changing the user's OS clipboard.
    await a.page.evaluate(()=>{window.fixtureClipboard='';document.execCommand=command=>{if(command!=='copy')return false;window.fixtureClipboard=document.activeElement.value;return true}});
-   await a.page.click('#copySecret');await a.page.waitForFunction(()=>document.querySelector('#status').textContent==='完整 API Key 已复制');
+   let confirmationDialogs=0;const onCopyDialog=dialog=>{confirmationDialogs++;dialog.dismiss()};a.page.on('dialog',onCopyDialog);
+   await a.page.click('#copySecret');await a.page.locator('#copyFeedback').waitFor({state:'visible'});assert.equal(await a.page.locator('#copyFeedback').textContent(),'已复制到剪贴板');
    assert.ok(await a.page.evaluate(secret=>window.fixtureClipboard===secret,emptySecret),'copy fallback did not select the full secret inside the modal');
-   await a.page.evaluate(()=>{document.execCommand=()=>false});await a.page.click('#copySecret');await a.page.waitForFunction(()=>document.querySelector('#status').textContent.includes('请手动复制'));
+   await a.page.locator('#copyFeedback').waitFor({state:'hidden',timeout:5000});assert.equal(await a.page.locator('#secretDialog').isVisible(),true);assert.equal(confirmationDialogs,0);a.page.off('dialog',onCopyDialog);
+   await a.page.evaluate(()=>{document.execCommand=()=>false});await a.page.click('#copySecret');await a.page.locator('#copyFeedback').waitFor({state:'visible'});assert.ok((await a.page.locator('#copyFeedback').textContent()).includes('请手动复制'));
    assert.ok(await a.page.evaluate(secret=>window.getSelection().toString()===secret,emptySecret),'copy failure did not select the full key for manual copying');
    await a.page.evaluate(()=>{delete document.execCommand;delete window.fixtureClipboard});
   }
