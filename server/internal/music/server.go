@@ -161,6 +161,9 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		a.accountAuth(response, request)
 		return
 	}
+	if !a.authorizeResource(response, request) {
+		return
+	}
 	if needsVersion(request) {
 		expected, err := strconv.ParseInt(strings.Trim(request.Header.Get("If-Match"), string(rune(34))), 10, 64)
 		if err != nil || expected < 1 {
@@ -629,6 +632,8 @@ func writePlaylistMutationError(response http.ResponseWriter, err error) {
 	status := http.StatusBadRequest
 	switch {
 	case errors.Is(err, errPlaylistNotFound), errors.Is(err, errMemberNotFound):
+		status = http.StatusNotFound
+	case errors.Is(err, errResourceHidden):
 		status = http.StatusNotFound
 	case errors.Is(err, errLibraryMembers), errors.Is(err, errPlaylistConflict), errors.Is(err, errVersionConflict):
 		status = http.StatusConflict
@@ -1210,6 +1215,10 @@ func writeJSON(response http.ResponseWriter, status int, value any) {
 
 func writeError(response http.ResponseWriter, status int, args ...string) {
 	code, message := "REQUEST_FAILED", "request failed"
+	if len(args) > 0 && args[len(args)-1] == errResourceHidden.Error() {
+		status = 404
+		args = []string{"NOT_FOUND", errResourceHidden.Error()}
+	}
 	if len(args) > 0 && args[len(args)-1] == errVersionConflict.Error() {
 		status = 409
 		args = []string{"VERSION_CONFLICT", errVersionConflict.Error()}

@@ -28,6 +28,11 @@ func (s *Store) SetTrackCover(id string, data []byte, options ...MutationOptions
 		if err != nil {
 			return err
 		}
+		if before.ID != "" {
+			if err := checkActorOwner(tx, before.OwnerID, options); err != nil {
+				return err
+			}
+		}
 		if err := checkVersion(before.Version, options); err != nil {
 			return err
 		}

@@ -330,6 +330,11 @@ func (s *Store) PutPlaylist(playlist Playlist, options ...MutationOptions) error
 		if before.ID != "" && len(options) > 0 && options[0].CreateOnly {
 			return errVersionConflict
 		}
+		if before.ID != "" {
+			if err := checkActorOwner(tx, before.OwnerID, options); err != nil {
+				return err
+			}
+		}
 		if err := checkVersion(before.Version, options); err != nil {
 			return err
 		}
@@ -390,6 +395,11 @@ func (s *Store) mutatePlaylist(id string, members bool, edit func(*Playlist) err
 		}
 		if members && id == "library" {
 			return errLibraryMembers
+		}
+		if before.ID != "" {
+			if err := checkActorOwner(tx, before.OwnerID, options); err != nil {
+				return err
+			}
 		}
 		if err := checkVersion(before.Version, options); err != nil {
 			return err
@@ -557,6 +567,11 @@ func (s *Store) DeletePlaylist(id string, options ...MutationOptions) error {
 		if err != nil {
 			return err
 		}
+		if before.ID != "" {
+			if err := checkActorOwner(tx, before.OwnerID, options); err != nil {
+				return err
+			}
+		}
 		if err := checkVersion(before.Version, options); err != nil {
 			return err
 		}
@@ -653,6 +668,11 @@ func (s *Store) UpdateTrack(id string, fields map[string]string, options ...Muta
 		if err != nil {
 			return err
 		}
+		if before.ID != "" {
+			if err := checkActorOwner(tx, before.OwnerID, options); err != nil {
+				return err
+			}
+		}
 		if err := checkVersion(before.Version, options); err != nil {
 			return err
 		}
@@ -682,6 +702,11 @@ func (s *Store) setRemoved(id string, removed bool, options []MutationOptions) e
 		before, err := readTrackFrom(tx, id, true)
 		if err != nil {
 			return err
+		}
+		if before.ID != "" {
+			if err := checkActorOwner(tx, before.OwnerID, options); err != nil {
+				return err
+			}
 		}
 		if err := checkVersion(before.Version, options); err != nil {
 			return err
