@@ -32,7 +32,7 @@ var accountPageScript []byte
 //go:embed users.js
 var usersPageScript []byte
 
-//go:embed management.css navigation.js feedback.js
+//go:embed management.css navigation.js feedback.js library.js
 var workspaceAssets embed.FS
 
 type API struct {
@@ -109,7 +109,7 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if request.Method == http.MethodGet {
-		assets := map[string]string{"/assets/management.css": "text/css; charset=utf-8", "/assets/navigation.js": "text/javascript; charset=utf-8", "/assets/feedback.js": "text/javascript; charset=utf-8"}
+		assets := map[string]string{"/assets/management.css": "text/css; charset=utf-8", "/assets/navigation.js": "text/javascript; charset=utf-8", "/assets/feedback.js": "text/javascript; charset=utf-8", "/assets/library.js": "text/javascript; charset=utf-8"}
 		if contentType, ok := assets[request.URL.Path]; ok {
 			data, err := workspaceAssets.ReadFile(strings.TrimPrefix(request.URL.Path, "/assets/"))
 			if err != nil {

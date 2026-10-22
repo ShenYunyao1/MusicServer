@@ -11,6 +11,7 @@ module.exports=async function({page}){
   await page.evaluate(()=>location.hash='#/playlists/not-accessible');await page.locator('#routeError').waitFor({state:'visible'});
   await page.locator('#routeError a').click();await page.waitForFunction(()=>state.page==='tracks');
   await page.setViewportSize({width:390,height:844});
+  await page.waitForFunction(()=>document.querySelector('.main').getBoundingClientRect().left<=1&&document.querySelector('#sidebar').getBoundingClientRect().right<=1);
   const overflow=await page.evaluate(()=>[...document.querySelectorAll('body *')].filter(el=>{const r=el.getBoundingClientRect();return r.width&&r.right>innerWidth+1&&!el.closest('.table-wrap')}).slice(0,12).map(el=>[el.tagName,el.id,el.className,el.getBoundingClientRect().right]));
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,JSON.stringify(overflow));
   await page.click('#menuToggle');assert.equal(await page.locator('#menuToggle').getAttribute('aria-expanded'),'true');

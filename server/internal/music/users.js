@@ -77,5 +77,5 @@ async function transferUserResources(all){
 $('transferSelected').onclick=()=>run(()=>transferUserResources(false));$('transferAll').onclick=()=>run(()=>transferUserResources(true));
 
 const statsUser=document.createElement('select');statsUser.id='statsUser';statsUser.className='select';statsUser.setAttribute('aria-label','按账户筛选统计');statsUser.hidden=true;$('page-stats').querySelector('.actions').prepend(statsUser);
-statsUser.onchange=()=>run(async()=>{state.statsUserID=statsUser.value;await loadStats()});
-function renderStatsUsers(){statsUser.hidden=!isAdministrator();if(!isAdministrator())return;statsUser.replaceChildren();const all=document.createElement('option');all.value='';all.textContent='全部账户';statsUser.append(all);for(const user of state.users||[]){const option=document.createElement('option');option.value=user.id;option.textContent=user.username+(user.enabled?'':'（账户已停用）');statsUser.append(option)}statsUser.value=state.statsUserID||''}
+statsUser.onchange=()=>{location.hash='#/admin/stats'+(statsUser.value?'?user='+encodeURIComponent(statsUser.value):'')};
+function renderStatsUsers(){statsUser.hidden=!isAdministrator()||state.statsScope!=='admin';if(!isAdministrator())return;statsUser.replaceChildren();const all=document.createElement('option');all.value='';all.textContent='全部账户';statsUser.append(all);for(const user of state.users||[]){const option=document.createElement('option');option.value=user.id;option.textContent=user.username+(user.enabled?'':'（账户已停用）');statsUser.append(option)}statsUser.value=state.statsUserID||''}

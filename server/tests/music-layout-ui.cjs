@@ -1,0 +1,23 @@
+const assert=require('node:assert/strict');
+const path=require('node:path');
+module.exports=async function({page,directory}){
+ await page.click('[data-page="tracks"]');await page.waitForFunction(()=>state.page==='tracks');
+ await page.locator('#trackRows [data-details]').first().click();await page.locator('#trackDetails').waitFor({state:'visible'});
+ assert.ok((await page.locator('#trackDetailsBody').textContent()).includes('音频参数'));
+ await page.locator('#trackDetails [aria-label="关闭曲目详情"]').click();
+ await page.locator('#trackRows [data-track-id]').first().check();assert.equal(await page.locator('#trackBulkActions').isVisible(),true);
+ await page.fill('#trackSearch','no matching fixture');assert.equal(await page.locator('#trackBulkActions').isVisible(),false);assert.equal(await page.evaluate(()=>state.selectedTrackIds.size),0);
+ await page.reload();await page.waitForFunction(()=>state.user&&document.querySelector('#status').textContent==='已登录');assert.equal(await page.locator('#trackSearch').inputValue(),'no matching fixture');
+ await page.fill('#trackSearch','');
+ await page.setViewportSize({width:390,height:844});await page.waitForFunction(()=>document.querySelector('.main').getBoundingClientRect().left<=1&&document.querySelector('#sidebar').getBoundingClientRect().right<=1);await page.screenshot({path:path.join(directory,'library-mobile.png'),fullPage:true});
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+ await page.locator('#trackRows .row-actions button').filter({hasText:'更多'}).first().click();await page.locator('#contextMenu').waitFor({state:'visible'});await page.keyboard.press('ArrowDown');assert.equal(await page.evaluate(()=>document.activeElement.closest('#contextMenu')!==null),true);await page.keyboard.press('Escape');
+ await page.setViewportSize({width:1440,height:1100});await page.waitForFunction(()=>document.querySelector('.main').getBoundingClientRect().left>=231);
+ await page.click('[data-page="playlists"]');await page.waitForFunction(()=>state.page==='playlists');
+ assert.equal(await page.locator('.playlist-card[data-id="library"]').count(),0);
+ await page.locator('.playlist-card button').filter({hasText:'打开'}).first().click();await page.locator('#playlistDetail').waitFor({state:'visible'});
+ assert.ok((await page.locator('#playlistDetail').textContent()).includes('Browser cue'));
+ await page.reload();await page.waitForFunction(()=>state.playlistDetailId&&document.querySelector('#status').textContent==='已登录');
+ assert.ok((await page.locator('#playlistDetail').textContent()).includes('Browser cue'));await page.click('[data-back-playlists]');
+ console.log('Music layout UI passed: track drawer, visible row/menu actions, selection scope, mobile layout, search restore and private playlist detail.');
+};

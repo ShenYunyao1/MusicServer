@@ -103,6 +103,7 @@ async function main() {
     await page.fill('[data-field="comment"]', 'Browser cue');
     await page.click('#saveModal');
     await page.waitForFunction(() => state.playlists.find(playlist => playlist.name === 'Browser playlist').track_notes?.[state.tracks[0].id] === 'Browser cue');
+    await require('./music-layout-ui.cjs')({page,directory});
     await page.evaluate(() => editTrack(state.tracks[0]));
     await page.evaluate(async () => { await api('tracks/' + state.tracks[0].id, 'PATCH', { comment: 'Concurrent edit' }, undefined, state.tracks[0].version); });
     await page.fill('[data-field="title"]', 'Stale edit');
@@ -166,6 +167,9 @@ async function main() {
     audio[44] = 1;
     await page.setInputFiles('#uploadInput', { name: 'Upload.wav', mimeType: 'audio/wav', buffer: audio });
     await page.waitForFunction(() => state.uploads.length === 1);
+    assert.equal(await page.locator('.upload-editor').getAttribute('open'),null);
+    await page.locator('.upload-editor > summary').click();await page.locator('[data-upload-field="title"]').waitFor({state:'visible'});
+    await page.locator('.upload-editor > summary').click();
     await page.locator('[data-stage-upload]').click();
     await page.waitForFunction(() => state.uploads[0].stageId);
     await page.locator('[data-confirm-upload]').click();

@@ -14,6 +14,20 @@ function routeLink(label, path) {
 }
 
 const nav = document.querySelector('.nav');
+const trackIntro=$('page-tracks').querySelector('.page-intro');trackIntro.append(routeLink('上传曲目','uploads'));
+const trackCount=document.createElement('p');trackCount.id='trackCount';trackCount.className='status';$('page-tracks').querySelector('.track-toolbar').append(trackCount);
+const trackBulk=document.createElement('div');trackBulk.id='trackBulkActions';trackBulk.className='bulk-actions';trackBulk.hidden=true;
+const bulkAdd=makeButton('加入歌单',()=>openAddTracks([...state.selectedTrackIds]),'btn primary');bulkAdd.id='bulkAdd';
+const bulkCancel=makeButton('取消选择',()=>{state.selectedTrackIds.clear();renderTracks()});
+const bulkDelete=makeButton('删除所选曲目',()=>deleteSelectedTracks(),'btn danger');bulkDelete.id='bulkDelete';
+trackBulk.append(bulkAdd,bulkCancel,bulkDelete);$('page-tracks').querySelector('.panel').before(trackBulk);
+const trackDetails=document.createElement('dialog');trackDetails.id='trackDetails';trackDetails.className='modal drawer';
+trackDetails.innerHTML='<div class="modal-head"><h3>曲目详情</h3><button class="btn small" aria-label="关闭曲目详情">×</button></div><div id="trackDetailsBody" class="modal-body"></div>';
+trackDetails.querySelector('button').onclick=()=>trackDetails.close();document.body.append(trackDetails);
+trackDetails.addEventListener('close',()=>{$('trackDetailsBody').replaceChildren()});
+const clearCompleted=makeButton('清理已完成',()=>run(async()=>{for(const upload of [...state.uploads].filter(x=>['完成','已去重'].includes(x.status)))await removeUpload(upload)}));
+clearCompleted.id='clearCompleted';$('page-upload').querySelector('.queue-actions').prepend(clearCompleted);
+window.addEventListener('beforeunload',event=>{if(state.user&&state.uploads.some(x=>!['完成','已去重'].includes(x.status))){event.preventDefault();event.returnValue=''}});
 const groups = [['音乐', ['tracks','playlists','upload']], ['播放器',['keys']], ['管理',['overview','users','maintenance','settings']]];
 const maintenanceNav = makeButton('', () => showPage('maintenance'));
 maintenanceNav.dataset.page = 'maintenance';
@@ -37,6 +51,10 @@ const playerTabs = document.createElement('nav'); playerTabs.id = 'playerTabs'; 
 const keyTab = routeLink('API Key','player/keys');
 statsNav.textContent = '调用统计'; statsNav.className = 'btn'; playerTabs.append(keyTab, statsNav);
 document.querySelector('.content').prepend(playerTabs);
+const connectionChecks=$('keyTests').closest('.panel');connectionChecks.querySelector('h3').textContent='连接检查（需输入完整 Key）';$('page-keys').append(connectionChecks);
+const playerHelp=document.createElement('div');playerHelp.className='notice';playerHelp.innerHTML='<strong>连接 MusicPlayer2</strong><p>服务器地址：<span id="playerServerAddress"></span></p><p>在播放器中填写服务器地址和完整 API Key，保存后测试连接。未授权任何歌单的 Key 可以连接，但曲库为空。</p>';
+playerHelp.querySelector('#playerServerAddress').textContent=location.origin;$('page-keys').querySelector('.page-intro').after(playerHelp);
+const secretAddress=document.createElement('p');secretAddress.className='notice';secretAddress.textContent='服务器地址：'+location.origin+(['localhost','127.0.0.1','[::1]'].includes(location.hostname)?'。其他设备请改用服务器的局域网 IP。':'');$('secretValue').before(secretAddress);
 
 const accountMenu = document.createElement('details'); accountMenu.id = 'accountMenu'; accountMenu.className = 'account-menu';
 const accountSummary = document.createElement('summary'); accountSummary.append($('accountName'));
@@ -62,6 +80,8 @@ const maintenancePage=document.createElement('section');maintenancePage.id='page
 maintenancePage.innerHTML='<div class="page-intro"><h2>曲库维护</h2></div>';
 maintenancePage.append(maintenancePanel);document.querySelector('.content').append(maintenancePage);
 maintenancePanel.querySelector('.actions').prepend($('scan'));
+const adminStatsLink=routeLink('全站调用统计','admin/stats');adminStatsLink.id='adminStatsLink';$('page-overview').querySelector('.actions').append(adminStatsLink);
+const statsScopeLabel=document.createElement('p');statsScopeLabel.id='statsScopeLabel';statsScopeLabel.className='notice';$('page-stats').querySelector('.page-intro').after(statsScopeLabel);
 
 const routeError = document.createElement('section');routeError.id='routeError';routeError.className='panel';routeError.hidden=true;
 routeError.innerHTML='<h2>无法打开此页面</h2><p id="routeErrorMessage"></p>';routeError.append(routeLink('返回全局曲库','library'));
@@ -75,13 +95,19 @@ function navigatePage(page) {
 function displayWorkspacePage(page) {
   hideContextMenu(); closeMobileNav(); routeError.hidden=true;
   state.page=page;
+  if(page!=='tracks')state.selectedTrackIds.clear();
   document.querySelectorAll('.page').forEach(el=>el.classList.toggle('active',el.id==='page-'+page));
   document.querySelectorAll('.nav [data-page]').forEach(el=>el.classList.toggle('active',el.dataset.page===page || page==='stats'&&el.dataset.page==='keys'));
   document.querySelectorAll('.nav-group[data-admin]').forEach(el=>el.hidden=!isAdministrator());
   $('accountRole').textContent=isAdministrator()?'管理员':'普通用户';
   $('pageTitle').textContent=titles[page];document.title=titles[page]+' · 音乐服务器';
-  playerTabs.hidden=!['keys','stats'].includes(page); keyTab.classList.toggle('active',page==='keys');statsNav.classList.toggle('active',page==='stats');
+  playerTabs.hidden=!['keys','stats'].includes(page)||page==='stats'&&state.statsScope==='admin'; keyTab.classList.toggle('active',page==='keys');statsNav.classList.toggle('active',page==='stats');
+  if(page==='stats'){
+    const adminScope=state.statsScope==='admin';$('pageTitle').textContent=adminScope?'管理 / 调用统计':'播放器接入 / 调用统计';
+    statsScopeLabel.textContent=adminScope?'统计范围：'+(state.statsUserID?(state.users||[]).find(u=>u.id===state.statsUserID)?.username||'指定账户':'全部账户'):'统计范围：仅当前账户的播放器 Key';
+  }
   document.querySelectorAll('.page-intro h2').forEach(el=>{const section=el.closest('.page');if(section&&titles[section.id.slice(5)])el.textContent=titles[section.id.slice(5)]});
+  $('page-stats').querySelector('h2').textContent='调用统计';
 }
 let routeGeneration=0;
 async function restoreWorkspaceRoute() {
@@ -94,15 +120,23 @@ async function restoreWorkspaceRoute() {
   if(path[0]==='admin'&&path[1]==='users'&&path.length===3)page='users';
   if(path[0]==='admin'&&path[1]==='library')page='maintenance';
   if(path[0]==='admin'&&path[1]==='settings')page='settings';
+  if(path[0]==='admin'&&path[1]==='stats'&&path.length===2)page='stats';
   try {
-    if(!page || adminPages.has(page)&&!isAdministrator())throw new Error('页面不存在或当前账户无权访问。');
+    if(!page || (adminPages.has(page)||path[0]==='admin')&&!isAdministrator())throw new Error('页面不存在或当前账户无权访问。');
+    state.statsScope=path[0]==='admin'?'admin':'self';
+    state.statsUserID=page==='stats'&&state.statsScope==='admin'?new URLSearchParams(location.hash.split('?')[1]||'').get('user')||'':'';
+    renderStatsUsers();
     displayWorkspacePage(page);
     if(page==='playlists') {
       state.playlistDetailId=path[1]||null;
       if(state.playlistDetailId&&!state.playlists.some(p=>p.id===state.playlistDetailId&&!p.system))throw new Error('歌单不存在或当前账户无权访问。');
       renderPlaylists();
     }
-    if(page==='tracks')renderTracks();
+    if(page==='tracks'){
+      const query=new URLSearchParams(location.hash.split('?')[1]||'');$('trackSearch').value=query.get('q')||'';
+      state.trackFilter=['all','mine','managed','orphan'].includes(query.get('filter'))?query.get('filter'):'all';
+      document.querySelectorAll('[data-filter]').forEach(el=>el.classList.toggle('active',el.dataset.filter===state.trackFilter));renderTracks();
+    }
     if(page==='keys')await loadKeys();
     if(page==='stats')await loadStats();
     if(page==='overview'){renderOverview();await loadStats(true)}
