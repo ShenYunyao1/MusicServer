@@ -167,6 +167,10 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		a.keys(response, request)
 		return
 	}
+	if request.URL.Path == "/api/v2/admin/users" || strings.HasPrefix(request.URL.Path, "/api/v2/admin/users/") {
+		a.adminUsers(response, request)
+		return
+	}
 	switch {
 	case request.URL.Path == "/api/v2/health":
 		if request.Method != http.MethodGet {

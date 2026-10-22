@@ -94,16 +94,26 @@ func (s *Store) InitializeAdmin(username, password string) (User, error) {
 	return s.createUser(username, password, "admin", true)
 }
 func (s *Store) createUser(username, password, role string, bootstrap bool) (User, error) {
+	return s.createUserRecord(username, password, role, "", false, bootstrap, nil)
+}
+func (s *Store) createUserRecord(username, password, role, display string, mustChange, bootstrap bool, options []MutationOptions) (User, error) {
 	username = normalizeUsername(username)
 	if !usernamePattern.MatchString(username) || (role != "admin" && role != "member") {
 		return User{}, errors.New("invalid username or role (username: 3-64 ASCII letters, digits, dot, dash or underscore)")
+	}
+	display = strings.TrimSpace(display)
+	if display == "" {
+		display = username
+	}
+	if !utf8.ValidString(display) || utf8.RuneCountInString(display) > 128 {
+		return User{}, errors.New("display name must be valid UTF-8 and at most 128 characters")
 	}
 	encoded, err := passwordHash(password)
 	if err != nil {
 		return User{}, err
 	}
 	now := time.Now().UTC()
-	user := User{ID: uuid.NewString(), Username: username, DisplayName: username, Role: role, Enabled: true, AuthVersion: 1, Version: 1, CreatedAt: now}
+	user := User{ID: uuid.NewString(), Username: username, DisplayName: display, Role: role, Enabled: true, MustChangePassword: mustChange, AuthVersion: 1, Version: 1, CreatedAt: now}
 	err = s.transaction(func(tx *sql.Tx) error {
 		if bootstrap {
 			var count int
@@ -114,7 +124,14 @@ func (s *Store) createUser(username, password, role string, bootstrap bool) (Use
 				return errors.New("administrator already initialized")
 			}
 		}
-		if _, err := tx.Exec("INSERT INTO users(id,username,display_name,password_hash,role,enabled,auth_version,version,created_at,updated_at) VALUES(?,?,?,?,?,1,1,1,?,?)", user.ID, username, user.DisplayName, encoded, role, persistedTime(now), persistedTime(now)); err != nil {
+		var exists bool
+		if err := tx.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE username=?)", username).Scan(&exists); err != nil {
+			return err
+		}
+		if exists {
+			return errUsernameTaken
+		}
+		if _, err := tx.Exec("INSERT INTO users(id,username,display_name,password_hash,role,enabled,auth_version,version,created_at,updated_at,must_change_password) VALUES(?,?,?,?,?,1,1,1,?,?,?)", user.ID, username, user.DisplayName, encoded, role, persistedTime(now), persistedTime(now), mustChange); err != nil {
 			return err
 		}
 		if bootstrap {
@@ -122,7 +139,10 @@ func (s *Store) createUser(username, password, role string, bootstrap bool) (Use
 				return err
 			}
 		}
-		return auditMutation(tx, "account.create", user.ID, nil, user, []MutationOptions{{Actor: "local-console", ActorType: "console", UserID: user.ID}})
+		if len(options) == 0 {
+			options = []MutationOptions{{Actor: "local-console", ActorType: "console", UserID: user.ID}}
+		}
+		return auditMutation(tx, "account.create", user.ID, nil, user, options)
 	})
 	return user, err
 }
