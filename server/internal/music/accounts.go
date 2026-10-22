@@ -352,31 +352,8 @@ func (s *Store) replacePassword(username, old, password string, local, revokeKey
 	})
 }
 func (s *Store) SetUserEnabled(id string, enabled bool, expected int64) error {
-	return s.transaction(func(tx *sql.Tx) error {
-		user, err := readUser(tx, id)
-		if err != nil {
-			return err
-		}
-		if user.Version != expected {
-			return errVersionConflict
-		}
-		if user.Role == "admin" && !enabled {
-			var count int
-			if err := tx.QueryRow("SELECT count(*) FROM users WHERE role='admin' AND enabled=1").Scan(&count); err != nil {
-				return err
-			}
-			if user.Enabled && count <= 1 {
-				return errors.New("cannot disable the last administrator")
-			}
-		}
-		if _, err := tx.Exec("UPDATE users SET enabled=?,auth_version=auth_version+1,version=version+1,updated_at=? WHERE id=?", enabled, persistedTime(time.Now()), id); err != nil {
-			return err
-		}
-		if _, err := tx.Exec("UPDATE sessions SET revoked_at=? WHERE user_id=? AND revoked_at=''", persistedTime(time.Now()), id); err != nil {
-			return err
-		}
-		return auditMutation(tx, "account.enabled", id, user, map[string]bool{"enabled": enabled}, []MutationOptions{{Actor: "local-console", ActorType: "console", UserID: id}})
-	})
+	_, err := s.UpdateUser(id, AccountPatch{Enabled: &enabled}, MutationOptions{ExpectedVersion: expected, Actor: "local-console", ActorType: "console", UserID: id})
+	return err
 }
 
 func (s *Store) RevokeAccountKeys(userID string, options ...MutationOptions) error {

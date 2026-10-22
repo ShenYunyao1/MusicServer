@@ -82,6 +82,25 @@ func (a *API) adminUsers(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	parts := strings.Split(path, "/")
+	if len(parts) == 1 && request.Method == "PATCH" {
+		options := mutationOptions(request)
+		if options.ExpectedVersion < 1 {
+			writeError(response, 428, "VERSION_REQUIRED", "If-Match is required")
+			return
+		}
+		var patch AccountPatch
+		if decodeStrict(request, &patch) != nil {
+			writeError(response, 400, "INVALID_USER", "invalid account update")
+			return
+		}
+		user, err := a.store.UpdateUser(parts[0], patch, options)
+		if err != nil {
+			writeUserError(response, err)
+			return
+		}
+		writeJSON(response, 200, user)
+		return
+	}
 	if len(parts) == 2 && parts[1] == "reset-password" && request.Method == "POST" {
 		options := mutationOptions(request)
 		if options.ExpectedVersion < 1 {

@@ -3,10 +3,75 @@ package music
 import (
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 var errUsernameTaken = errors.New("username already exists")
+
+type AccountPatch struct {
+	DisplayName *string `json:"display_name"`
+	Enabled     *bool   `json:"enabled"`
+}
+
+func (s *Store) UpdateUser(id string, patch AccountPatch, options MutationOptions) (User, error) {
+	var user User
+	if patch.DisplayName == nil && patch.Enabled == nil {
+		return user, errors.New("no account changes supplied")
+	}
+	if patch.DisplayName != nil {
+		v := strings.TrimSpace(*patch.DisplayName)
+		if v == "" || !utf8.ValidString(v) || utf8.RuneCountInString(v) > 128 {
+			return user, errors.New("invalid display name")
+		}
+		patch.DisplayName = &v
+	}
+	err := s.transaction(func(tx *sql.Tx) error {
+		var err error
+		user, err = readUser(tx, id)
+		if err != nil {
+			return err
+		}
+		if err := checkVersion(user.Version, []MutationOptions{options}); err != nil {
+			return err
+		}
+		before := user
+		stateChanged := patch.Enabled != nil && *patch.Enabled != user.Enabled
+		if stateChanged && !*patch.Enabled && user.Role == "admin" {
+			var count int
+			if err := tx.QueryRow("SELECT count(*) FROM users WHERE role='admin' AND enabled=1").Scan(&count); err != nil {
+				return err
+			}
+			if count <= 1 {
+				return errors.New("cannot disable the last administrator")
+			}
+		}
+		if patch.Enabled != nil {
+			user.Enabled = *patch.Enabled
+		}
+		if patch.DisplayName != nil {
+			user.DisplayName = *patch.DisplayName
+		}
+		if user.Enabled == before.Enabled && user.DisplayName == before.DisplayName {
+			return nil
+		}
+		user.Version++
+		if stateChanged {
+			user.AuthVersion++
+		}
+		if _, err := tx.Exec("UPDATE users SET enabled=?,display_name=?,auth_version=?,version=?,updated_at=? WHERE id=?", user.Enabled, user.DisplayName, user.AuthVersion, user.Version, persistedTime(time.Now()), id); err != nil {
+			return err
+		}
+		if stateChanged {
+			if _, err := tx.Exec("UPDATE sessions SET revoked_at=? WHERE user_id=? AND revoked_at=''", persistedTime(time.Now()), id); err != nil {
+				return err
+			}
+		}
+		return auditMutation(tx, "account.update", id, before, user, []MutationOptions{options})
+	})
+	return user, err
+}
 
 type TemporaryAccount struct {
 	User              User   `json:"user"`
