@@ -1,12 +1,12 @@
-# 音乐服务器（多用户版本开发中）
+# 音乐服务器 0.10.0
 
 Go 1.26+，SQLite schema 5，HTTP API `/api/v2`，内置中文管理页。支持 Windows 和 Linux。
 
 固定产物路径、运行目录布局、编译打包与 Git 提交规则见 [服务器编译与运行目录规范](../Docs/服务器编译与运行目录规范.md)。
 
-下一阶段的多用户功能范围、验收条件和复选框进度见 [多用户版本开发方案与进度](../Docs/多用户版本开发方案与进度.md)，尚未在当前版本开放。
+多用户功能范围、验收条件和复选框进度见 [多用户版本开发方案与进度](../Docs/多用户版本开发方案与进度.md)。本版采用全局曲库、私人歌单和资源归属，共享歌单暂不实施。
 
-本版采用账号密码登录和账号所属的播放器 Key。schema 1–4、旧启动管理员 Key、匿名管理员模式、JSON 文件及 `/api/v1` 均不支持，不执行旧库迁移。使用新的数据库路径初始化；旧库原样保留。重新扫描不会恢复旧歌单和人工覆盖。多用户功能逐项实施，开放范围以进度清单为准。
+本版采用账号密码登录和账号所属的播放器 Key。schema 1–4、旧启动管理员 Key、匿名管理员模式、JSON 文件及 `/api/v1` 均不支持，不执行旧库迁移。默认数据库固定为 `build/data/library.sqlite`，不会回退打开 `library-v4.sqlite`。从 0.9 升级时初始化新的测试库；媒体可重新扫描，旧 UUID、歌单和人工覆盖不会导入。
 
 ## 启动
 
@@ -52,7 +52,11 @@ go build -trimpath -buildvcs=auto -o ./build/musicserver.exe ./cmd/musicserver
 .\build\musicserver.exe
 ```
 
-浏览器打开 `http://127.0.0.1:8080/`，输入账号密码登录。管理页支持修改密码、查看和撤销登录会话、创建和撤销播放器 Key。Key 是播放器凭证，不能用于管理接口。首次启动若处于无交互的后台环境，退出并提示先在终端初始化，不创建默认密码。
+浏览器打开 `http://127.0.0.1:8080/`，输入账号密码登录。管理员在“账户管理”创建成员，自定义登录名和显示名；每个账户生成独立临时密码，仅成功创建或重置时显示一次，关闭弹窗即清空。请安全交给本人。成员首次登录必须修改临时密码，完成前不能浏览曲库、上传或使用 Key。初次本机设置的管理员密码无需重复修改。首次启动若处于无交互的后台环境，退出并提示先在终端初始化，不创建默认密码。
+
+成员可使用全局曲库、我的歌单、我的上传、本人 Key/统计和个人改密。管理员额外使用账户管理、资源接管及服务器维护。管理员重置他人密码会撤销会话并重新要求改密，可显式选择同时主动撤销 Key；重置本人请使用顶部“修改密码”或停服后的本机恢复命令。
+
+停用账户会立即阻止登录和 Key 使用、撤销会话，但保留原 Key、授权、到期时间和累计统计。重新启用后，未主动撤销、未过期且满足当前权限/改密要求的同一 Key 恢复使用，统计继续累计；旧浏览器会话不会恢复。账户停用不下架全局曲目，也不自动转移资源。
 
 密码采用 Argon2id，独立 16 字节盐、19 MiB 内存、2 次迭代、并行度 1；数据库只保存密码哈希和会话令牌哈希。Cookie 使用 HttpOnly、SameSite=Strict，HTTPS 部署启用 Secure。浏览器写请求验证 Origin/Referer 和 `X-CSRF-Token`；登录验证来源，失败提示统一，账号每分钟最多 5 次尝试、IP 每分钟 30 次，最多 2 个并发密码哈希任务。成功登录重置该账号的尝试计数。
 
@@ -77,6 +81,7 @@ build\musicserver.exe admin reset-password
 曲目文件位置以媒体库根目录下的相对路径保存。同一数据格式下，停服后将 **整个 build/ 运行目录（含程序、数据库、音频）一起移动**，直接运行其中的程序即可继续使用，UUID、歌单、人工修改和账号保持不变，不需要携带源码。只复制音频到新库可重新扫描导入，但不会带回数据库中的 UUID、歌单等信息。若显式配置了外部绝对路径，该外部目录需要一起保留或重新指定；单独移动/重命名音频按下述哈希匹配规则识别，不保证重复文件的无歧义匹配。
 
 - 曲目 `id` 是首次建库时生成的 UUID v4，与数据库记录一一对应。歌单和人工修改引用 UUID。
+- `uploaded_by` 是不可变的原始上传者；`owner_id` 是当前管理者，接管只改变管理者。扫描新曲目归发起扫描的管理员，自动扫描使用初始化时记录的管理员；重扫和移动识别保留归属。原始上传者或管理者停用，不影响其他启用用户播放。
 - `path` 是媒体目录下的唯一相对路径，可变化；`content_hash` 是文件 SHA-256，用于完整性校验、上传去重和移动识别，不作为曲目主键。
 - 相同路径重扫沿用 UUID。在同一次扫描中，旧路径消失、新路径出现，且哈希仅对应一个旧候选和一个新候选时，认定移动或重命名并沿用 UUID。存在重复内容歧义时创建新记录，旧记录保留为缺失，避免错误合并。
 - 文件丢失标记 `missing=true`，保留曲目、歌单顺序、成员备注及人工覆盖；原路径文件恢复后可通过扫描清除缺失状态。媒体接口对不可用文件返回错误。
@@ -116,7 +121,9 @@ Content-Type: application/json
 
 缺少有效 `If-Match` 返回 `428 VERSION_REQUIRED`；版本已变化返回 `409 VERSION_CONFLICT`。刷新后由用户重新确认修改，不自动覆盖他人的更改。创建歌单时 ID 已存在返回 `409`。
 
-歌单成员排序同时提交 `track_ids` 和读取时的 `expected_track_ids`；歌单显示排序提交 `order` 和 `expected_order`，以检测并发变化。系统 `library` 歌单自动维护曲目，不允许手工修改成员。用户歌单成员备注独立于曲目备注。
+歌单成员排序同时提交 `track_ids` 和读取时的 `expected_track_ids`；歌单显示排序提交 `order` 和 `expected_order`，以检测并发变化。显示顺序仅作用本人私人歌单；系统 `library` 固定在前并自动维护曲目，不参与个人排序或接管。用户歌单成员备注独立于全局曲目备注，其他成员不能读取私人歌单或猜测其存在性。
+
+全局曲目仅管理者或管理员可修改。成员软删除本人管理的曲目前，事务内检查其他账户的私人歌单引用；停用账户的引用也受保护，系统曲库不计入。存在引用返回 `409 TRACK_IN_USE`，不披露引用者身份或备注；管理员可下架并恢复。下架不删除原文件，歌单保留 UUID、顺序与备注，详情返回最小不可用曲目占位。成员无法通过重复上传恢复已下架内容。
 
 ## 增量同步
 
@@ -125,16 +132,16 @@ Content-Type: application/json
 响应包含 `changed_tracks`、`playlists`、`deleted_tracks`、`deleted_playlists`、`cursor`、`has_more`、`full_snapshot`、`reset` 和 `revision`。客户端应：
 
 1. `reset=true` 时清空该服务器的旧缓存；仅新快照的第一页发出 reset。
-2. 按 UUID 应用更新和删除，`has_more=true` 时继续请求下一页。
+2. 按 UUID 应用更新和删除，`has_more=true` 时继续请求下一页。`deleted_tracks` 删除的是可用曲目缓存，不能据此删除私人歌单的成员 UUID 或备注；歌单的 `unavailable_track_ids` 表示需要显示占位的成员，恢复后更新占位。
 3. 完成所有页后保存最终游标；后续轮询使用游标，不能用 `revision` 替代游标。
 
-游标由 HMAC 签名，绑定账号 UUID、权限版本、会话/Key、角色、scopes、歌单授权和可见成员集合；有效期 24 小时。过期、授权或可见成员变化会重新发快照并返回 reset，客户端必须清理失去权限的数据。快照分页期间库发生变化返回 `409 SYNC_RESTART`，丢弃中间结果并不带游标重试。
+游标由 HMAC 签名，绑定账号 UUID、权限版本、会话/Key、角色、scopes、当前可见歌单 ID（含空歌单）和 Key 授权成员集合；有效期 24 小时。会话同步全局曲目及本人的私人歌单，管理员查阅他人资源使用管理接口，不混入普通同步。过期、授权或可见范围变化会重新发快照并返回 reset，客户端必须清理失去权限的数据。同步事务内复核账户和 Key，防止已认证请求跨接管读取他人新内容。快照分页期间库发生变化返回 `409 SYNC_RESTART`，丢弃中间结果并不带游标重试。
 
 变更日志持久保留最近 10,000 条事件，游标超出窗口自动退回快照。增量页读取实体当前状态，在连续变化期间以完成后续页达到最终一致；客户端须完成分页。管理页的普通曲目/歌单列表仍是完整列表，大库客户端应使用分页同步。压缩可在反向代理启用。
 
 ## 权限与并发
 
-浏览器使用账号会话，管理接口只接受管理员账号会话。播放器认证头使用 `X-API-Key` 或 `Authorization: Bearer ...`，Key 归属账号、只保存密钥哈希，创建/轮换时仅返回一次完整密钥。Key 不再具有独立角色，只能配置 `library:read`、`media:read`，默认无歌单授权；显式空 scopes 禁用全部能力。有效访问范围为账号当前可访问的歌单与 Key 授权的交集。显式 Key 优先于 Cookie，失败时不回退，也不合并权限。
+浏览器使用账号会话，`/admin/` 接口只接受管理员会话；成员可管理本人的歌单、Key、暂存和管理中的曲目。播放器认证头使用 `X-API-Key` 或 `Authorization: Bearer ...`，Key 归属账号、只保存密钥哈希，创建/轮换时仅返回一次完整密钥。Key 只能配置 `library:read`、`media:read`，默认无歌单授权；显式空 scopes 禁用全部能力。Key 只能显式授权本人私人歌单或系统 `library`，成员的全库浏览权限不会自动透传给 Key，管理员的管理访问也不会透传。显式 Key 优先于 Cookie，失败时不回退，也不合并权限。
 
 | Scope | 接口能力 |
 | --- | --- |
@@ -143,7 +150,15 @@ Content-Type: application/json
 
 `max_concurrency` 为 Key 元数据请求并发数，默认 4，范围 1–64；`max_downloads` 为音频和封面下载并发数，默认 1，范围 1–16。两者独立，下载不会占满元数据限额；超限返回 `429` 和 `Retry-After: 1`。账号会话不受 Key 限额约束。并发计数仅在当前进程有效；设备绑定和心跳租约不在此版本范围内。
 
-本期只开放管理员界面和本机首次管理员初始化。底层账号、歌单、Key 和暂存已有归属和隔离，停用账号会使会话及 Key 失效；多账户管理页面和歌单分享尚未开放，未增加公开注册或分享链接。
+管理员“账户管理”按账户分页查阅当前管理/原始上传的曲目、私人歌单及脱敏 Key。停用来源后，可将所选或全部曲目与歌单接管给一个启用账户。请求验证来源、目标及每个资源版本，冲突整体回滚；不转移 Key 或会话，不改变原始上传者，清除被转移私人歌单的旧 Key 授权。原账户重新启用后资源不会自动返还。管理读取、启停、改密重置和接管均记录审计。不提供公开注册或分享链接。
+
+接管请求示例（从资源查询响应获取当前版本）：
+
+```json
+{"target_id":"目标账户UUID","target_version":2,"all":false,"tracks":[{"id":"曲目UUID","version":3}],"playlists":[{"id":"歌单ID","version":4}]}
+```
+
+`If-Match` 使用来源账户版本。`all=true` 时仍需提交来源全部曲目和私人歌单的完整版本清单，服务端校验数量与当前归属，不允许遗漏资源后宣称整账户接管。
 
 调用统计仅按当前未撤销的播放器 API Key 持久记录次数、成功/失败、字节和耗时；账号会话、匿名请求及健康检查不计入。新增 Key 自动显示零调用记录，改名同步显示，撤销或批量撤销时同步删除对应统计；旧凭证完成中的请求不会在撤销后重建记录。有效 Key 的历史计数在重启后保留，启动时清理历史会话、匿名和已撤销 Key 的残留记录，总数只汇总当前 Key。过期但未撤销的 Key 仍保留历史统计。审计记录操作人、凭证类型、账号 ID、凭证 ID、动作、实体和时间，密码和令牌不写入审计。审计和备份可能包含私人元数据，应限制文件访问；Windows 权限还需要由部署目录 ACL 控制。
 
@@ -170,7 +185,7 @@ Content-Type: application/json
 | PATCH / DELETE | `/playlists/{id}/tracks/{trackID}` | `note` 备注、移出成员 |
 | PUT | `/playlists/{id}/tracks/order` | 成员排序 |
 | PUT | `/playlists/order` | 歌单显示排序 |
-| POST | `/uploads` | multipart `file` 直接校验并入库 |
+| POST | `/uploads` | multipart `file` 直接校验并入库，曲目字段及 duplicate；新建201，复用200 |
 | POST | `/uploads/stage` | 暂存，`file`，可选 `lyrics_file`、`cover`、元数据 |
 | GET / DELETE | `/uploads/stage/{id}` | 查看、取消暂存 |
 | GET | `/uploads/stage/{id}/cover` | 暂存封面 |
@@ -184,7 +199,14 @@ Content-Type: application/json
 | GET / PATCH | `/admin/settings` | ffprobe、上传限制、扫描开关、更新仓库 |
 | GET | `/admin/stats`、`/admin/update` | 调用统计、更新状态 |
 | POST | `/admin/update/check` | 异步检查正式发布并准备更新包 |
-| GET / POST / DELETE | `/auth/keys` | 管理员列出/创建 Key，撤销当前账号全部 Key |
+| GET / POST / DELETE | `/auth/keys` | 本人列出/创建 Key，撤销本人全部 Key |
+| GET | `/auth/keys/stats` | 本人 Key 统计；管理员使用 `/admin/stats?user_id=...` 筛选 |
+| GET / POST | `/admin/users` | 账户列表、创建普通成员，成功响应一次性临时密码 |
+| PATCH | `/admin/users/{id}` | 修改显示名、停用/启用；要求 If-Match |
+| POST | `/admin/users/{id}/reset-password` | 一次性新临时密码，可选 revoke_keys；要求 If-Match |
+| GET | `/admin/users/{id}/tracks?relation=owned` | 管理曲目；relation=uploaded 为原始上传，支持 offset/limit |
+| GET | `/admin/users/{id}/playlists`、`/admin/users/{id}/keys` | 私人歌单或脱敏 Key 分页，支持 offset/limit |
+| POST | `/admin/users/{id}/transfer` | 停用账户资源接管，要求来源 If-Match、目标和资源版本 |
 | PATCH / DELETE | `/auth/keys/{id}` | 更新策略、撤销 |
 | POST | `/auth/keys/{id}/rotate` | 轮换密钥 |
 
@@ -194,7 +216,7 @@ Content-Type: application/json
 
 管理页概览或备份接口使用 `VACUUM INTO` 生成一致的 SQLite 快照，运行 `integrity_check` 成功后才返回路径。文件位于数据库旁 `backups/`，包括曲目元数据、歌单、Key 哈希、覆盖、封面、审计等数据库内容；**不包含媒体和暂存文件**，这些目录须另外备份。未设置备份自动清理策略，应按实际容量归档或删除旧备份。
 
-恢复步骤：停止服务，保留当前数据库及媒体副本，将已校验的 schema 5 备份复制为启动 `-data` 指定的数据库，恢复匹配的媒体目录，再启动。启动会撤销旧会话；备份仍可能恢复旧密码和旧 Key，需核对并轮换。不要对运行中的数据库直接覆盖。schema 1–3 不能用于本版恢复，需配合原版本程序使用。
+恢复步骤：停止服务，保留当前数据库及媒体副本，将已校验的 schema 5 备份复制为启动 `-data` 指定的数据库，恢复匹配的媒体目录，再启动。启动会撤销旧会话；备份仍可能恢复旧密码和旧 Key，需核对并轮换。不要对运行中的数据库直接覆盖。schema 1–4 不能用于本版恢复，需配合原版本程序使用。
 
 配置 `update_repository` 为 GitHub 仓库后，启动、修改配置及每 6 小时检查正式 Release；仅准备当前平台包，验证大小和 Release SHA-256。发现可用新包时先创建数据库备份，备份失败则停止准备；状态返回 `backup_path`、`package_path`。下载完成不会安装、替换程序或自动重启。准备备份到实际安装之间的数据修改需在停服前另做备份。私有仓库使用 `MUSIC_SERVER_GITHUB_TOKEN`。
 
@@ -216,7 +238,7 @@ $env:MUSIC_SERVER_TEST_PYTHON = 'python'
 node tests/management-ui.cjs
 ```
 
-安装 Playwright 及其 Chromium、Python 后运行；终端初始化测试在 Windows 需要 pywinpty，其他系统需要 pexpect。`MUSIC_SERVER_PLAYWRIGHT` 也可为模块绝对路径。浏览器回归覆盖真实终端隐藏密码初始化、登录、刷新保持会话、改密、注销、撤销会话和原有管理流程。
+安装 Playwright 及其 Chromium、Python 后运行；终端初始化测试在 Windows 需要 pywinpty，其他系统需要 pexpect。`MUSIC_SERVER_PLAYWRIGHT` 也可为模块绝对路径。浏览器回归调用 `multiuser-ui.cjs` 和 `users-ui.cjs`，覆盖管理员和两个成员的首次改密、上传收藏、私人备注、引用保护、下架恢复、Key/统计隔离、启停同密钥恢复和资源接管，以及原有管理流程。Linux 交叉编译不等于已在 Linux 主机实际运行验证。
 
 Windows 可另运行 `python tests/runtime-layout.py`（需要 pywinpty），用临时副本验证 `start.bat` 从其他工作目录启动时仍使用 `build/` 的程序、数据库和音乐，不扫描源码目录或在调用目录写入数据。
 

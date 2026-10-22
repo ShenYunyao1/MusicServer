@@ -68,6 +68,10 @@ def main():
         else:
             raise AssertionError("server startup timed out")
         assert "commit" in health and "modified" in health, health
+        expected_commit = os.environ.get("MUSIC_SERVER_EXPECT_COMMIT")
+        if expected_commit:
+            assert health["commit"] == expected_commit and health["modified"] is False, health
+            assert health["version"] == "0.10.0", health
         request("auth/login", {"username": "admin", "password": password})
         for attempt in range(100):
             tracks = request("tracks")
