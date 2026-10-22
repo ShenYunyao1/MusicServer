@@ -11,6 +11,7 @@ for(const [filter,label] of [['mine','我的上传'],['managed','我管理的曲
  button.onclick=()=>{state.trackFilter=filter;document.querySelectorAll('[data-filter]').forEach(el=>el.classList.toggle('active',el===button));renderTracks()};document.querySelector('#page-tracks .filter-tabs').append(button);
 }
 function applyAccountRole(){
+	if(typeof renderStatsUsers==='function')renderStatsUsers();
  document.querySelector('[data-page="settings"]').hidden=!isAdministrator();
  if(document.querySelector('[data-page="users"]'))document.querySelector('[data-page="users"]').hidden=!isAdministrator();
  maintenancePanel.hidden=!isAdministrator();$('scan').hidden=!isAdministrator();
@@ -39,7 +40,7 @@ function setLoggedOut() {
   state.attachments = [];
   state.user = null;
   state.stats=null;state.settings={};state.playlistDetailId=null;state.trackFilter="all";state.revision=null;
-  state.users=[];state.statsUserID="";
+  state.users=[];state.statsUserID="";state.managedUserID=null;state.userResources=[];state.resourceOffset=0;
   $("firstPasswordScreen").hidden=true;$("firstPasswordForm").reset();
   const player=$("memberPlayer");if(player){player.pause();player.removeAttribute("src");player.load();player.hidden=true;}
   state.csrf = '';
@@ -58,6 +59,7 @@ function setLoggedOut() {
   $('secretValue').textContent = '';
   $('statsTable').replaceChildren();$('keyRows').replaceChildren();$('settingsForm').replaceChildren();
   if($('userList'))$('userList').replaceChildren();if($('userResources'))$('userResources').replaceChildren();
+  if($('userResourcesPanel'))$('userResourcesPanel').hidden=true;if($('statsUser'))$('statsUser').replaceChildren();
   $('modalBody').replaceChildren();
   renderUploads();
   renderTracks();
@@ -75,6 +77,7 @@ async function enterAccount(identity) {
   }
   $('firstPasswordScreen').hidden=true;
   applyAccountRole();
+  if(isAdministrator()&&typeof loadUsers==='function')await loadUsers();
   document.querySelector('.app').hidden = false;
   $('loginScreen').hidden = true;
   setStatus('正在载入…');

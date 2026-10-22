@@ -22,6 +22,10 @@ func TestMultiuserResourceTransferAtomicAndAudited(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldIdentity := testPlayerIdentity(t, api, key.Secret)
+	keyList := callAPI(api, "GET", "/api/v2/admin/users/"+a.ID+"/keys", "")
+	if keyList.Code != 200 || !bytes.Contains(keyList.Body.Bytes(), []byte(key.ID)) || bytes.Contains(keyList.Body.Bytes(), []byte(key.Secret)) || bytes.Contains(keyList.Body.Bytes(), []byte("secret_hash")) {
+		t.Fatal("admin key view leaked secret or unavailable", keyList.Code, keyList.Body.String())
+	}
 	r := callAPI(api, "GET", "/api/v2/admin/users/"+a.ID+"/tracks?limit=1", "")
 	if r.Code != 200 {
 		t.Fatal("resource list", r.Code, r.Body.String())

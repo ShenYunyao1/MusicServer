@@ -58,6 +58,19 @@ func (s *Store) UserResources(id, kind, relation string, offset, limit int, opti
 				items = []Track{}
 			}
 			result = map[string]any{"items": items, "total": total, "offset": offset, "limit": limit}
+		} else if kind == "keys" {
+			if err := tx.QueryRow("SELECT count(*) FROM api_keys WHERE user_id=?", id).Scan(&total); err != nil {
+				return err
+			}
+			items, err := queryJSON[APIKey](tx, "SELECT payload FROM api_keys WHERE user_id=? ORDER BY id LIMIT ? OFFSET ?", id, limit, offset)
+			if err != nil {
+				return err
+			}
+			views := []APIKey{}
+			for _, item := range items {
+				views = append(views, publicAPIKey(item))
+			}
+			result = map[string]any{"items": views, "total": total, "offset": offset, "limit": limit}
 		} else {
 			if err := tx.QueryRow("SELECT count(*) FROM playlists WHERE owner_id=? AND system=0", id).Scan(&total); err != nil {
 				return err

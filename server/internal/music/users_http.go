@@ -83,7 +83,7 @@ func (a *API) adminUsers(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	parts := strings.Split(path, "/")
-	if len(parts) == 2 && (parts[1] == "tracks" || parts[1] == "playlists") && request.Method == "GET" {
+	if len(parts) == 2 && (parts[1] == "tracks" || parts[1] == "playlists" || parts[1] == "keys") && request.Method == "GET" {
 		offset, limit := 0, 100
 		var err error
 		if raw := request.URL.Query().Get("offset"); raw != "" {

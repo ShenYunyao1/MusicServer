@@ -31,6 +31,12 @@ module.exports=async function runMultiuserUI({browser,adminPage,base,audio,direc
   await a.page.locator('[data-confirm-upload]').click();await a.page.waitForFunction(()=>state.uploads[0].status==='完成');
   const track=await a.page.evaluate(()=>state.tracks.find(t=>t.title==='Alice song'));
   assert.equal(track.owner_id,a.user.id);assert.equal(track.uploaded_by,a.user.id);assert.equal(track.path,'');
+  await a.page.click('[data-page="playlists"]');await a.page.click('#newPlaylist');await a.page.fill('[data-field="name"]','Alice private');await a.page.click('#saveModal');await a.page.waitForFunction(()=>state.playlists.some(p=>p.name==='Alice private'));
+  await a.page.evaluate(async id=>{const p=state.playlists.find(p=>p.name==='Alice private');await api('playlists/'+p.id+'/tracks','POST',{track_ids:[id]},undefined,p.version);await refreshCore()},track.id);
+  await a.page.click('[data-page="keys"]');await a.page.click('#newKey');await a.page.fill('#policyName','Alice player');
+  const alicePlaylist=await a.page.evaluate(()=>state.playlists.find(p=>p.name==='Alice private'));
+  await a.page.locator('[data-playlist-check][value="'+alicePlaylist.id+'"]').check();await a.page.click('#saveModal');await a.page.locator('#secretDialog').waitFor({state:'visible'});const aliceSecret=await a.page.locator('#secretValue').textContent();await a.page.click('#doneSecret');
+  assert.equal(await a.page.evaluate(async secret=>(await fetch('/api/v2/tracks',{headers:{'X-API-Key':secret}})).status,aliceSecret),200);
   await a.page.click('[data-page="tracks"]');await a.page.click('[data-filter="mine"]');assert.equal(await a.page.locator('#trackRows tr').count(),1);
   await b.page.evaluate(()=>refreshCore());
   await b.page.click('[data-page="playlists"]');await b.page.click('#newPlaylist');await b.page.fill('[data-field="name"]','Bob private');await b.page.click('#saveModal');
@@ -62,6 +68,6 @@ module.exports=async function runMultiuserUI({browser,adminPage,base,audio,direc
   await a.page.click('#logout');await a.page.waitForFunction(()=>!state.user);assert.equal(await a.page.evaluate(()=>state.tracks.length+state.playlists.length+state.keys.length),0);
   assert.deepEqual(errors,[]);
   console.log('Member UI passed: forced password/reload, global catalogue, owner upload, private notes, own key/stats, reference protection, unavailable placeholder and logout cleanup.');
-  return {accounts:accounts.map(({page,...account})=>account),track,playlist,secret};
+  return {accounts:accounts.map(({page,...account})=>account),track,playlist,secret,alicePlaylist,aliceSecret};
  }finally {for(const {context} of fixtures)await context.close()}
 };

@@ -29,6 +29,9 @@ var browserTagReader []byte
 //go:embed account.js
 var accountPageScript []byte
 
+//go:embed users.js
+var usersPageScript []byte
+
 type API struct {
 	store         *Store
 	updater       *update.Manager
@@ -107,6 +110,12 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		response.Header().Set("Cache-Control", "no-cache")
 		_, _ = response.Write(accountPageScript)
+		return
+	}
+	if request.URL.Path == "/assets/users.js" && request.Method == http.MethodGet {
+		response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		response.Header().Set("Cache-Control", "no-cache")
+		_, _ = response.Write(usersPageScript)
 		return
 	}
 	resourceUpload := strings.HasPrefix(request.URL.Path, "/api/v2/tracks/") && (strings.HasSuffix(request.URL.Path, "/cover") || strings.HasSuffix(request.URL.Path, "/lyrics"))
