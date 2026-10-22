@@ -142,11 +142,6 @@ func (s *Store) stageAudioWithAssets(name string, reader io.Reader, fields map[s
 		record.Overrides[key] = value
 	}
 	applyMetadata(&record.Track, fields)
-	encoded, err := json.Marshal(record)
-	if err != nil {
-		_ = root.Remove(relative)
-		return UploadPreview{}, err
-	}
 	created := time.Now().UTC()
 	expires := created.Add(uploadStageTTL)
 	owner := ""
@@ -158,6 +153,16 @@ func (s *Store) stageAudioWithAssets(name string, reader io.Reader, fields map[s
 			_ = root.Remove(relative)
 			return UploadPreview{}, err
 		}
+	}
+	if err := checkActorOwner(s.db, owner, options); err != nil {
+		_ = root.Remove(relative)
+		return UploadPreview{}, err
+	}
+	record.Track.OwnerID, record.Track.UploadedBy = owner, owner
+	encoded, err := json.Marshal(record)
+	if err != nil {
+		_ = root.Remove(relative)
+		return UploadPreview{}, err
 	}
 	if _, err := s.db.Exec(`INSERT INTO upload_staging (id,original_name,size,content_hash,temp_path,track_json,created_at,expires_at,user_id) VALUES (?,?,?,?,?,?,?,?,?)`, id, filepath.Base(name), count, track.ContentHash, relative, string(encoded), persistedTime(created), persistedTime(expires), owner); err != nil {
 		_ = root.Remove(relative)
@@ -244,14 +249,15 @@ func (s *Store) commitUploadStageWithMetadata(id string, fields map[string]strin
 	if err != nil {
 		return Track{}, false, err
 	}
-	if preview.DuplicateOf != "" {
-		track, ok := s.Track(preview.DuplicateOf)
-		if ok && !track.Missing {
-			if err := s.deleteUploadStageLocked(id); err != nil {
-				return Track{}, false, err
-			}
-			return track, true, nil
-		}
+	var stageOwner string
+	if err := s.db.QueryRow("SELECT user_id FROM upload_staging WHERE id=?", id).Scan(&stageOwner); err != nil {
+		return Track{}, false, err
+	}
+	if len(options) > 0 && options[0].UserID != "" && options[0].UserID != stageOwner {
+		return Track{}, false, errResourceHidden
+	}
+	if err := checkActorOwner(s.db, stageOwner, options); err != nil {
+		return Track{}, false, err
 	}
 	s.mediaMu.Lock()
 	defer s.mediaMu.Unlock()
@@ -348,6 +354,9 @@ func (s *Store) commitUploadStageWithMetadata(id string, fields map[string]strin
 	}
 	duplicate := false
 	if err := s.transaction(func(tx *sql.Tx) error {
+		if err := checkActorOwner(tx, stageOwner, options); err != nil {
+			return err
+		}
 		var existingID string
 		err := tx.QueryRow("SELECT id FROM tracks WHERE content_hash=? AND removed=0 AND missing=0 ORDER BY id LIMIT 1", track.ContentHash).Scan(&existingID)
 		if err == nil {
@@ -360,6 +369,16 @@ func (s *Store) commitUploadStageWithMetadata(id string, fields map[string]strin
 			return err
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		var removed int
+		if err := tx.QueryRow("SELECT count(*) FROM tracks WHERE content_hash=? AND removed=1", track.ContentHash).Scan(&removed); err != nil {
+			return err
+		}
+		if removed > 0 {
+			return errors.New("this audio was removed; contact an administrator to restore it")
+		}
+		if err := checkActorOwner(tx, stageOwner, options); err != nil {
 			return err
 		}
 		if err := saveCover(tx, record.Cover, track.CoverMIME); err != nil {

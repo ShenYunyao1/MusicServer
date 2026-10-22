@@ -909,7 +909,7 @@ func (a *API) scan(response http.ResponseWriter, request *http.Request) {
 }
 
 func (a *API) upload(response http.ResponseWriter, request *http.Request) {
-	if !a.requireAdmin(response, request) {
+	if !a.requireAccount(response, request) {
 		return
 	}
 	if request.Method != http.MethodPost {
@@ -943,11 +943,11 @@ func (a *API) upload(response http.ResponseWriter, request *http.Request) {
 		writeError(response, 400, err.Error())
 		return
 	}
-	writeJSON(response, http.StatusCreated, track)
+	writeJSON(response, http.StatusCreated, publicTrack(track, authFromRequest(request)))
 }
 
 func (a *API) stageUpload(response http.ResponseWriter, request *http.Request) {
-	if !a.requireAdmin(response, request) {
+	if !a.requireAccount(response, request) {
 		return
 	}
 	if request.Method != http.MethodPost {
@@ -996,11 +996,12 @@ func (a *API) stageUpload(response http.ResponseWriter, request *http.Request) {
 		writeError(response, http.StatusBadRequest, "STAGE_FAILED", err.Error())
 		return
 	}
+	preview.Track = publicTrack(preview.Track, authFromRequest(request))
 	writeJSON(response, http.StatusCreated, preview)
 }
 
 func (a *API) stagedUpload(response http.ResponseWriter, request *http.Request) {
-	if !a.requireAdmin(response, request) {
+	if !a.requireAccount(response, request) {
 		return
 	}
 	path := strings.TrimPrefix(request.URL.Path, "/api/v2/uploads/stage/")
@@ -1052,7 +1053,7 @@ func (a *API) stagedUpload(response http.ResponseWriter, request *http.Request) 
 			writeError(response, http.StatusBadRequest, "COMMIT_FAILED", err.Error())
 			return
 		}
-		writeJSON(response, http.StatusOK, map[string]any{"track": track, "duplicate": duplicate})
+		writeJSON(response, http.StatusOK, map[string]any{"track": publicTrack(track, authFromRequest(request)), "duplicate": duplicate})
 		return
 	}
 	switch request.Method {
@@ -1066,6 +1067,7 @@ func (a *API) stagedUpload(response http.ResponseWriter, request *http.Request) 
 			writeError(response, http.StatusNotFound, "STAGE_NOT_FOUND", "upload stage not found or expired")
 			return
 		}
+		preview.Track = publicTrack(preview.Track, authFromRequest(request))
 		writeJSON(response, http.StatusOK, preview)
 	case http.MethodDelete:
 		if err := a.store.DeleteUploadStage(id); errors.Is(err, os.ErrNotExist) {
