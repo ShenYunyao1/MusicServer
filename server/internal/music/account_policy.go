@@ -1,9 +1,11 @@
 package music
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 )
 
 var errResourceHidden = errors.New("resource not found")
@@ -37,7 +39,7 @@ func (a *API) authorizeResource(response http.ResponseWriter, request *http.Requ
 	if strings.HasPrefix(path, "/api/v2/playlists/") && path != "/api/v2/playlists/order" {
 		id := strings.Split(strings.TrimPrefix(path, "/api/v2/playlists/"), "/")[0]
 		p, ok := a.store.Playlist(id)
-		if !ok || !canReadPlaylist(auth, id) {
+		if !ok || !canReadPlaylist(auth, a.store, p) {
 			return deny()
 		}
 		if write && (!auth.session || (auth.role != "admin" && p.OwnerID != auth.userID)) {
@@ -66,6 +68,29 @@ func (a *API) authorizeResource(response http.ResponseWriter, request *http.Requ
 		}
 	}
 	return true
+}
+
+// Refresh player grants at the resource read, so an in-flight request cannot
+// follow a private playlist across an administrator's ownership transfer.
+func currentKeyAuth(reader sqlReader, auth authContext) (authContext, error) {
+	user, err := readUser(reader, auth.userID)
+	if err != nil || !user.Enabled || user.MustChangePassword || user.AuthVersion != auth.authVersion {
+		return authContext{}, errResourceHidden
+	}
+	var raw string
+	if err := reader.QueryRow("SELECT payload FROM api_keys WHERE id=? AND user_id=?", auth.keyID, auth.userID).Scan(&raw); err != nil {
+		return authContext{}, errResourceHidden
+	}
+	var key APIKey
+	if json.Unmarshal([]byte(raw), &key) != nil || !key.RevokedAt.IsZero() || !key.ExpiresAt.IsZero() && !time.Now().Before(key.ExpiresAt) {
+		return authContext{}, errResourceHidden
+	}
+	auth.allowedPlaylists = map[string]bool{}
+	for _, id := range key.AllowedPlaylistIDs {
+		auth.allowedPlaylists[id] = true
+	}
+	auth.scopes = cloneStrings(key.Scopes)
+	return auth, nil
 }
 
 func publicTrack(track Track, auth authContext) Track {

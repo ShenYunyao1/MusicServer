@@ -266,7 +266,11 @@ func TestSyncPaginationAndConcurrentMutation(t *testing.T) {
 func TestSyncAuthorizationChangesResetSnapshot(t *testing.T) {
 	api, _ := testAPI(t)
 	track := api.store.Tracks()[0]
-	auth := authContext{role: "player", keyID: "player", allowedPlaylists: map[string]bool{"library": true}, scopes: defaultScopes()}
+	key, err := api.store.CreateAPIKey(APIKeyCreateRequest{Name: "sync test", AllowedPlaylistIDs: []string{"library"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth := testPlayerIdentity(t, api, key.Secret)
 	initial, err := api.store.SyncPage(auth, "", 100)
 	if err != nil {
 		t.Fatal(err)
@@ -274,7 +278,11 @@ func TestSyncAuthorizationChangesResetSnapshot(t *testing.T) {
 	if len(initial.Changed) != 1 {
 		t.Fatal("authorized track missing")
 	}
-	auth.allowedPlaylists = map[string]bool{}
+	empty := []string{}
+	if _, err := api.store.UpdateAPIKey(key.ID, APIKeyUpdateRequest{AllowedPlaylistIDs: &empty}); err != nil {
+		t.Fatal(err)
+	}
+	auth = testPlayerIdentity(t, api, key.Secret)
 	reset, err := api.store.SyncPage(auth, initial.Cursor, 100)
 	if err != nil {
 		t.Fatal(err)
@@ -301,7 +309,11 @@ func TestPlaylistMetadataSyncIsIncrementalForPlayer(t *testing.T) {
 	if err := api.store.PutPlaylist(Playlist{ID: "granted", Name: "Granted", TrackIDs: []string{track.ID}}); err != nil {
 		t.Fatal(err)
 	}
-	auth := authContext{role: "player", keyID: "player", allowedPlaylists: map[string]bool{"granted": true}, scopes: defaultScopes()}
+	key, err := api.store.CreateAPIKey(APIKeyCreateRequest{Name: "sync test", AllowedPlaylistIDs: []string{"granted"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth := testPlayerIdentity(t, api, key.Secret)
 	first, err := api.store.SyncPage(auth, "", 100)
 	if err != nil {
 		t.Fatal(err)

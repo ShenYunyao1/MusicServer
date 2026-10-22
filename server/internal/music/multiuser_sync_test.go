@@ -2,9 +2,21 @@ package music
 
 import (
 	"encoding/json"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+func testPlayerIdentity(t *testing.T, api *API, secret string) authContext {
+	t.Helper()
+	r := httptest.NewRequest("GET", "/api/v2/sync", nil)
+	r.Header.Set("X-API-Key", secret)
+	auth, ok := api.authenticate(r)
+	if !ok {
+		t.Fatal("key authentication failed")
+	}
+	return auth
+}
 
 func testSyncIdentity(store *Store) authContext {
 	var id string

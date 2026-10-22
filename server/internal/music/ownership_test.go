@@ -21,6 +21,7 @@ func TestMultiuserResourceTransferAtomicAndAudited(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	oldIdentity := testPlayerIdentity(t, api, key.Secret)
 	r := callAPI(api, "GET", "/api/v2/admin/users/"+a.ID+"/tracks?limit=1", "")
 	if r.Code != 200 {
 		t.Fatal("resource list", r.Code, r.Body.String())
@@ -64,6 +65,15 @@ func TestMultiuserResourceTransferAtomicAndAudited(t *testing.T) {
 	after, _ = api.store.Track(tr.ID)
 	if after.OwnerID != b.ID {
 		t.Fatal("reenable reversed ownership")
+	}
+	if _, err := api.store.UpdatePlaylistTrackNote(p.ID, tr.ID, "new private target note", MutationOptions{UserID: b.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := api.store.SyncPage(oldIdentity, "", 500); err == nil {
+		t.Fatal("in-flight identity survived disable/transfer")
+	}
+	if canReadPlaylist(oldIdentity, api.store, moved) || canReadTrack(oldIdentity, api.store, tr.ID) {
+		t.Fatal("in-flight key read transferred resource")
 	}
 	r = callAPI(api, "GET", "/api/v2/admin/users/"+a.ID+"/tracks?relation=uploaded", "")
 	if r.Code != 200 || !bytes.Contains(r.Body.Bytes(), []byte(tr.ID)) {

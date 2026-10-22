@@ -498,20 +498,28 @@ func (a *API) activeRequests(keyID string) int {
 	return a.active[keyID] + a.active[keyID+"/downloads"]
 }
 
-func canReadPlaylist(auth authContext, id string) bool {
-	return auth.role == "admin" || auth.allowedPlaylists[id]
+func canReadPlaylist(auth authContext, store *Store, p Playlist) bool {
+	if auth.session {
+		return auth.role == "admin" || p.System || p.OwnerID == auth.userID
+	}
+	current, err := currentKeyAuth(store.db, auth)
+	return err == nil && current.allowedPlaylists[p.ID] && (p.System || p.OwnerID == current.userID)
 }
 
 func canReadTrack(auth authContext, store *Store, id string) bool {
 	if auth.session || auth.role == "admin" {
 		return true
 	}
-	for playlistID, allowed := range auth.allowedPlaylists {
+	current, err := currentKeyAuth(store.db, auth)
+	if err != nil {
+		return false
+	}
+	for playlistID, allowed := range current.allowedPlaylists {
 		if !allowed {
 			continue
 		}
 		var exists bool
-		if store.db.QueryRow("SELECT EXISTS(SELECT 1 FROM playlist_tracks WHERE playlist_id=? AND track_id=?)", playlistID, id).Scan(&exists) == nil && exists {
+		if store.db.QueryRow("SELECT EXISTS(SELECT 1 FROM playlist_tracks m JOIN playlists p ON p.id=m.playlist_id WHERE m.playlist_id=? AND m.track_id=? AND (p.system=1 OR p.owner_id=?))", playlistID, id, auth.userID).Scan(&exists) == nil && exists {
 			return true
 		}
 	}
@@ -541,7 +549,7 @@ func (a *API) playlists(response http.ResponseWriter, request *http.Request) {
 	case http.MethodGet:
 		playlists := make([]Playlist, 0)
 		for _, playlist := range a.store.Playlists() {
-			if auth := authFromRequest(request); auth.session && (playlist.System || playlist.OwnerID == auth.userID) || !auth.session && canReadPlaylist(auth, playlist.ID) {
+			if auth := authFromRequest(request); auth.session && (playlist.System || playlist.OwnerID == auth.userID) || !auth.session && canReadPlaylist(auth, a.store, playlist) {
 				playlists = append(playlists, playlist)
 			}
 		}
@@ -579,7 +587,7 @@ func (a *API) playlist(response http.ResponseWriter, request *http.Request) {
 		writeError(response, http.StatusNotFound, "playlist not found")
 		return
 	}
-	if !canReadPlaylist(authFromRequest(request), id) {
+	if !canReadPlaylist(authFromRequest(request), a.store, playlist) {
 		writeError(response, http.StatusNotFound, "PLAYLIST_NOT_FOUND", "playlist not found")
 		return
 	}

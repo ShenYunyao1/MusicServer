@@ -29,7 +29,7 @@ func canSyncPlaylist(auth authContext, p Playlist) bool {
 	if auth.session {
 		return p.System || p.OwnerID == auth.userID
 	}
-	return auth.allowedPlaylists[p.ID]
+	return auth.allowedPlaylists[p.ID] && (p.System || p.OwnerID == auth.userID)
 }
 
 func syncBinding(auth authContext, playlists []Playlist) string {
@@ -124,6 +124,12 @@ func (s *Store) SyncPage(auth authContext, token string, limit int) (SyncRespons
 		return result, err
 	}
 	defer tx.Rollback()
+	if !auth.session {
+		auth, err = currentKeyAuth(tx, auth)
+		if err != nil {
+			return result, err
+		}
+	}
 	var secret string
 	if err := tx.QueryRow("SELECT value FROM meta WHERE key='sync_secret'").Scan(&secret); err != nil {
 		return result, err
