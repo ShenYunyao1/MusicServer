@@ -64,6 +64,8 @@ go build -trimpath -buildvcs=auto -o ./build/musicserver.exe ./cmd/musicserver
 
 绑定通配地址或私网 IP 且未设置 `public-url` 时启用局域网 HTTP：只接受本机、私网及链路本地来源，并要求 Host 为本机名 localhost 或本机/私网 IP；不信任转发头来绕过限制。保留账号鉴权、同源校验、CSRF、HttpOnly 与 SameSite=Strict Cookie。HTTP 无传输加密，仅用于可信局域网。若仅本机使用，可传入 `-addr 127.0.0.1:8080`。
 
+局域网 HTTP 页面支持新建歌单、上传和复制完整 Key。自动复制不可用时，页面会选中完整 Key 并提示手动复制，不会显示复制成功。没有私人歌单或没有勾选任何授权时，Key 仍可通过认证并返回空列表；要在播放器中看到全局曲库，需要显式授权系统 library。401 表示密钥无效、已过期/撤销或账户不可用，与歌单为空无关。若此前复制失败且一次性弹窗已关闭，请新建或轮换 Key，再将完整值填入播放器并应用设置；列表中的 Key ID 不能用于认证。
+
 公网部署继续通过 HTTPS 反向代理，并配置 `-public-url https://music.example.com` 或 `MUSIC_SERVER_PUBLIC_URL`，固定外部来源并使用 Secure Cookie。显式绑定公网 IP 不允许无 HTTPS 配置启动。代理后的登录 IP 限流以代理连接地址计，建议后端仅绑定回环或受限内部接口。
 
 忘记密码时停服后在终端执行（可选 `--revoke-keys` 同时撤销该账号播放器凭证）：

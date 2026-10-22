@@ -34,8 +34,9 @@ async function main() {
   await new Promise(resolve => listener.listen(0, '127.0.0.1', resolve));
   const port = listener.address().port;
   await new Promise(resolve => listener.close(resolve));
-  const base = 'http://127.0.0.1:' + port;
-  const server = spawn(binary, ['-addr', '127.0.0.1:' + port, '-media-root', media, '-data', database], { windowsHide: true });
+  const lanIP = process.env.MUSIC_SERVER_UI_LAN_IP;
+  const base = 'http://' + (lanIP || '127.0.0.1') + ':' + port;
+  const server = spawn(binary, ['-addr', (lanIP ? '0.0.0.0' : '127.0.0.1') + ':' + port, '-media-root', media, '-data', database], { windowsHide: true });
   let serverLog = '';
   server.stderr.on('data', data => { serverLog += data; });
   let browser;
@@ -54,6 +55,11 @@ async function main() {
     const pageErrors = [];
     page.on('pageerror', error => pageErrors.push(error.message));
     await page.goto(base);
+    if (lanIP) {
+      assert.equal(await page.evaluate(() => isSecureContext), false, 'LAN regression must use an actual HTTP insecure context');
+      assert.equal(await page.evaluate(() => typeof crypto.randomUUID), 'undefined');
+      assert.equal(await page.evaluate(() => typeof navigator.clipboard), 'undefined');
+    }
     await page.locator('#username').waitFor();
     await page.screenshot({ path: path.join(directory, 'login.png'), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
@@ -76,7 +82,12 @@ async function main() {
     await page.click('#newPlaylist');
     await page.fill('[data-field="name"]', 'Browser playlist');
     await page.click('#saveModal');
-    await page.waitForFunction(() => state.playlists.some(playlist => playlist.name === 'Browser playlist'));
+    await page.waitForFunction(() => state.playlists.some(playlist => playlist.name === 'Browser playlist') ||
+      document.querySelector('#status').textContent.includes('randomUUID'));
+    assert.ok(await page.evaluate(() => state.playlists.some(playlist => playlist.name === 'Browser playlist')),
+      await page.locator('#status').textContent());
+    const createdPlaylistID = await page.evaluate(() => state.playlists.find(p => p.name === 'Browser playlist').id);
+    assert.match(createdPlaylistID, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     await page.evaluate(async () => { await reorder(state.playlists.find(playlist => playlist.name === 'Browser playlist').id, 'library'); });
     await page.evaluate(() => openPlaylistTrackPicker(state.playlists.find(playlist => playlist.name === 'Browser playlist')));
     await page.locator('#modalBody input[type="checkbox"]').check();

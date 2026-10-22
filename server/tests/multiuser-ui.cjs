@@ -1,5 +1,6 @@
 const assert=require('node:assert/strict');
 const path=require('node:path');
+const {spawnSync}=require('node:child_process');
 
 module.exports=async function runMultiuserUI({browser,adminPage,base,audio,directory}) {
  const errors=[];
@@ -24,11 +25,37 @@ module.exports=async function runMultiuserUI({browser,adminPage,base,audio,direc
    fixtures.push({context,page});accounts.push({user:result.user,password,username,page});
   }
   const [a,b]=accounts;
+  // No private playlist is required to create and authenticate a player key.
+  await a.page.click('[data-page="keys"]');await a.page.click('#newKey');await a.page.fill('#policyName','Empty player fixture');await a.page.click('#saveModal');await a.page.locator('#secretDialog').waitFor({state:'visible'});
+  const emptySecret=await a.page.locator('#secretValue').textContent();assert.ok(emptySecret);
+  await a.page.waitForFunction(()=>state.keys.some(k=>k.name==='Empty player fixture'));
+  const emptyKey=await a.page.evaluate(()=>state.keys.find(k=>k.name==='Empty player fixture'));
+  assert.equal((await a.page.evaluate(()=>state.playlists.filter(p=>!p.system))).length,0);
+  if(await a.page.evaluate(()=>!navigator.clipboard?.writeText)){
+   // Inspect the selected value without changing the user's OS clipboard.
+   await a.page.evaluate(()=>{window.fixtureClipboard='';document.execCommand=command=>{if(command!=='copy')return false;window.fixtureClipboard=document.activeElement.value;return true}});
+   await a.page.click('#copySecret');await a.page.waitForFunction(()=>document.querySelector('#status').textContent==='完整 API Key 已复制');
+   assert.ok(await a.page.evaluate(secret=>window.fixtureClipboard===secret,emptySecret),'copy fallback did not select the full secret inside the modal');
+   await a.page.evaluate(()=>{document.execCommand=()=>false});await a.page.click('#copySecret');await a.page.waitForFunction(()=>document.querySelector('#status').textContent.includes('请手动复制'));
+   assert.ok(await a.page.evaluate(secret=>window.getSelection().toString()===secret,emptySecret),'copy failure did not select the full key for manual copying');
+   await a.page.evaluate(()=>{delete document.execCommand;delete window.fixtureClipboard});
+  }
+  for(const route of ['playlists','sync']){
+   const response=await a.page.evaluate(async({route,secret})=>{const r=await fetch('/api/v2/'+route,{credentials:'omit',headers:{'X-API-Key':secret}});return {status:r.status,body:await r.json()}},{route,secret:emptySecret});
+   assert.equal(response.status,200);if(route==='playlists')assert.deepEqual(response.body,[]);else assert.deepEqual(response.body.playlists,[]);
+  }
+  if(process.env.MUSIC_SERVER_TEST_PLAYER_CLIENT){
+   const client=spawnSync(process.env.MUSIC_SERVER_TEST_PLAYER_CLIENT,['--server'],{input:JSON.stringify({url:base,key:emptySecret,cache:path.join(directory,'empty-player-cache')}),encoding:'utf8',timeout:30000,windowsHide:true});
+   assert.equal(client.status,0,client.stderr);const result=JSON.parse(client.stdout);assert.equal(result.success,true,result.error);assert.equal(result.offline,false);assert.deepEqual(result.playlists,[]);
+  }
+  await a.page.click('#doneSecret');await a.page.evaluate(async id=>{await api('auth/keys/'+id,'DELETE');await loadKeys()},emptyKey.id);
+  console.log('Empty-library member key passed: zero private playlists, copy fallback/manual selection and 200 empty grants'+(process.env.MUSIC_SERVER_TEST_PLAYER_CLIENT?', native player sync.':'.'));
   await a.page.click('[data-page="upload"]');const upload=Buffer.from(audio);upload[44]=7;
   await a.page.setInputFiles('#uploadInput',{name:'Alice song.wav',mimeType:'audio/wav',buffer:upload});
   await a.page.waitForFunction(()=>state.uploads.length===1);
   await a.page.locator('[data-stage-upload]').click();await a.page.waitForFunction(()=>state.uploads[0].stageId);
   await a.page.locator('[data-confirm-upload]').click();await a.page.waitForFunction(()=>state.uploads[0].status==='完成');
+  await a.page.waitForFunction(()=>state.tracks.some(t=>t.title==='Alice song'));
   const track=await a.page.evaluate(()=>state.tracks.find(t=>t.title==='Alice song'));
   assert.equal(track.owner_id,a.user.id);assert.equal(track.uploaded_by,a.user.id);assert.equal(track.path,'');
   await a.page.click('[data-page="playlists"]');await a.page.click('#newPlaylist');await a.page.fill('[data-field="name"]','Alice private');await a.page.click('#saveModal');await a.page.waitForFunction(()=>state.playlists.some(p=>p.name==='Alice private'));
