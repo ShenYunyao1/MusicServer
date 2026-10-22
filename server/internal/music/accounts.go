@@ -307,6 +307,9 @@ func (s *Store) ChangePassword(user User, old, password string, options ...Mutat
 	return s.replacePassword(user.Username, old, password, false, false, options)
 }
 func (s *Store) replacePassword(username, old, password string, local, revokeKeys bool, options []MutationOptions) error {
+	if !local && old == password {
+		return errors.New("new password must differ from the previous password")
+	}
 	var id, before string
 	if err := s.db.QueryRow("SELECT id,password_hash FROM users WHERE username=?", username).Scan(&id, &before); err != nil {
 		return err
@@ -319,7 +322,7 @@ func (s *Store) replacePassword(username, old, password string, local, revokeKey
 		return err
 	}
 	return s.transaction(func(tx *sql.Tx) error {
-		result, err := tx.Exec("UPDATE users SET password_hash=?,auth_version=auth_version+1,version=version+1,updated_at=? WHERE id=? AND password_hash=?", encoded, persistedTime(time.Now()), id, before)
+		result, err := tx.Exec("UPDATE users SET password_hash=?,must_change_password=0,auth_version=auth_version+1,version=version+1,updated_at=? WHERE id=? AND password_hash=?", encoded, persistedTime(time.Now()), id, before)
 		if err != nil {
 			return err
 		}

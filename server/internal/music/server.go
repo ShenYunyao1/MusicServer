@@ -38,18 +38,19 @@ type API struct {
 }
 
 type authContext struct {
-	userID           string
-	authVersion      int64
-	session          bool
-	csrf             string
-	username         string
-	role             string
-	allowedPlaylists map[string]bool
-	scopes           []string
-	keyID            string
-	maxConcurrency   int
-	download         bool
-	maxDownloads     int
+	userID             string
+	authVersion        int64
+	session            bool
+	mustChangePassword bool
+	csrf               string
+	username           string
+	role               string
+	allowedPlaylists   map[string]bool
+	scopes             []string
+	keyID              string
+	maxConcurrency     int
+	download           bool
+	maxDownloads       int
 }
 
 func NewAPI(store *Store) *API {
@@ -132,6 +133,10 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 				writeError(response, 403, "CSRF_DENIED", "same-origin CSRF token required")
 				return
 			}
+		}
+		if auth.mustChangePassword && !firstPasswordEndpoint(request) {
+			writeError(response, 403, "PASSWORD_CHANGE_REQUIRED", "change your temporary password before using the account")
+			return
 		}
 		if !auth.session {
 			if !playerEndpoint(request) {
@@ -375,7 +380,7 @@ func (a *API) authenticate(request *http.Request) (authContext, bool) {
 			return authContext{}, false
 		}
 		user, err := readUser(a.store.db, key.UserID)
-		if err != nil || !user.Enabled {
+		if err != nil || !user.Enabled || user.MustChangePassword {
 			return authContext{}, false
 		}
 		allowed := map[string]bool{}
@@ -401,7 +406,19 @@ func (a *API) authenticate(request *http.Request) (authContext, bool) {
 			allowed[playlist.ID] = true
 		}
 	}
-	return authContext{role: user.Role, userID: user.ID, authVersion: user.AuthVersion, username: user.Username, session: true, csrf: csrfForToken(cookie.Value), allowedPlaylists: allowed, keyID: session.ID}, true
+	return authContext{role: user.Role, userID: user.ID, authVersion: user.AuthVersion, username: user.Username, session: true, mustChangePassword: user.MustChangePassword, csrf: csrfForToken(cookie.Value), allowedPlaylists: allowed, keyID: session.ID}, true
+}
+
+func firstPasswordEndpoint(request *http.Request) bool {
+	switch request.URL.Path {
+	case "/api/v2/auth/me":
+		return request.Method == "GET"
+	case "/api/v2/auth/password":
+		return request.Method == "PUT"
+	case "/api/v2/auth/logout", "/api/v2/auth/activity":
+		return request.Method == "POST"
+	}
+	return false
 }
 
 func playerEndpoint(request *http.Request) bool {
