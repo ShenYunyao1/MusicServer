@@ -8,6 +8,8 @@ import (
 )
 
 type apiCallStats struct {
+	UserID          string    `json:"user_id,omitempty"`
+	AccountEnabled  bool      `json:"account_enabled"`
 	KeyID           string    `json:"key_id"`
 	KeyName         string    `json:"key_name,omitempty"`
 	TotalRequests   int64     `json:"total_requests"`
@@ -69,17 +71,21 @@ ON CONFLICT(key_id) DO UPDATE SET
 	}
 }
 
-func (a *API) readCallStats() apiStatsResponse {
+func (a *API) readCallStats(userIDs ...string) apiStatsResponse {
 	result := apiStatsResponse{Keys: []apiCallStats{}}
 	if a == nil || a.store == nil || a.store.db == nil {
 		result.err = errors.New("statistics database is not available")
 		return result
 	}
-	rows, err := a.store.db.Query(`SELECT k.id,json_extract(k.payload,'$.name'),
+	userID := ""
+	if len(userIDs) > 0 {
+		userID = userIDs[0]
+	}
+	rows, err := a.store.db.Query(`SELECT k.id,json_extract(k.payload,'$.name'),k.user_id,u.enabled,
         COALESCE(s.total_requests,0),COALESCE(s.success_requests,0),COALESCE(s.failure_requests,0),
         COALESCE(s.total_bytes,0),COALESCE(s.total_duration_ms,0),COALESCE(s.last_called_at,''),COALESCE(s.last_status,0)
-        FROM api_keys k LEFT JOIN api_call_stats s ON s.key_id=k.id
-        WHERE json_extract(k.payload,'$.revoked_at') IS NULL ORDER BY k.id`)
+        FROM api_keys k JOIN users u ON u.id=k.user_id LEFT JOIN api_call_stats s ON s.key_id=k.id
+        WHERE json_extract(k.payload,'$.revoked_at') IS NULL AND (?='' OR k.user_id=?) ORDER BY k.id`, userID, userID)
 	if err != nil {
 		result.err = err
 		return result
@@ -88,7 +94,7 @@ func (a *API) readCallStats() apiStatsResponse {
 	for rows.Next() {
 		var value apiCallStats
 		var last string
-		if err := rows.Scan(&value.KeyID, &value.KeyName, &value.TotalRequests, &value.SuccessRequests, &value.FailureRequests, &value.TotalBytes, &value.TotalDurationMS, &last, &value.LastStatus); err != nil {
+		if err := rows.Scan(&value.KeyID, &value.KeyName, &value.UserID, &value.AccountEnabled, &value.TotalRequests, &value.SuccessRequests, &value.FailureRequests, &value.TotalBytes, &value.TotalDurationMS, &last, &value.LastStatus); err != nil {
 			result.err = err
 			return result
 		}

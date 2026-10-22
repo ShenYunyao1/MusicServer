@@ -96,7 +96,7 @@ func validateKeyGrants(tx *sql.Tx, key APIKey) error {
 		if err != nil {
 			return err
 		}
-		if user.Role != "admin" && (playlist.System || playlist.OwnerID != user.ID) {
+		if !playlist.System && playlist.OwnerID != user.ID {
 			return errors.New("key owner cannot access requested playlist")
 		}
 	}
@@ -169,6 +169,9 @@ func (s *Store) CreateAPIKey(request APIKeyCreateRequest, options ...MutationOpt
 		if err != nil {
 			return err
 		}
+		if err := checkActorOwner(tx, owner, options); err != nil {
+			return err
+		}
 		key.UserID = owner
 		if err := validateKeyGrants(tx, key); err != nil {
 			return err
@@ -212,6 +215,12 @@ func (s *Store) mutateKey(id, action string, edit func(*APIKey) error, options [
 			return err
 		}
 		if err := json.Unmarshal([]byte(raw), &result); err != nil {
+			return err
+		}
+		if len(options) > 0 && options[0].UserID != "" && options[0].UserID != result.UserID {
+			return errResourceHidden
+		}
+		if err := checkActorOwner(tx, result.UserID, options); err != nil {
 			return err
 		}
 		before := publicAPIKey(result)

@@ -406,7 +406,7 @@ func (a *API) authenticate(request *http.Request) (authContext, bool) {
 		allowed := map[string]bool{}
 		for _, id := range key.AllowedPlaylistIDs {
 			playlist, exists := a.store.Playlist(id)
-			if exists && (user.Role == "admin" || !playlist.System && playlist.OwnerID == user.ID) {
+			if exists && (playlist.System || playlist.OwnerID == user.ID) {
 				allowed[id] = true
 			}
 		}
@@ -1114,7 +1114,20 @@ func (a *API) stagedUpload(response http.ResponseWriter, request *http.Request) 
 }
 
 func (a *API) keys(response http.ResponseWriter, request *http.Request) {
-	if !a.requireAdmin(response, request) {
+	if !a.requireAccount(response, request) {
+		return
+	}
+	if request.URL.Path == "/api/v2/auth/keys/stats" {
+		if request.Method != "GET" {
+			writeError(response, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+			return
+		}
+		stats := a.readCallStats(authFromRequest(request).userID)
+		if stats.err != nil {
+			writeError(response, 500, "STATS_READ_FAILED", "statistics unavailable")
+			return
+		}
+		writeJSON(response, 200, stats)
 		return
 	}
 	path := strings.TrimPrefix(request.URL.Path, "/api/v2/auth/keys")
@@ -1123,7 +1136,9 @@ func (a *API) keys(response http.ResponseWriter, request *http.Request) {
 		case http.MethodGet:
 			views := make([]APIKeyView, 0)
 			for _, key := range a.store.APIKeys() {
-				views = append(views, APIKeyView{APIKey: publicAPIKey(key)})
+				if key.UserID == authFromRequest(request).userID {
+					views = append(views, APIKeyView{APIKey: publicAPIKey(key)})
+				}
 			}
 			writeJSON(response, http.StatusOK, views)
 		case http.MethodPost:
@@ -1213,7 +1228,7 @@ func (a *API) adminStats(response http.ResponseWriter, request *http.Request) {
 		writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
 		return
 	}
-	stats := a.readCallStats()
+	stats := a.readCallStats(request.URL.Query().Get("user_id"))
 	if stats.err != nil {
 		writeError(response, http.StatusInternalServerError, "STATS_READ_FAILED", "failed to read API call statistics")
 		return

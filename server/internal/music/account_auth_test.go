@@ -183,7 +183,7 @@ func TestAccountsIsolateKeysPlaylistsStagesAndMedia(t *testing.T) {
 	if err := api.store.PutPlaylist(own, MutationOptions{UserID: member.ID}); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"/api/v2/playlists/private", "/api/v2/auth/keys", "/api/v2/admin/audit", "/api/v2/admin/removed"} {
+	for _, path := range []string{"/api/v2/playlists/private", "/api/v2/admin/audit", "/api/v2/admin/removed"} {
 		w := sessionRequest(api, memberToken, "GET", path, "")
 		if w.Code < 400 {
 			t.Fatalf("member accessed %s: %s", path, w.Body)
@@ -356,8 +356,8 @@ func TestAccountKeyRightsChangeResetSync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !next.Reset || len(next.Changed) != 0 || len(next.Playlists) != 0 {
-		t.Fatal("role downgrade did not remove library access")
+	if !next.Reset || len(next.Changed) == 0 || len(next.Playlists) == 0 {
+		t.Fatal("role change should reset while retaining explicitly granted global library access")
 	}
 	if err := api.store.RevokeAPIKey(key.ID); err != nil {
 		t.Fatalf("could not revoke key after owner lost playlist rights: %v", err)
