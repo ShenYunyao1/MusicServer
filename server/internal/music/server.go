@@ -954,12 +954,27 @@ func (a *API) upload(response http.ResponseWriter, request *http.Request) {
 			metadata[field] = value
 		}
 	}
-	track, err := a.store.ImportAudioWithMetadata(header.Filename, file, metadata, mutationOptions(request))
+	preview, err := a.store.StageAudio(header.Filename, file, metadata, mutationOptions(request))
 	if err != nil {
 		writeError(response, 400, err.Error())
 		return
 	}
-	writeJSON(response, http.StatusCreated, publicTrack(track, authFromRequest(request)))
+	track, duplicate, err := a.store.CommitUploadStage(preview.ID, mutationOptions(request))
+	if err != nil {
+		_ = a.store.DeleteUploadStage(preview.ID)
+	}
+	if err != nil {
+		writeError(response, 400, err.Error())
+		return
+	}
+	status := http.StatusCreated
+	if duplicate {
+		status = http.StatusOK
+	}
+	writeJSON(response, status, struct {
+		Track
+		Duplicate bool `json:"duplicate"`
+	}{publicTrack(track, authFromRequest(request)), duplicate})
 }
 
 func (a *API) stageUpload(response http.ResponseWriter, request *http.Request) {

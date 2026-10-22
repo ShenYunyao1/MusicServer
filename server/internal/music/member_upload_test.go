@@ -2,7 +2,10 @@ package music
 
 import (
 	"bytes"
+	"encoding/json"
+	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 )
@@ -67,5 +70,40 @@ func TestMultiuserUploadOwnershipAndDedup(t *testing.T) {
 	}
 	if r := memberVersionRequest(api, bt, http.MethodDelete, "/api/v2/uploads/stage/"+pc.ID, "", 0); r.Code != 204 {
 		t.Fatal("cancel", r.Code)
+	}
+}
+
+func TestMultiuserDirectUploadReportsDuplicate(t *testing.T) {
+	api, _ := testAPI(t)
+	a, at := readyMember(t, api, "direct-a")
+	_, bt := readyMember(t, api, "direct-b")
+	audio := validTestAudio(t)
+	var original string
+	for index, token := range []string{at, bt} {
+		var body bytes.Buffer
+		form := multipart.NewWriter(&body)
+		file, _ := form.CreateFormFile("file", "same.wav")
+		file.Write(audio)
+		form.Close()
+		r := httptest.NewRequest("POST", "http://example.com/api/v2/uploads", &body)
+		r.Header.Set("Content-Type", form.FormDataContentType())
+		r.Header.Set("Origin", "http://example.com")
+		r.Header.Set("X-CSRF-Token", csrfForToken(token))
+		r.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+		w := httptest.NewRecorder()
+		api.ServeHTTP(w, r)
+		var view struct {
+			Track
+			Duplicate bool `json:"duplicate"`
+		}
+		json.Unmarshal(w.Body.Bytes(), &view)
+		if index == 0 {
+			original = view.ID
+			if w.Code != 201 || view.Duplicate {
+				t.Fatal("new upload", w.Code, w.Body.String())
+			}
+		} else if w.Code != 200 || !view.Duplicate || view.ID != original || view.OwnerID != a.ID || view.Path != "" {
+			t.Fatal("duplicate response", w.Code, w.Body.String())
+		}
 	}
 }
