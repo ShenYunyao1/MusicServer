@@ -1,5 +1,34 @@
 'use strict';
 
+const firstPasswordScreen=document.createElement('section');
+firstPasswordScreen.id='firstPasswordScreen';firstPasswordScreen.className='login-screen';firstPasswordScreen.hidden=true;
+firstPasswordScreen.innerHTML='<form id="firstPasswordForm" class="panel login-card"><h1>设置个人密码</h1><p>首次登录或密码重置后，需要先修改临时密码。</p><div class="field"><label for="firstOldPassword">临时密码</label><input id="firstOldPassword" type="password" autocomplete="current-password" required></div><div class="field"><label for="firstNewPassword">新密码（至少 12 个字符）</label><input id="firstNewPassword" type="password" autocomplete="new-password" minlength="12" required></div><div class="field"><label for="firstConfirmPassword">确认新密码</label><input id="firstConfirmPassword" type="password" autocomplete="new-password" minlength="12" required></div><button id="saveFirstPassword" class="btn primary" type="submit">修改并重新登录</button> <button id="logoutFirstPassword" class="btn" type="button">退出</button><p id="firstPasswordError" class="status" role="alert"></p></form>';
+document.body.append(firstPasswordScreen);
+function isAdministrator(){return state.user?.role==='admin'}
+function canManageTrack(track){return isAdministrator() || track.owner_id===state.user?.id}
+for(const [filter,label] of [['mine','我的上传'],['managed','我管理的曲目']]){
+ const button=document.createElement('button');button.dataset.filter=filter;button.textContent=label;
+ button.onclick=()=>{state.trackFilter=filter;document.querySelectorAll('[data-filter]').forEach(el=>el.classList.toggle('active',el===button));renderTracks()};document.querySelector('#page-tracks .filter-tabs').append(button);
+}
+function applyAccountRole(){
+ document.querySelector('[data-page="settings"]').hidden=!isAdministrator();
+ if(document.querySelector('[data-page="users"]'))document.querySelector('[data-page="users"]').hidden=!isAdministrator();
+ maintenancePanel.hidden=!isAdministrator();$('scan').hidden=!isAdministrator();
+ document.querySelector('[data-page="tracks"] .nav-label').textContent='全局曲库';
+ document.querySelector('[data-page="playlists"] .nav-label').textContent='我的歌单';
+}
+$('firstPasswordForm').onsubmit=async event=>{
+ event.preventDefault();$('firstPasswordError').textContent='';$('saveFirstPassword').disabled=true;
+ try {
+  if($('firstNewPassword').value!==$('firstConfirmPassword').value)throw new Error('两次新密码不一致');
+  await api('auth/password','PUT',{old_password:$('firstOldPassword').value,new_password:$('firstNewPassword').value});
+  setLoggedOut();$('loginError').textContent='密码已修改，请使用新密码登录。';
+ }catch(error){$('firstPasswordError').textContent=error.message}finally{$('saveFirstPassword').disabled=false}
+};
+$('logoutFirstPassword').onclick=()=>run(async()=>{await api('auth/logout','POST');setLoggedOut()});
+const memberPlayer=document.createElement('audio');memberPlayer.id='memberPlayer';memberPlayer.controls=true;memberPlayer.hidden=true;memberPlayer.style.maxWidth='100%';document.querySelector('.content').prepend(memberPlayer);
+function playTrack(track){if(track.missing || track.removed)return;memberPlayer.src='/api/v2/media/'+encodeURIComponent(track.id);memberPlayer.hidden=false;memberPlayer.play().catch(error=>setStatus(error.message,'error'))}
+
 function setLoggedOut() {
   for (const upload of state.uploads) {
     invalidateLocalParse(upload);
@@ -9,6 +38,10 @@ function setLoggedOut() {
   state.uploads = [];
   state.attachments = [];
   state.user = null;
+  state.stats=null;state.settings={};state.playlistDetailId=null;state.trackFilter="all";state.revision=null;
+  state.users=[];state.statsUserID="";
+  $("firstPasswordScreen").hidden=true;$("firstPasswordForm").reset();
+  const player=$("memberPlayer");if(player){player.pause();player.removeAttribute("src");player.load();player.hidden=true;}
   state.csrf = '';
   state.tracks = [];
   state.playlists = [];
@@ -23,6 +56,8 @@ function setLoggedOut() {
   $('maintenanceResults').replaceChildren();
   $('password').value = '';
   $('secretValue').textContent = '';
+  $('statsTable').replaceChildren();$('keyRows').replaceChildren();$('settingsForm').replaceChildren();
+  if($('userList'))$('userList').replaceChildren();if($('userResources'))$('userResources').replaceChildren();
   $('modalBody').replaceChildren();
   renderUploads();
   renderTracks();
@@ -34,15 +69,17 @@ async function enterAccount(identity) {
   state.csrf = identity.csrf_token;
   $('accountName').textContent = state.user.display_name || state.user.username;
   $('password').value = '';
-  if (state.user.role !== 'admin') {
-    setLoggedOut();
-    $('loginError').textContent = '此管理页面仅供管理员使用。';
-    return;
+  if(state.user.must_change_password) {
+    document.querySelector('.app').hidden=true;$('loginScreen').hidden=true;$('firstPasswordScreen').hidden=false;
+    $('firstPasswordForm').reset();$('firstPasswordError').textContent='';return;
   }
+  $('firstPasswordScreen').hidden=true;
+  applyAccountRole();
   document.querySelector('.app').hidden = false;
   $('loginScreen').hidden = true;
   setStatus('正在载入…');
   await connect();
+  showPage('overview');
   if (state.user) setStatus('已登录', 'ok');
 }
 

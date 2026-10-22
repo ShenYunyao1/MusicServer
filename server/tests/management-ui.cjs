@@ -177,6 +177,7 @@ async function main() {
     await page.fill('#password', 'changed administrator password');
     await page.click('#loginButton');
     await page.waitForFunction(() => state.user?.username === 'admin');
+    await require('./multiuser-ui.cjs')({browser,adminPage:page,base,audio,directory});
     await page.click('#logout');
     await page.waitForFunction(() => !state.user);
     assert.equal(await page.evaluate(async () => (await fetch('/api/v2/auth/me')).status), 401);
