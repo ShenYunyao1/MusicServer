@@ -95,6 +95,10 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	if err == nil {
 		response.Header().Set("X-Request-ID", requestID)
 	}
+	if !a.allowLANHTTP(request) {
+		writeError(response, http.StatusForbidden, "LAN_HTTP_ONLY", "HTTP access requires a local/private peer and an IP or localhost host; use HTTPS for public access")
+		return
+	}
 	if request.URL.Path == "/" && request.Method == http.MethodGet {
 		response.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = response.Write(managementPage)

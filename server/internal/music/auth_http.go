@@ -16,8 +16,9 @@ import (
 const sessionCookie = "music_session"
 
 type AuthConfig struct {
-	Origin string
-	Secure bool
+	Origin  string
+	Secure  bool
+	LANHTTP bool
 }
 
 func NewAuthConfig(address, externalURL string) (AuthConfig, error) {
@@ -26,10 +27,15 @@ func NewAuthConfig(address, externalURL string) (AuthConfig, error) {
 		return AuthConfig{}, err
 	}
 	loopback := host == "localhost"
+	lanListener := host == ""
 	if ip := net.ParseIP(host); ip != nil {
 		loopback = ip.IsLoopback()
+		lanListener = ip.IsUnspecified() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
 	}
 	if externalURL == "" {
+		if !loopback && lanListener {
+			return AuthConfig{LANHTTP: true}, nil
+		}
 		if !loopback {
 			return AuthConfig{}, errors.New("non-loopback listeners require -public-url https://your-server")
 		}
@@ -60,6 +66,25 @@ func NewAuthConfig(address, externalURL string) (AuthConfig, error) {
 	}
 	return AuthConfig{Origin: parsed.Scheme + "://" + publicHost, Secure: parsed.Scheme == "https"}, nil
 }
+
+// Direct HTTP is for local/private networks. Public deployments retain a
+// pinned HTTPS origin and Secure cookies; forwarded headers do not grant LAN access.
+func localHTTPAddress(address string) bool {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		host = strings.Trim(address, "[]")
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast())
+}
+
+func (a *API) allowLANHTTP(request *http.Request) bool {
+	return !a.authConfig.LANHTTP || (localHTTPAddress(request.RemoteAddr) && localHTTPAddress(request.Host))
+}
+
 func (a *API) SetAuthConfig(config AuthConfig) { a.authConfig = config }
 func (a *API) validOrigin(request *http.Request) bool {
 	expected := a.authConfig.Origin

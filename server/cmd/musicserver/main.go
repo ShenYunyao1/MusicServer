@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -27,7 +28,7 @@ func main() {
 		}
 		return
 	}
-	address := flag.String("addr", "127.0.0.1:8080", "HTTP listen address")
+	address := flag.String("addr", "0.0.0.0:8080", "HTTP listen address")
 	mediaRoot := flag.String("media-root", defaults.MediaRoot, "music directory (relative paths follow executable directory)")
 	dataPath := flag.String("data", defaults.Data, "schema 5 SQLite database (relative paths follow executable directory)")
 	publicURL := flag.String("public-url", os.Getenv("MUSIC_SERVER_PUBLIC_URL"), "HTTPS origin for remote deployment, e.g. https://music.example.com")
@@ -116,7 +117,12 @@ func main() {
 	}()
 	commit, modified := version.Source()
 	log.Printf("music server v%s (commit %s, modified=%t) listening on %s, media root %s, SQLite database %s", version.Version, commit, modified, *address, filepath.Clean(*mediaRoot), store.DataPath())
-	log.Printf("Open http://%s/ in your browser. Press Ctrl+C to stop.", *address)
+	if authConfig.LANHTTP {
+		_, port, _ := net.SplitHostPort(*address)
+		log.Printf("LAN HTTP enabled. Open http://127.0.0.1:%s/ locally or http://<LAN-IP>:%s/ on your LAN. Press Ctrl+C to stop.", port, port)
+	} else {
+		log.Printf("Open http://%s/ in your browser. Press Ctrl+C to stop.", *address)
+	}
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Printf("listen: %v", err)
 		stopSignals()

@@ -535,7 +535,7 @@ func TestAccountDeploymentAndLegacyKeyRejection(t *testing.T) {
 		address, url string
 		valid        bool
 	}{
-		{"127.0.0.1:8080", "", true}, {"0.0.0.0:8080", "", false}, {"0.0.0.0:8080", "http://music.example.com", false}, {"0.0.0.0:8080", "https://music.example.com", true},
+		{"127.0.0.1:8080", "", true}, {"0.0.0.0:8080", "", true}, {"0.0.0.0:8080", "http://music.example.com", false}, {"0.0.0.0:8080", "https://music.example.com", true},
 		{"127.0.0.1:8080", "http://music.example.com", false}, {"127.0.0.1:8080", "http://localhost:8080", true},
 	} {
 		if _, err := NewAuthConfig(item.address, item.url); (err == nil) != item.valid {
