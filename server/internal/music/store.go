@@ -772,6 +772,15 @@ func (s *Store) setRemoved(id string, removed bool, options []MutationOptions) e
 		if err := recordChange(tx, "track", id, removed); err != nil {
 			return err
 		}
+		playlists, err := queryJSON[Playlist](tx, "SELECT p.payload FROM playlists p JOIN playlist_tracks m ON m.playlist_id=p.id WHERE m.track_id=? AND p.system=0", id)
+		if err != nil {
+			return err
+		}
+		for _, p := range playlists {
+			if err := recordChange(tx, "playlist", p.ID, false); err != nil {
+				return err
+			}
+		}
 		if err := refreshLibrary(tx); err != nil {
 			return err
 		}

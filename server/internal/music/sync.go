@@ -25,6 +25,13 @@ type syncCursor struct {
 
 var errSyncRestart = errors.New("library changed during pagination; restart snapshot")
 
+func canSyncPlaylist(auth authContext, p Playlist) bool {
+	if auth.session {
+		return p.System || p.OwnerID == auth.userID
+	}
+	return auth.allowedPlaylists[p.ID]
+}
+
 func syncBinding(auth authContext, playlists []Playlist) string {
 	grants := []string{}
 	for id, allowed := range auth.allowedPlaylists {
@@ -36,9 +43,11 @@ func syncBinding(auth authContext, playlists []Playlist) string {
 	scopes := cloneStrings(auth.scopes)
 	sort.Strings(scopes)
 	visible := map[string]bool{}
-	if auth.role != "admin" {
+	visiblePlaylists := []string{}
+	{
 		for _, playlist := range playlists {
-			if canReadPlaylist(auth, playlist.ID) {
+			if canSyncPlaylist(auth, playlist) {
+				visiblePlaylists = append(visiblePlaylists, playlist.ID)
 				for _, id := range playlist.TrackIDs {
 					visible[id] = true
 				}
@@ -50,7 +59,11 @@ func syncBinding(auth authContext, playlists []Playlist) string {
 		members = append(members, id)
 	}
 	sort.Strings(members)
-	encoded, _ := json.Marshal([]any{auth.userID, auth.authVersion, auth.keyID, auth.role, grants, scopes, members})
+	sort.Strings(visiblePlaylists)
+	if auth.session {
+		members = nil
+	}
+	encoded, _ := json.Marshal([]any{auth.userID, auth.authVersion, auth.keyID, auth.role, auth.session, grants, scopes, members, visiblePlaylists})
 	return hashBytes(encoded)
 }
 func signCursor(cursor syncCursor, secret string) string {
@@ -87,8 +100,12 @@ func visiblePlaylist(playlist Playlist, auth authContext, tracks map[string]bool
 	result := clonePlaylist(playlist)
 	result.TrackIDs = []string{}
 	result.TrackNotes = map[string]string{}
+	result.UnavailableTrackIDs = []string{}
 	for _, id := range playlist.TrackIDs {
-		if tracks[id] {
+		{
+			if !tracks[id] {
+				result.UnavailableTrackIDs = append(result.UnavailableTrackIDs, id)
+			}
 			result.TrackIDs = append(result.TrackIDs, id)
 			if note, ok := playlist.TrackNotes[id]; ok {
 				result.TrackNotes[id] = note
@@ -147,7 +164,7 @@ func (s *Store) SyncPage(auth authContext, token string, limit int) (SyncRespons
 	allowedTracks := map[string]bool{}
 	allowedPlaylists := map[string]Playlist{}
 	for _, playlist := range playlists {
-		if canReadPlaylist(auth, playlist.ID) {
+		if canSyncPlaylist(auth, playlist) {
 			allowedPlaylists[playlist.ID] = playlist
 			for _, id := range playlist.TrackIDs {
 				allowedTracks[id] = true
@@ -155,17 +172,20 @@ func (s *Store) SyncPage(auth authContext, token string, limit int) (SyncRespons
 		}
 	}
 	active := map[string]bool{}
-	trackRows, err := tx.Query("SELECT id FROM tracks WHERE removed=0")
+	available := map[string]bool{}
+	trackRows, err := tx.Query("SELECT id,missing FROM tracks WHERE removed=0")
 	if err != nil {
 		return result, err
 	}
 	for trackRows.Next() {
 		var id string
-		if err := trackRows.Scan(&id); err != nil {
+		var missing bool
+		if err := trackRows.Scan(&id, &missing); err != nil {
 			_ = trackRows.Close()
 			return result, err
 		}
-		if auth.role == "admin" || allowedTracks[id] {
+		if auth.session || allowedTracks[id] {
+			available[id] = !missing
 			active[id] = true
 		}
 	}
@@ -193,9 +213,12 @@ func (s *Store) SyncPage(auth authContext, token string, limit int) (SyncRespons
 				if err != nil {
 					return result, err
 				}
+				if track.Missing {
+					track = unavailableTrack(track)
+				}
 				result.Changed = append(result.Changed, publicTrack(track, auth))
 			} else {
-				result.Playlists = append(result.Playlists, visiblePlaylist(allowedPlaylists[id], auth, active))
+				result.Playlists = append(result.Playlists, visiblePlaylist(allowedPlaylists[id], auth, available))
 			}
 			cursor.Last = key
 		}
@@ -240,7 +263,7 @@ func (s *Store) SyncPage(auth authContext, token string, limit int) (SyncRespons
 		}
 		for _, item := range latest {
 			if item.kind == "track" {
-				if auth.role != "admin" && !allowedTracks[item.id] {
+				if !auth.session && !allowedTracks[item.id] {
 					continue
 				}
 				if !active[item.id] || item.deleted {
@@ -250,13 +273,14 @@ func (s *Store) SyncPage(auth authContext, token string, limit int) (SyncRespons
 					if err != nil {
 						return result, err
 					}
+					if track.Missing {
+						track = unavailableTrack(track)
+					}
 					result.Changed = append(result.Changed, publicTrack(track, auth))
 				}
 			} else if item.kind == "playlist" {
 				if playlist, ok := allowedPlaylists[item.id]; ok && !item.deleted {
-					result.Playlists = append(result.Playlists, visiblePlaylist(playlist, auth, active))
-				} else if auth.role == "admin" {
-					result.DeletedPlaylists = append(result.DeletedPlaylists, item.id)
+					result.Playlists = append(result.Playlists, visiblePlaylist(playlist, auth, available))
 				}
 			}
 		}

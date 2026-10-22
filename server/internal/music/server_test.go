@@ -253,14 +253,14 @@ func TestMetadataPlaylistAndDeletionPersistAcrossScan(t *testing.T) {
 	if _, exists := api.store.Track(track.ID); exists {
 		t.Fatal("deleted track returned after scan")
 	}
-	snapshot, err := api.store.SyncPage(authContext{role: "admin", keyID: "test"}, "", 100)
+	snapshot, err := api.store.SyncPage(testSyncIdentity(api.store), "", 100)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !snapshot.FullSnapshot {
 		t.Fatal("changed revision did not return snapshot")
 	}
-	current, err := api.store.SyncPage(authContext{role: "admin", keyID: "test"}, snapshot.Cursor, 100)
+	current, err := api.store.SyncPage(testSyncIdentity(api.store), snapshot.Cursor, 100)
 	if err != nil {
 		t.Fatal(err)
 	}

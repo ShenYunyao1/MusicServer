@@ -33,16 +33,17 @@ type Track struct {
 }
 
 type Playlist struct {
-	OwnerID     string            `json:"owner_id,omitempty"`
-	System      bool              `json:"system"`
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	Description string            `json:"description,omitempty"`
-	TrackIDs    []string          `json:"track_ids"`
-	UpdatedAt   time.Time         `json:"updated_at"`
-	SortOrder   int               `json:"sort_order"`
-	TrackNotes  map[string]string `json:"track_notes,omitempty"`
-	Version     int64             `json:"version"`
+	UnavailableTrackIDs []string          `json:"unavailable_track_ids,omitempty"`
+	OwnerID             string            `json:"owner_id,omitempty"`
+	System              bool              `json:"system"`
+	ID                  string            `json:"id"`
+	Name                string            `json:"name"`
+	Description         string            `json:"description,omitempty"`
+	TrackIDs            []string          `json:"track_ids"`
+	UpdatedAt           time.Time         `json:"updated_at"`
+	SortOrder           int               `json:"sort_order"`
+	TrackNotes          map[string]string `json:"track_notes,omitempty"`
+	Version             int64             `json:"version"`
 }
 
 type ServerSettings struct {

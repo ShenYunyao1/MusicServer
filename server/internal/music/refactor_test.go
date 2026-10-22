@@ -198,7 +198,7 @@ func TestFailedTransactionRollsBackAuditAndChanges(t *testing.T) {
 
 func adminSync(t *testing.T, store *Store, cursor string, limit int) SyncResponse {
 	t.Helper()
-	response, err := store.SyncPage(authContext{role: "admin", keyID: "test-admin"}, cursor, limit)
+	response, err := store.SyncPage(testSyncIdentity(store), cursor, limit)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,12 +253,12 @@ func TestSyncPaginationAndConcurrentMutation(t *testing.T) {
 	if err := api.store.UpdateTrack(track.ID, map[string]string{"comment": "During pagination"}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := api.store.SyncPage(authContext{role: "admin", keyID: "test-admin"}, partial.Cursor, 1)
+	_, err := api.store.SyncPage(testSyncIdentity(api.store), partial.Cursor, 1)
 	if !errors.Is(err, errSyncRestart) {
 		t.Fatalf("mixed revision snapshot accepted: %v", err)
 	}
 	token := partial.Cursor[:len(partial.Cursor)-5] + "XXXXX"
-	if _, err := api.store.SyncPage(authContext{role: "admin", keyID: "test-admin"}, token, 1); err == nil {
+	if _, err := api.store.SyncPage(testSyncIdentity(api.store), token, 1); err == nil {
 		t.Fatal("tampered cursor accepted")
 	}
 }
