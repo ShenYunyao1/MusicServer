@@ -10,6 +10,8 @@ Go 1.26+，SQLite schema 4，HTTP API `/api/v2`，内置中文管理页。支持
 
 Windows 使用两个批处理脚本：`build.bat` 执行测试、`go vet` 和编译，固定生成 `build/musicserver.exe`，成功后明确输出 `BUILD SUCCEEDED` 和程序路径；失败输出 `BUILD FAILED` 并返回非零状态。`start.bat` 固定启动该程序，首次启动引导设置管理员密码。从其他目录调用也可；源码更新后先停服再编译。
 
+两个 BAT 在正常结束或出错后默认暂停，按任意键再关闭，避免双击时错误信息一闪而过；暂停后仍返回原退出码。如果提示数据库已占用，说明已有实例正在使用该数据库，请使用现有服务或先停服再启动。自动化调用可设置环境变量 `MUSIC_SERVER_NO_PAUSE=1` 跳过暂停；PowerShell 下可使用 `$env:MUSIC_SERVER_NO_PAUSE='1'`，CMD 下使用 `set MUSIC_SERVER_NO_PAUSE=1`。
+
 ```bat
 cd server
 call build.bat

@@ -40,10 +40,12 @@ def main():
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
     base = "http://127.0.0.1:" + str(port)
+    environment = os.environ.copy()
+    environment["MUSIC_SERVER_NO_PAUSE"] = "1"
     process = subprocess.Popen(
         [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/c", "call", str(runtime.parent / "start.bat"),
          "-addr", "127.0.0.1:" + str(port)], cwd=foreign,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=environment,
     )
     opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 

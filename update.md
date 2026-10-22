@@ -1,5 +1,11 @@
 # 更新日志
 
+## BAT 窗口暂停修复 - 2026-10-22
+
+- `start.bat` 和 `build.bat` 正常结束或失败后均默认暂停，保留报错信息和原退出码，修复双击启动失败时窗口立即关闭的问题。
+- 增加 `MUSIC_SERVER_NO_PAUSE=1`，供自动化调用显式跳过暂停；目录隔离测试同步使用该设置。
+- 新增真实 Windows 终端回归，覆盖缺少程序、程序正常/异常退出、编译成功/失败和自动化退出。
+
 ## 构建与运行目录整理 - 2026-10-22
 
 - 固定 Windows 产物为 `server/build/musicserver.exe`，启动脚本使用相同路径；可选 Linux 产物为 `server/build/musicserver`。
