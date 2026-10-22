@@ -44,8 +44,17 @@ func validateScopes(scopes []string) error {
 	return nil
 }
 
+func validatePlayerScopes(scopes []string) error {
+	for _, scope := range scopes {
+		if scope != ScopeLibraryRead && scope != ScopeMediaRead {
+			return fmt.Errorf("player keys only support library:read and media:read")
+		}
+	}
+	return validateScopes(scopes)
+}
+
 func hasScope(auth authContext, scope string) bool {
-	if auth.startup {
+	if auth.session {
 		return true
 	}
 	for _, candidate := range auth.scopes {
@@ -60,9 +69,9 @@ func hasScope(auth authContext, scope string) bool {
 // routes are left unscoped so handlers added later can decide their own policy
 // while the server still returns a normal NOT_FOUND response.
 func endpointScope(path, method string) string {
-	playlistRoute := path == "/api/v1/playlists" || strings.HasPrefix(path, "/api/v1/playlists/")
-	trackRoute := path == "/api/v1/tracks" || strings.HasPrefix(path, "/api/v1/tracks/")
-	if path == "/api/v1/sync" || playlistRoute || trackRoute {
+	playlistRoute := path == "/api/v2/playlists" || strings.HasPrefix(path, "/api/v2/playlists/")
+	trackRoute := path == "/api/v2/tracks" || strings.HasPrefix(path, "/api/v2/tracks/")
+	if path == "/api/v2/sync" || playlistRoute || trackRoute {
 		if method == "GET" {
 			return ScopeLibraryRead
 		}
@@ -70,22 +79,22 @@ func endpointScope(path, method string) string {
 			return ScopeLibraryWrite
 		}
 	}
-	if strings.HasPrefix(path, "/api/v1/media/") || strings.HasPrefix(path, "/api/v1/covers/") {
+	if strings.HasPrefix(path, "/api/v2/media/") || strings.HasPrefix(path, "/api/v2/covers/") {
 		return ScopeMediaRead
 	}
-	if path == "/api/v1/uploads" || strings.HasPrefix(path, "/api/v1/uploads/") {
+	if path == "/api/v2/uploads" || strings.HasPrefix(path, "/api/v2/uploads/") {
 		return ScopeUploadsWrite
 	}
-	if path == "/api/v1/admin/scan" {
+	if path == "/api/v2/admin/scan" || strings.HasPrefix(path, "/api/v2/admin/scan/") || path == "/api/v2/admin/removed" || strings.HasPrefix(path, "/api/v2/admin/removed/") {
 		return ScopeLibraryWrite
 	}
-	if path == "/api/v1/auth/keys" || strings.HasPrefix(path, "/api/v1/auth/keys/") {
+	if path == "/api/v2/auth/keys" || strings.HasPrefix(path, "/api/v2/auth/keys/") {
 		return ScopeKeysManage
 	}
-	if path == "/api/v1/admin/stats" {
+	if path == "/api/v2/admin/stats" || path == "/api/v2/admin/audit" {
 		return ScopeStatsRead
 	}
-	if path == "/api/v1/settings" || strings.HasPrefix(path, "/api/v1/settings/") || path == "/api/v1/admin/settings" || strings.HasPrefix(path, "/api/v1/admin/settings/") || path == "/api/v1/admin/update" || strings.HasPrefix(path, "/api/v1/admin/update/") {
+	if path == "/api/v2/admin/backups" || path == "/api/v2/settings" || strings.HasPrefix(path, "/api/v2/settings/") || path == "/api/v2/admin/settings" || strings.HasPrefix(path, "/api/v2/admin/settings/") || path == "/api/v2/admin/update" || strings.HasPrefix(path, "/api/v2/admin/update/") {
 		return ScopeSettingsManage
 	}
 	return ""

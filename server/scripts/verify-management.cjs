@@ -1,14 +1,14 @@
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const fs = require('node:fs');
-const { chromium } = require('playwright');
+const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 
 // Run against an isolated empty validation server, never a production library.
 async function main() {
   const base = process.env.MUSIC_SERVER_UI_URL;
-  const key = process.env.MUSIC_SERVER_UI_KEY;
+  const { login } = require('./account-session.cjs');
   const sampleRoot = process.env.MUSIC_SERVER_UI_SAMPLES;
-  assert(base && key && sampleRoot, 'Set MUSIC_SERVER_UI_URL, MUSIC_SERVER_UI_KEY and MUSIC_SERVER_UI_SAMPLES');
+  assert(base && sampleRoot, 'Set MUSIC_SERVER_UI_URL and MUSIC_SERVER_UI_SAMPLES');
   const sample = path.join(sampleRoot, '[1]\u9ed8\u8ba4\u5217\u8868', '\u7231\u6b87');
   const files = ['.mp3', '.lrc', '.jpg'].map(extension => sample + extension);
   files.forEach(file => assert(fs.existsSync(file), `Missing sample ${file}`));
@@ -17,9 +17,10 @@ async function main() {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
     const errors = [];
     page.on('pageerror', error => errors.push(String(error)));
+    const headers = await login(page, base);
     await page.goto(base);
-    await page.locator('#key').fill(key);
-    await page.locator('#connect').click();
+
+
     await page.waitForFunction(() => state.revision !== null);
     assert.equal(await page.evaluate(() => state.tracks.length), 0, 'Validation library must be empty');
     await page.locator('[data-page="upload"]').click();
@@ -38,10 +39,11 @@ async function main() {
     await page.waitForFunction(() => state.tracks.some(track => track.title === 'UI Regression Title'));
     await page.locator('[data-page="tracks"]').click();
     await page.waitForFunction(() => [...document.querySelectorAll('#trackRows img')].some(img => img.complete && img.naturalWidth > 0));
-    const headers = { 'X-API-Key': key };
-    const scan = await page.request.post(base + '/api/v1/admin/scan', { headers });
-    assert.equal(scan.status(), 200);
-    const stored = (await (await page.request.get(base + '/api/v1/tracks', { headers })).json())[0];
+
+    const scan = await page.request.post(base + '/api/v2/admin/scan', { headers });
+    assert.equal(scan.status(), 202);
+    await page.waitForFunction(async () => (await api('admin/scan/status')).state !== 'running');
+    const stored = (await (await page.request.get(base + '/api/v2/tracks', { headers })).json())[0];
     assert.equal(stored.title, 'UI Regression Title');
     assert.equal(stored.lyrics_source, 'sidecar');
     assert.equal(stored.cover_source, 'embedded');
@@ -51,9 +53,10 @@ async function main() {
     await page.locator('#modalBody input[type="file"]').setInputFiles(files[2]);
     await page.locator('#saveModal').click();
     await page.waitForFunction(() => state.tracks[0]?.cover_source === 'manual');
-    const manualScan = await page.request.post(base + '/api/v1/admin/scan', { headers });
-    assert.equal(manualScan.status(), 200);
-    const manualTrack = (await (await page.request.get(base + '/api/v1/tracks', { headers })).json())[0];
+    const manualScan = await page.request.post(base + '/api/v2/admin/scan', { headers });
+    assert.equal(manualScan.status(), 202);
+    await page.waitForFunction(async () => (await api('admin/scan/status')).state !== 'running');
+    const manualTrack = (await (await page.request.get(base + '/api/v2/tracks', { headers })).json())[0];
     assert.equal(manualTrack.cover_source, 'manual');
 
     await page.locator('[data-page="upload"]').click();
@@ -79,7 +82,7 @@ async function main() {
     await page.locator(`.playlist-card[data-id="${playlistIDs[1]}"]`).dragTo(page.locator(`.playlist-card[data-id="${playlistIDs[0]}"]`));
     await page.waitForFunction(id => state.playlists.find(playlist => playlist.id !== 'library')?.id === id, playlistIDs[1]);
     await page.waitForFunction(() => !requestActive && requestQueue.length === 0);
-    const ordered = await (await page.request.get(base + '/api/v1/playlists', { headers })).json();
+    const ordered = await (await page.request.get(base + '/api/v2/playlists', { headers })).json();
     assert.equal(ordered.find(playlist => playlist.id !== 'library').id, playlistIDs[1]);
     await page.locator('[data-page="tracks"]').click();
     await page.locator('#trackRows tr').click({ button: 'right' });
@@ -99,7 +102,7 @@ async function main() {
       }
       await page.locator('#newKey').click();
       await page.waitForSelector('#editor[open]');
-      assert.equal(await page.locator('[data-scope-check]').count(), 7);
+      assert.equal(await page.locator('[data-scope-check]').count(), 2);
       assert.equal(await page.locator('#policyConcurrency').inputValue(), '1');
       await page.screenshot({ path: path.join(process.env.MUSIC_SERVER_UI_SCREENSHOTS || process.cwd(), `v06-key-dialog-${viewport.width}.png`), fullPage: true });
       await page.locator('#cancelModal').click();
@@ -114,16 +117,16 @@ async function main() {
     await page.locator('[data-setting="max_upload_bytes"]').fill('64');
     await page.locator('#saveSettings').click();
     await page.waitForFunction(() => state.settings.max_upload_bytes === 64 * 1048576 && !state.settings.scan_external_lyrics && !state.settings.scan_external_covers);
-    const settings = await (await page.request.get(base + '/api/v1/admin/settings', { headers })).json();
+    const settings = await (await page.request.get(base + '/api/v2/admin/settings', { headers })).json();
     assert.equal(settings.scan_external_lyrics, false);
     assert.equal(settings.scan_external_covers, false);
 
-    // A persisted administrator with the default concurrency must also be usable.
+    // A player key with restricted permissions must also be usable.
     await page.locator('[data-page="keys"]').click();
     await page.locator('#newKey').click();
-    await page.locator('#policyName').fill('UI Single Request Admin');
-    await page.locator('#policyRole').selectOption('admin');
-    assert.equal(await page.locator('[data-scope-check]:checked').count(), 7);
+    await page.locator('#policyName').fill('UI Single Request Player');
+    await page.locator('#policyConcurrency').fill('1');
+    assert.equal(await page.locator('[data-scope-check]:checked').count(), 2);
     await page.locator('#saveModal').click();
     await page.waitForSelector('#secretDialog[open]');
     const restrictedAdmin = await page.locator('#secretValue').textContent();
@@ -131,8 +134,8 @@ async function main() {
     await page.waitForFunction(() => !requestActive && requestQueue.length === 0);
     const failures = [];
     page.on('response', response => { if (response.status() === 429) failures.push(response.url()); });
-    await page.locator('#key').fill(restrictedAdmin);
-    await page.locator('#connect').click();
+    assert.equal((await page.request.get(base + '/api/v2/admin/settings', { headers: { 'X-API-Key': restrictedAdmin } })).status(), 403);
+
     await page.waitForFunction(() => !requestActive && requestQueue.length === 0 && document.getElementById('status').classList.contains('ok'));
     for (let pass = 0; pass < 3; pass++) {
       await page.locator('[data-page="tracks"]').click();
@@ -142,7 +145,7 @@ async function main() {
       await page.locator('#refreshOverview').click();
       await page.waitForFunction(() => !requestActive && requestQueue.length === 0);
     }
-    assert.deepEqual(failures, [], 'The management queue must respect concurrency=1');
+    assert.deepEqual(failures, [], 'The management queue must complete queued requests');
     assert.deepEqual(errors, [], 'Management page must not throw JavaScript errors');
     console.log('PASS: resource matching, staged preview/confirm, cover rendering, rescan, dedup, playlist drag/submenu, settings persistence, scopes/key UI, concurrency=1, desktop/mobile');
   } finally {

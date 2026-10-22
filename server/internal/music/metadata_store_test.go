@@ -12,7 +12,7 @@ import (
 )
 
 func TestUnusedAPIKeyDoesNotExposeZeroDates(t *testing.T) {
-	encoded, err := json.Marshal(publicAPIKey(APIKey{ID: "unused", Name: "未使用", Role: "player"}))
+	encoded, err := json.Marshal(publicAPIKey(APIKey{ID: "unused", Name: "未使用"}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,9 +75,9 @@ func TestUploadPreservesTagsAndCommitsMetadataOnce(t *testing.T) {
 	_, _ = part.Write(testID3AudioMetadata())
 	_ = form.WriteField("artist", "上传修订歌手")
 	_ = form.Close()
-	request := httptest.NewRequest("POST", "/api/v1/uploads", &body)
+	request := httptest.NewRequest("POST", "/api/v2/uploads", &body)
 	request.Header.Set("Content-Type", form.FormDataContentType())
-	request.Header.Set("X-API-Key", "secret")
+	authorizeTestAdmin(api, request)
 	response := httptest.NewRecorder()
 	api.ServeHTTP(response, request)
 	if response.Code != 201 {
@@ -90,7 +90,7 @@ func TestUploadPreservesTagsAndCommitsMetadataOnce(t *testing.T) {
 	if track.Title != "中文歌名" || track.Artist != "上传修订歌手" || track.Album != "标签专辑" || !track.EmbeddedLyrics {
 		t.Fatalf("upload tags overwritten: %+v", track)
 	}
-	if api.store.Revision() != before+1 {
+	if api.store.Revision() != before+2 {
 		t.Fatal("upload metadata was committed separately")
 	}
 	if _, err := api.store.Scan(); err != nil {
@@ -105,7 +105,7 @@ func TestUploadPreservesTagsAndCommitsMetadataOnce(t *testing.T) {
 func TestUploadFailureRemovesFileAndRestoresLibrary(t *testing.T) {
 	api, root := testAPI(t)
 	before := api.store.Revision()
-	if err := api.store.Close(); err != nil {
+	if _, err := api.store.db.Exec("CREATE TRIGGER reject_upload BEFORE INSERT ON tracks BEGIN SELECT RAISE(ABORT,'reject upload'); END"); err != nil {
 		t.Fatal(err)
 	}
 	_, err := api.store.ImportAudioWithMetadata("failed.mp3", bytes.NewReader(testID3AudioMetadata()), map[string]string{"artist": "手工"})
@@ -123,7 +123,7 @@ func TestUploadFailureRemovesFileAndRestoresLibrary(t *testing.T) {
 
 func TestUntaggedUploadRetainsOriginalNameAfterReopen(t *testing.T) {
 	api, root := testAPI(t)
-	track, err := api.store.ImportAudio("原始标题 - 原始歌手.mp3", strings.NewReader("untagged audio"))
+	track, err := api.store.ImportAudio("原始标题 - 原始歌手.wav", bytes.NewReader(validTestAudio(t)))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,7 +2,9 @@ package music
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -10,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -24,18 +27,21 @@ func testAPI(t *testing.T) (*API, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
+	if _, err := store.InitializeAdmin("admin", "test administrator password"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := store.Scan(); err != nil {
 		t.Fatal(err)
 	}
-	return NewAPI(store, "secret"), mediaRoot
+	return NewAPI(store), mediaRoot
 }
 
 func TestHealthAndPlaylist(t *testing.T) {
 	api, _ := testAPI(t)
 	server := httptest.NewServer(api)
 	defer server.Close()
-	request, _ := http.NewRequest(http.MethodGet, server.URL+"/api/v1/playlists", nil)
-	request.Header.Set("X-API-Key", "secret")
+	request, _ := http.NewRequest(http.MethodGet, server.URL+"/api/v2/playlists", nil)
+	authorizeTestAdmin(api, request)
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatal(err)
@@ -55,8 +61,8 @@ func TestMediaSupportsRange(t *testing.T) {
 	track := api.store.Tracks()[0]
 	server := httptest.NewServer(api)
 	defer server.Close()
-	request, _ := http.NewRequest(http.MethodGet, server.URL+"/api/v1/media/"+track.ID, nil)
-	request.Header.Set("X-API-Key", "secret")
+	request, _ := http.NewRequest(http.MethodGet, server.URL+"/api/v2/media/"+track.ID, nil)
+	authorizeTestAdmin(api, request)
 	request.Header.Set("Range", "bytes=2-5")
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
@@ -74,7 +80,7 @@ func TestMediaSupportsRange(t *testing.T) {
 
 func TestAPIKeyRequired(t *testing.T) {
 	api, _ := testAPI(t)
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/playlists", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/v2/playlists", nil)
 	response := httptest.NewRecorder()
 	api.ServeHTTP(response, request)
 	if response.Code != http.StatusUnauthorized {
@@ -84,7 +90,9 @@ func TestAPIKeyRequired(t *testing.T) {
 
 func callAPI(api *API, method, path, body string) *httptest.ResponseRecorder {
 	request := httptest.NewRequest(method, path, strings.NewReader(body))
-	request.Header.Set("X-API-Key", "secret")
+	authorizeTestAdmin(api, request)
+	addTestVersion(api, request)
+	addTestVersion(api, request)
 	response := httptest.NewRecorder()
 	api.ServeHTTP(response, request)
 	return response
@@ -92,12 +100,32 @@ func callAPI(api *API, method, path, body string) *httptest.ResponseRecorder {
 
 func callAPIWithKey(api *API, method, path, body, key string) *httptest.ResponseRecorder {
 	request := httptest.NewRequest(method, path, strings.NewReader(body))
-	if key != "" {
+	if key == "secret" {
+		authorizeTestAdmin(api, request)
+	} else if key != "" {
 		request.Header.Set("X-API-Key", key)
 	}
 	response := httptest.NewRecorder()
 	api.ServeHTTP(response, request)
 	return response
+}
+
+var testSessions sync.Map
+
+func authorizeTestAdmin(api *API, request *http.Request) {
+	value, ok := testSessions.Load(api)
+	if !ok {
+		_, _, token, err := api.store.Login("admin", "test administrator password", "test-fixture")
+		if err != nil {
+			panic(err)
+		}
+		value = token
+		testSessions.Store(api, token)
+	}
+	token := value.(string)
+	request.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+	request.Header.Set("Origin", "http://"+request.Host)
+	request.Header.Set("X-CSRF-Token", csrfForToken(token))
 }
 
 func createPersistentKey(t *testing.T, api *API, input APIKeyCreateRequest) (APIKeyView, string) {
@@ -106,7 +134,7 @@ func createPersistentKey(t *testing.T, api *API, input APIKeyCreateRequest) (API
 	if err != nil {
 		t.Fatal(err)
 	}
-	response := callAPI(api, http.MethodPost, "/api/v1/auth/keys", string(body))
+	response := callAPI(api, http.MethodPost, "/api/v2/auth/keys", string(body))
 	if response.Code != http.StatusCreated {
 		t.Fatalf("create key: %d %s", response.Code, response.Body.String())
 	}
@@ -125,44 +153,44 @@ func TestAPIKeyAuthorizationAndRedaction(t *testing.T) {
 	track := api.store.Tracks()[0]
 	playlist := Playlist{ID: "favorites", Name: "Favorites", TrackIDs: []string{track.ID}}
 	playlistBody, _ := json.Marshal(playlist)
-	if response := callAPI(api, http.MethodPost, "/api/v1/playlists", string(playlistBody)); response.Code != http.StatusCreated {
+	if response := callAPI(api, http.MethodPost, "/api/v2/playlists", string(playlistBody)); response.Code != http.StatusCreated {
 		t.Fatalf("create playlist: %d %s", response.Code, response.Body.String())
 	}
-	view, playerSecret := createPersistentKey(t, api, APIKeyCreateRequest{Name: "Player", Role: "player"})
+	view, playerSecret := createPersistentKey(t, api, APIKeyCreateRequest{Name: "Player"})
 
-	response := callAPIWithKey(api, http.MethodGet, "/api/v1/auth/keys", "", "secret")
+	response := callAPIWithKey(api, http.MethodGet, "/api/v2/auth/keys", "", "secret")
 	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "secret_hash") {
 		t.Fatalf("key list leaked hash or failed: %d %s", response.Code, response.Body.String())
 	}
-	response = callAPIWithKey(api, http.MethodGet, "/api/v1/playlists", "", playerSecret)
+	response = callAPIWithKey(api, http.MethodGet, "/api/v2/playlists", "", playerSecret)
 	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "Favorites") {
 		t.Fatalf("unassigned player can read playlist: %d %s", response.Code, response.Body.String())
 	}
-	response = callAPIWithKey(api, http.MethodGet, "/api/v1/media/"+track.ID, "", playerSecret)
-	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "TRACK_ACCESS_DENIED") {
+	response = callAPIWithKey(api, http.MethodGet, "/api/v2/media/"+track.ID, "", playerSecret)
+	if response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), "TRACK_NOT_FOUND") {
 		t.Fatalf("unassigned player media access: %d %s", response.Code, response.Body.String())
 	}
 
 	authorized := []string{playlist.ID}
 	updateBody, _ := json.Marshal(APIKeyUpdateRequest{AllowedPlaylistIDs: &authorized})
-	response = callAPIWithKey(api, http.MethodPatch, "/api/v1/auth/keys/"+view.ID, string(updateBody), "secret")
+	response = callAPIWithKey(api, http.MethodPatch, "/api/v2/auth/keys/"+view.ID, string(updateBody), "secret")
 	if response.Code != http.StatusOK {
 		t.Fatalf("authorize key: %d %s", response.Code, response.Body.String())
 	}
-	response = callAPIWithKey(api, http.MethodGet, "/api/v1/playlists/"+playlist.ID, "", playerSecret)
+	response = callAPIWithKey(api, http.MethodGet, "/api/v2/playlists/"+playlist.ID, "", playerSecret)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Favorites") {
 		t.Fatalf("authorized playlist access: %d %s", response.Code, response.Body.String())
 	}
-	response = callAPIWithKey(api, http.MethodGet, "/api/v1/media/"+track.ID, "", playerSecret)
+	response = callAPIWithKey(api, http.MethodGet, "/api/v2/media/"+track.ID, "", playerSecret)
 	if response.Code != http.StatusOK {
 		t.Fatalf("authorized media access: %d %s", response.Code, response.Body.String())
 	}
 
-	response = callAPIWithKey(api, http.MethodDelete, "/api/v1/auth/keys/"+view.ID, "", "secret")
+	response = callAPIWithKey(api, http.MethodDelete, "/api/v2/auth/keys/"+view.ID, "", "secret")
 	if response.Code != http.StatusNoContent {
 		t.Fatalf("revoke key: %d %s", response.Code, response.Body.String())
 	}
-	response = callAPIWithKey(api, http.MethodGet, "/api/v1/playlists", "", playerSecret)
+	response = callAPIWithKey(api, http.MethodGet, "/api/v2/playlists", "", playerSecret)
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("revoked key status: %d %s", response.Code, response.Body.String())
 	}
@@ -184,12 +212,12 @@ func TestAPIKeyAuthorizationAndRedaction(t *testing.T) {
 func TestMetadataPlaylistAndDeletionPersistAcrossScan(t *testing.T) {
 	api, root := testAPI(t)
 	track := api.store.Tracks()[0]
-	if response := callAPI(api, "PATCH", "/api/v1/tracks/"+track.ID, `{"title":"Edited","lyrics":"[00:01]Words","comment":"Note","genre":"Pop"}`); response.Code != 200 {
+	if response := callAPI(api, "PATCH", "/api/v2/tracks/"+track.ID, `{"title":"Edited","lyrics":"[00:01]Words","comment":"Note","genre":"Pop"}`); response.Code != 200 {
 		t.Fatal(response.Body.String())
 	}
 	playlist := Playlist{ID: "custom", Name: "Favorites", Description: "Playlist note", TrackIDs: []string{track.ID}, TrackNotes: map[string]string{track.ID: "Track in playlist note"}}
 	content, _ := json.Marshal(playlist)
-	if response := callAPI(api, "POST", "/api/v1/playlists", string(content)); response.Code != 201 {
+	if response := callAPI(api, "POST", "/api/v2/playlists", string(content)); response.Code != 201 {
 		t.Fatal(response.Body.String())
 	}
 	if _, err := api.store.Scan(); err != nil {
@@ -213,8 +241,7 @@ func TestMetadataPlaylistAndDeletionPersistAcrossScan(t *testing.T) {
 	if storedAgain.TrackNotes[track.ID] == "external mutation" {
 		t.Fatal("playlist exposed mutable storage")
 	}
-	before := api.store.Revision()
-	if response := callAPI(api, "DELETE", "/api/v1/tracks/"+track.ID, ""); response.Code != 204 {
+	if response := callAPI(api, "DELETE", "/api/v2/tracks/"+track.ID, ""); response.Code != 204 {
 		t.Fatal(response.Body.String())
 	}
 	if _, err := os.Stat(filepath.Join(root, track.Path)); err != nil {
@@ -226,13 +253,21 @@ func TestMetadataPlaylistAndDeletionPersistAcrossScan(t *testing.T) {
 	if _, exists := api.store.Track(track.ID); exists {
 		t.Fatal("deleted track returned after scan")
 	}
-	if !api.store.Sync(before).FullSnapshot {
+	snapshot, err := api.store.SyncPage(authContext{role: "admin", keyID: "test"}, "", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snapshot.FullSnapshot {
 		t.Fatal("changed revision did not return snapshot")
 	}
-	if api.store.Sync(api.store.Revision()).FullSnapshot {
+	current, err := api.store.SyncPage(authContext{role: "admin", keyID: "test"}, snapshot.Cursor, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.FullSnapshot {
 		t.Fatal("unchanged revision returned snapshot")
 	}
-	if response := callAPI(api, "DELETE", "/api/v1/playlists/custom", ""); response.Code != 204 {
+	if response := callAPI(api, "DELETE", "/api/v2/playlists/custom", ""); response.Code != 204 {
 		t.Fatal(response.Body.String())
 	}
 }
@@ -245,11 +280,12 @@ func TestUploadExceedsMetadataBodyLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _ = part.Write(bytes.Repeat([]byte("music"), 600000))
+	audio := bytes.Repeat(validTestAudio(t), 4000)
+	_, _ = part.Write(audio)
 	_ = form.Close()
-	request := httptest.NewRequest("POST", "/api/v1/uploads", &body)
+	request := httptest.NewRequest("POST", "/api/v2/uploads", &body)
 	request.Header.Set("Content-Type", form.FormDataContentType())
-	request.Header.Set("X-API-Key", "secret")
+	authorizeTestAdmin(api, request)
 	response := httptest.NewRecorder()
 	api.ServeHTTP(response, request)
 	if response.Code != 201 {
@@ -259,7 +295,7 @@ func TestUploadExceedsMetadataBodyLimit(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &track); err != nil {
 		t.Fatal(err)
 	}
-	if track.Size != 3000000 || track.Title != "Uploaded" {
+	if track.Size != int64(len(audio)) || track.Title != "Uploaded" {
 		t.Fatalf("upload metadata: %+v", track)
 	}
 	if len(api.store.Tracks()) != 2 {
@@ -271,15 +307,15 @@ func TestFailedSaveRollsBackRevisionAndMetadata(t *testing.T) {
 	api, _ := testAPI(t)
 	track := api.store.Tracks()[0]
 	revision := api.store.Revision()
-	if err := api.store.Close(); err != nil {
+	if _, err := api.store.db.Exec("CREATE TRIGGER reject_update BEFORE INSERT ON tracks BEGIN SELECT RAISE(ABORT,'reject'); END"); err != nil {
 		t.Fatal(err)
 	}
-	if err := api.store.UpdateTrack(track.ID, map[string]string{"title": "Should roll back"}); err == nil {
-		t.Fatal("expected persistence failure")
+	if err := api.store.UpdateTrack(track.ID, map[string]string{"title": "Rejected"}); err == nil {
+		t.Fatal("expected transaction failure")
 	}
 	actual, _ := api.store.Track(track.ID)
 	if actual.Title != track.Title || api.store.Revision() != revision {
-		t.Fatal("failed save changed live data")
+		t.Fatal("failed save changed data")
 	}
 }
 
@@ -294,11 +330,11 @@ func TestMediaCannotFollowExternalSymlink(t *testing.T) {
 	if err := os.Symlink(outside, link); err != nil {
 		t.Skipf("symlink not supported: %v", err)
 	}
-	api.store.mu.Lock()
 	track.Path = "link.mp3"
-	api.store.data.Tracks[track.ID] = track
-	api.store.mu.Unlock()
-	response := callAPI(api, "GET", "/api/v1/media/"+track.ID, "")
+	if err := api.store.transaction(func(tx *sql.Tx) error { return writeTrack(tx, track) }); err != nil {
+		t.Fatal(err)
+	}
+	response := callAPI(api, "GET", "/api/v2/media/"+track.ID, "")
 	if response.Code == 200 || strings.Contains(response.Body.String(), "private data") {
 		t.Fatal("media escaped root")
 	}
@@ -331,5 +367,23 @@ func TestLyricsAssociationAndContainment(t *testing.T) {
 	}
 	if api.store.Tracks()[0].Lyrics != "" {
 		t.Fatal("lyrics escaped root")
+	}
+}
+
+func addTestVersion(api *API, request *http.Request) {
+	if !needsVersion(request) {
+		return
+	}
+	path := strings.TrimPrefix(request.URL.Path, "/api/v2/")
+	parts := strings.Split(path, "/")
+	if parts[0] == "tracks" && len(parts) > 1 {
+		if track, ok := api.store.Track(parts[1]); ok {
+			request.Header.Set("If-Match", fmt.Sprint(track.Version))
+		}
+	}
+	if parts[0] == "playlists" && len(parts) > 1 {
+		if playlist, ok := api.store.Playlist(parts[1]); ok {
+			request.Header.Set("If-Match", fmt.Sprint(playlist.Version))
+		}
 	}
 }

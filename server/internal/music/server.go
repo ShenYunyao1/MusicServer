@@ -2,6 +2,7 @@ package music
 
 import (
 	"context"
+	"crypto/subtle"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -24,34 +25,43 @@ var managementPage []byte
 //go:embed vendor/jsmediatags-3.9.7.min.js
 var browserTagReader []byte
 
+//go:embed account.js
+var accountPageScript []byte
+
 type API struct {
 	store         *Store
-	apiKey        string
 	updater       *update.Manager
 	concurrencyMu sync.Mutex
 	active        map[string]int
+	authConfig    AuthConfig
+	hashSlots     chan struct{}
 }
 
 type authContext struct {
+	userID           string
+	authVersion      int64
+	session          bool
+	csrf             string
+	username         string
 	role             string
 	allowedPlaylists map[string]bool
 	scopes           []string
 	keyID            string
 	maxConcurrency   int
-	startup          bool
-	legacy           bool
+	download         bool
+	maxDownloads     int
 }
 
-func NewAPI(store *Store, apiKey string) *API {
-	api := &API{store: store, apiKey: apiKey, active: map[string]int{}}
+func NewAPI(store *Store) *API {
+	api := &API{store: store, active: map[string]int{}, hashSlots: make(chan struct{}, 2)}
 	return api
 }
 
 func (a *API) SetUpdater(manager *update.Manager) { a.updater = manager }
 
 func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
-	isAPIRequest := strings.HasPrefix(request.URL.Path, "/api/v1/")
-	trackCall := isAPIRequest && request.URL.Path != "/api/v1/health"
+	isAPIRequest := strings.HasPrefix(request.URL.Path, "/api/v2/")
+	trackCall := isAPIRequest && request.URL.Path != "/api/v2/health"
 	started := time.Now()
 	callKeyID := "anonymous"
 	var release func()
@@ -73,6 +83,9 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		}()
 	}
 	response.Header().Set("X-Content-Type-Options", "nosniff")
+	if isAPIRequest {
+		response.Header().Set("Cache-Control", "no-store")
+	}
 	requestID, err := randomToken(8)
 	if err == nil {
 		response.Header().Set("X-Request-ID", requestID)
@@ -88,12 +101,22 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		_, _ = response.Write(browserTagReader)
 		return
 	}
-	resourceUpload := strings.HasPrefix(request.URL.Path, "/api/v1/tracks/") && (strings.HasSuffix(request.URL.Path, "/cover") || strings.HasSuffix(request.URL.Path, "/lyrics"))
-	if !strings.HasPrefix(request.URL.Path, "/api/v1/uploads") && !resourceUpload {
+	if request.URL.Path == "/assets/account.js" && request.Method == http.MethodGet {
+		response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		response.Header().Set("Cache-Control", "no-cache")
+		_, _ = response.Write(accountPageScript)
+		return
+	}
+	resourceUpload := strings.HasPrefix(request.URL.Path, "/api/v2/tracks/") && (strings.HasSuffix(request.URL.Path, "/cover") || strings.HasSuffix(request.URL.Path, "/lyrics"))
+	if !strings.HasPrefix(request.URL.Path, "/api/v2/uploads") && !resourceUpload {
 		request.Body = http.MaxBytesReader(response, request.Body, 2<<20)
 	}
 	var auth authContext
-	if request.URL.Path != "/api/v1/health" {
+	if request.URL.Path == "/api/v2/auth/login" {
+		a.accountAuth(response, request)
+		return
+	}
+	if request.URL.Path != "/api/v2/health" {
 		var ok bool
 		auth, ok = a.authenticate(request)
 		if !ok {
@@ -102,7 +125,18 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		}
 		request = request.WithContext(withAuth(request.Context(), auth))
 		callKeyID = auth.keyID
-		if !auth.startup {
+		if auth.session && request.Method != "GET" && request.Method != "HEAD" {
+			if !a.validOrigin(request) || subtle.ConstantTimeCompare([]byte(auth.csrf), []byte(request.Header.Get("X-CSRF-Token"))) != 1 {
+				writeError(response, 403, "CSRF_DENIED", "same-origin CSRF token required")
+				return
+			}
+		}
+		if !auth.session {
+			if !playerEndpoint(request) {
+				writeError(response, 403, "SESSION_REQUIRED", "management requires an account session")
+				return
+			}
+			auth.download = strings.HasPrefix(request.URL.Path, "/api/v2/media/") || strings.HasPrefix(request.URL.Path, "/api/v2/covers/")
 			if !a.acquire(auth) {
 				response.Header().Set("Retry-After", "1")
 				writeError(response, http.StatusTooManyRequests, "KEY_CONCURRENCY_LIMIT", "key concurrency limit reached")
@@ -116,24 +150,37 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 			}
 		}
 	}
-	if request.URL.Path == "/api/v1/auth/keys" || strings.HasPrefix(request.URL.Path, "/api/v1/auth/keys/") {
+	if strings.HasPrefix(request.URL.Path, "/api/v2/auth/") && !strings.HasPrefix(request.URL.Path, "/api/v2/auth/keys") {
+		a.accountAuth(response, request)
+		return
+	}
+	if needsVersion(request) {
+		expected, err := strconv.ParseInt(strings.Trim(request.Header.Get("If-Match"), string(rune(34))), 10, 64)
+		if err != nil || expected < 1 {
+			writeError(response, 428, "VERSION_REQUIRED", "If-Match with current version is required")
+			return
+		}
+	}
+	if request.URL.Path == "/api/v2/auth/keys" || strings.HasPrefix(request.URL.Path, "/api/v2/auth/keys/") {
 		a.keys(response, request)
 		return
 	}
 	switch {
-	case request.URL.Path == "/api/v1/health":
+	case request.URL.Path == "/api/v2/health":
 		if request.Method != http.MethodGet {
 			writeError(response, 405, "method not allowed")
 			return
 		}
 		writeJSON(response, http.StatusOK, map[string]any{"status": "ok", "version": version.Version, "revision": a.store.Revision()})
-	case request.URL.Path == "/api/v1/sync":
+	case request.URL.Path == "/api/v2/sync":
 		a.sync(response, request)
-	case request.URL.Path == "/api/v1/playlists":
+	case request.URL.Path == "/api/v2/playlists":
 		a.playlists(response, request)
-	case request.URL.Path == "/api/v1/playlists/order":
+	case request.URL.Path == "/api/v2/playlists/order":
 		a.playlistOrder(response, request)
-	case request.URL.Path == "/api/v1/tracks":
+	case request.URL.Path == "/api/v2/admin/removed" || strings.HasPrefix(request.URL.Path, "/api/v2/admin/removed/") || request.URL.Path == "/api/v2/admin/audit" || request.URL.Path == "/api/v2/admin/backups" || request.URL.Path == "/api/v2/admin/scan/status" || request.URL.Path == "/api/v2/admin/scan/cancel":
+		a.maintenance(response, request)
+	case request.URL.Path == "/api/v2/tracks":
 		if request.Method != http.MethodGet {
 			writeError(response, 405, "method not allowed")
 			return
@@ -143,33 +190,33 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 			filtered := make([]Track, 0, len(tracks))
 			for _, track := range tracks {
 				if canReadTrack(authFromRequest(request), a.store, track.ID) {
-					filtered = append(filtered, track)
+					filtered = append(filtered, publicTrack(track, authFromRequest(request)))
 				}
 			}
 			tracks = filtered
 		}
 		writeJSON(response, http.StatusOK, tracks)
-	case request.URL.Path == "/api/v1/uploads":
+	case request.URL.Path == "/api/v2/uploads":
 		a.upload(response, request)
-	case request.URL.Path == "/api/v1/uploads/stage":
+	case request.URL.Path == "/api/v2/uploads/stage":
 		a.stageUpload(response, request)
-	case strings.HasPrefix(request.URL.Path, "/api/v1/uploads/stage/"):
+	case strings.HasPrefix(request.URL.Path, "/api/v2/uploads/stage/"):
 		a.stagedUpload(response, request)
-	case strings.HasPrefix(request.URL.Path, "/api/v1/playlists/"):
+	case strings.HasPrefix(request.URL.Path, "/api/v2/playlists/"):
 		a.playlist(response, request)
-	case strings.HasPrefix(request.URL.Path, "/api/v1/tracks/"):
+	case strings.HasPrefix(request.URL.Path, "/api/v2/tracks/"):
 		a.track(response, request)
-	case strings.HasPrefix(request.URL.Path, "/api/v1/media/"):
+	case strings.HasPrefix(request.URL.Path, "/api/v2/media/"):
 		a.media(response, request)
-	case strings.HasPrefix(request.URL.Path, "/api/v1/covers/"):
+	case strings.HasPrefix(request.URL.Path, "/api/v2/covers/"):
 		a.cover(response, request)
-	case request.URL.Path == "/api/v1/admin/scan":
+	case request.URL.Path == "/api/v2/admin/scan":
 		a.scan(response, request)
-	case request.URL.Path == "/api/v1/admin/stats":
+	case request.URL.Path == "/api/v2/admin/stats":
 		a.adminStats(response, request)
-	case request.URL.Path == "/api/v1/admin/settings":
+	case request.URL.Path == "/api/v2/admin/settings":
 		a.adminSettings(response, request)
-	case request.URL.Path == "/api/v1/admin/update" || request.URL.Path == "/api/v1/admin/update/check":
+	case request.URL.Path == "/api/v2/admin/update" || request.URL.Path == "/api/v2/admin/update/check":
 		a.adminUpdate(response, request)
 	default:
 		writeErrorWithID(response, http.StatusNotFound, "NOT_FOUND", "endpoint not found", requestID)
@@ -185,14 +232,21 @@ func (a *API) playlistOrder(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	var body struct {
-		Order []string `json:"order"`
+		Order         []string `json:"order"`
+		ExpectedOrder []string `json:"expected_order"`
 	}
 	if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 		writeError(response, http.StatusBadRequest, "INVALID_ORDER", "invalid playlist order JSON")
 		return
 	}
-	if err := a.store.ReorderPlaylists(body.Order); err != nil {
-		writeError(response, http.StatusBadRequest, "ORDER_FAILED", err.Error())
+	if body.ExpectedOrder == nil {
+		writeError(response, 428, "ORDER_REQUIRED", "expected_order is required")
+		return
+	}
+	options := mutationOptions(request)
+	options.ExpectedOrder = body.ExpectedOrder
+	if err := a.store.ReorderPlaylists(body.Order, options); err != nil {
+		writePlaylistMutationError(response, err)
 		return
 	}
 	writeJSON(response, http.StatusOK, a.store.Playlists())
@@ -211,7 +265,7 @@ func (a *API) adminSettings(response http.ResponseWriter, request *http.Request)
 			writeError(response, http.StatusBadRequest, "INVALID_SETTINGS", "invalid settings JSON")
 			return
 		}
-		if err := a.store.UpdateSettings(settings); err != nil {
+		if err := a.store.UpdateSettings(settings, mutationOptions(request)); err != nil {
 			writeError(response, http.StatusBadRequest, "INVALID_SETTINGS", err.Error())
 			return
 		}
@@ -232,11 +286,11 @@ func (a *API) adminUpdate(response http.ResponseWriter, request *http.Request) {
 		writeError(response, http.StatusServiceUnavailable, "UPDATE_UNAVAILABLE", "update manager is unavailable")
 		return
 	}
-	if request.URL.Path == "/api/v1/admin/update" && request.Method == http.MethodGet {
+	if request.URL.Path == "/api/v2/admin/update" && request.Method == http.MethodGet {
 		writeJSON(response, http.StatusOK, a.updater.Status())
 		return
 	}
-	if request.URL.Path == "/api/v1/admin/update/check" && request.Method == http.MethodPost {
+	if request.URL.Path == "/api/v2/admin/update/check" && request.Method == http.MethodPost {
 		if !a.updater.Trigger() {
 			writeError(response, http.StatusConflict, "UPDATE_BUSY", "update check is already running")
 			return
@@ -252,7 +306,7 @@ func (a *API) cover(response http.ResponseWriter, request *http.Request) {
 		writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
 		return
 	}
-	id := strings.TrimPrefix(request.URL.Path, "/api/v1/covers/")
+	id := strings.TrimPrefix(request.URL.Path, "/api/v2/covers/")
 	if id == "" || strings.ContainsAny(id, "/\\") {
 		writeError(response, http.StatusBadRequest, "INVALID_COVER", "invalid cover id")
 		return
@@ -267,7 +321,7 @@ func (a *API) cover(response http.ResponseWriter, request *http.Request) {
 			}
 		}
 		if !allowed {
-			writeError(response, http.StatusForbidden, "COVER_ACCESS_DENIED", "current key cannot access this cover")
+			writeError(response, http.StatusNotFound, "COVER_NOT_FOUND", "cover not found")
 			return
 		}
 	}
@@ -277,8 +331,8 @@ func (a *API) cover(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	response.Header().Set("Content-Type", asset.MIME)
-	response.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
-	response.Header().Set("Vary", "X-API-Key, Authorization")
+	response.Header().Set("Cache-Control", "private, no-store")
+	response.Header().Set("Vary", "X-API-Key, Authorization, Cookie")
 	response.Header().Set("ETag", fmt.Sprintf("\"%s\"", id))
 	if request.Method == http.MethodHead {
 		response.WriteHeader(http.StatusOK)
@@ -299,34 +353,61 @@ func authFromRequest(request *http.Request) authContext {
 	if value, ok := request.Context().Value(authContextKey{}).(authContext); ok {
 		return value
 	}
-	return authContext{role: "admin", keyID: "startup-admin", startup: true, legacy: true}
+	return authContext{}
 }
 
 func (a *API) authenticate(request *http.Request) (authContext, bool) {
 	provided := request.Header.Get("X-API-Key")
-	if provided == "" {
-		provided = strings.TrimPrefix(request.Header.Get("Authorization"), "Bearer ")
+	_, keyHeader := request.Header["X-Api-Key"]
+	if provided != "" || keyHeader || request.Header.Get("Authorization") != "" {
+		if provided == "" {
+			provided = strings.TrimPrefix(request.Header.Get("Authorization"), "Bearer ")
+		}
+		key, ok := a.store.AuthenticateSecret(provided)
+		if !ok {
+			return authContext{}, false
+		}
+		user, err := readUser(a.store.db, key.UserID)
+		if err != nil || !user.Enabled {
+			return authContext{}, false
+		}
+		allowed := map[string]bool{}
+		for _, id := range key.AllowedPlaylistIDs {
+			playlist, exists := a.store.Playlist(id)
+			if exists && (user.Role == "admin" || !playlist.System && playlist.OwnerID == user.ID) {
+				allowed[id] = true
+			}
+		}
+		return authContext{role: "player", userID: user.ID, authVersion: user.AuthVersion, username: user.Username, allowedPlaylists: allowed, scopes: cloneStrings(key.Scopes), keyID: key.ID, maxConcurrency: key.MaxConcurrency, maxDownloads: key.MaxDownloads}, true
 	}
-	if a.apiKey == "" && provided == "" && len(a.store.APIKeys()) == 0 {
-		return authContext{role: "admin", keyID: "startup-admin", startup: true, legacy: true}, true
+	cookie, err := request.Cookie(sessionCookie)
+	if err != nil {
+		return authContext{}, false
 	}
-	if provided != "" && a.apiKey != "" && provided == a.apiKey {
-		return authContext{role: "admin", keyID: "startup-admin", startup: true, legacy: true}, true
-	}
-	key, ok := a.store.AuthenticateSecret(provided)
+	user, session, ok := a.store.sessionIdentity(cookie.Value)
 	if !ok {
 		return authContext{}, false
 	}
 	allowed := map[string]bool{}
-	for _, id := range key.AllowedPlaylistIDs {
-		allowed[id] = true
+	for _, playlist := range a.store.Playlists() {
+		if !playlist.System && playlist.OwnerID == user.ID {
+			allowed[playlist.ID] = true
+		}
 	}
-	return authContext{role: key.Role, allowedPlaylists: allowed, scopes: cloneStrings(key.Scopes), keyID: key.ID, maxConcurrency: key.MaxConcurrency}, true
+	return authContext{role: user.Role, userID: user.ID, authVersion: user.AuthVersion, username: user.Username, session: true, csrf: csrfForToken(cookie.Value), allowedPlaylists: allowed, keyID: session.ID}, true
+}
+
+func playerEndpoint(request *http.Request) bool {
+	if request.Method != "GET" && request.Method != "HEAD" {
+		return false
+	}
+	path := request.URL.Path
+	return path == "/api/v2/sync" || path == "/api/v2/playlists" || strings.HasPrefix(path, "/api/v2/playlists/") || path == "/api/v2/tracks" || strings.HasPrefix(path, "/api/v2/tracks/") || strings.HasPrefix(path, "/api/v2/media/") || strings.HasPrefix(path, "/api/v2/covers/")
 }
 
 func (a *API) requireAdmin(response http.ResponseWriter, request *http.Request) bool {
 	auth := authFromRequest(request)
-	if auth.startup || auth.role == "admin" {
+	if auth.session && auth.role == "admin" {
 		return true
 	}
 	writeError(response, http.StatusForbidden, "ADMIN_REQUIRED", "administrator access required")
@@ -335,6 +416,10 @@ func (a *API) requireAdmin(response http.ResponseWriter, request *http.Request) 
 
 func (a *API) acquire(auth authContext) bool {
 	limit := auth.maxConcurrency
+	if auth.download {
+		limit = auth.maxDownloads
+		auth.keyID += "/downloads"
+	}
 	if limit < 1 {
 		limit = 1
 	}
@@ -351,6 +436,9 @@ func (a *API) acquire(auth authContext) bool {
 }
 
 func (a *API) release(auth authContext) {
+	if auth.download {
+		auth.keyID += "/downloads"
+	}
 	a.concurrencyMu.Lock()
 	defer a.concurrencyMu.Unlock()
 	if count := a.active[auth.keyID]; count <= 1 {
@@ -363,7 +451,7 @@ func (a *API) release(auth authContext) {
 func (a *API) activeRequests(keyID string) int {
 	a.concurrencyMu.Lock()
 	defer a.concurrencyMu.Unlock()
-	return a.active[keyID]
+	return a.active[keyID] + a.active[keyID+"/downloads"]
 }
 
 func canReadPlaylist(auth authContext, id string) bool {
@@ -374,14 +462,13 @@ func canReadTrack(auth authContext, store *Store, id string) bool {
 	if auth.role == "admin" {
 		return true
 	}
-	for _, playlist := range store.Playlists() {
-		if !canReadPlaylist(auth, playlist.ID) {
+	for playlistID, allowed := range auth.allowedPlaylists {
+		if !allowed {
 			continue
 		}
-		for _, trackID := range playlist.TrackIDs {
-			if trackID == id {
-				return true
-			}
+		var exists bool
+		if store.db.QueryRow("SELECT EXISTS(SELECT 1 FROM playlist_tracks WHERE playlist_id=? AND track_id=?)", playlistID, id).Scan(&exists) == nil && exists {
+			return true
 		}
 	}
 	return false
@@ -392,37 +479,17 @@ func (a *API) sync(response http.ResponseWriter, request *http.Request) {
 		writeError(response, 405, "method not allowed")
 		return
 	}
-	since := int64(-1)
-	if value := request.URL.Query().Get("since"); value != "" {
-		parsed, err := strconv.ParseInt(value, 10, 64)
-		if err != nil || parsed < 0 {
-			writeError(response, 400, "INVALID_REVISION", "invalid revision")
-			return
+	limit, _ := strconv.Atoi(request.URL.Query().Get("limit"))
+	result, err := a.store.SyncPage(authFromRequest(request), request.URL.Query().Get("cursor"), limit)
+	if err != nil {
+		if errors.Is(err, errSyncRestart) {
+			writeError(response, 409, "SYNC_RESTART", err.Error())
+		} else {
+			writeError(response, 400, "INVALID_CURSOR", err.Error())
 		}
-		since = parsed
+		return
 	}
-	result := a.store.Sync(since)
-	auth := authFromRequest(request)
-	visiblePlaylists := make([]Playlist, 0, len(result.Playlists))
-	visibleTracks := map[string]bool{}
-	for _, playlist := range result.Playlists {
-		if !canReadPlaylist(auth, playlist.ID) {
-			continue
-		}
-		visiblePlaylists = append(visiblePlaylists, playlist)
-		for _, id := range playlist.TrackIDs {
-			visibleTracks[id] = true
-		}
-	}
-	filtered := result
-	filtered.Playlists = visiblePlaylists
-	filtered.Changed = make([]Track, 0, len(result.Changed))
-	for _, track := range result.Changed {
-		if auth.role == "admin" || visibleTracks[track.ID] {
-			filtered.Changed = append(filtered.Changed, track)
-		}
-	}
-	writeJSON(response, http.StatusOK, filtered)
+	writeJSON(response, http.StatusOK, result)
 }
 
 func (a *API) playlists(response http.ResponseWriter, request *http.Request) {
@@ -444,7 +511,9 @@ func (a *API) playlists(response http.ResponseWriter, request *http.Request) {
 			writeError(response, http.StatusBadRequest, "invalid playlist JSON")
 			return
 		}
-		if err := a.store.PutPlaylist(playlist); err != nil {
+		options := mutationOptions(request)
+		options.CreateOnly = true
+		if err := a.store.PutPlaylist(playlist, options); err != nil {
 			writeError(response, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -456,7 +525,7 @@ func (a *API) playlists(response http.ResponseWriter, request *http.Request) {
 }
 
 func (a *API) playlist(response http.ResponseWriter, request *http.Request) {
-	id := strings.TrimPrefix(request.URL.Path, "/api/v1/playlists/")
+	id := strings.TrimPrefix(request.URL.Path, "/api/v2/playlists/")
 	if strings.Contains(id, "/tracks") {
 		a.playlistTracks(response, request, id)
 		return
@@ -467,7 +536,7 @@ func (a *API) playlist(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if !canReadPlaylist(authFromRequest(request), id) {
-		writeError(response, http.StatusForbidden, "PLAYLIST_ACCESS_DENIED", "current key cannot access this playlist")
+		writeError(response, http.StatusNotFound, "PLAYLIST_NOT_FOUND", "playlist not found")
 		return
 	}
 	if request.Method == http.MethodPatch {
@@ -482,7 +551,7 @@ func (a *API) playlist(response http.ResponseWriter, request *http.Request) {
 			writeError(response, http.StatusBadRequest, "invalid playlist JSON")
 			return
 		}
-		stored, err := a.store.UpdatePlaylistMetadata(id, patch.Name, patch.Description)
+		stored, err := a.store.UpdatePlaylistMetadata(id, patch.Name, patch.Description, mutationOptions(request))
 		if err != nil {
 			writePlaylistMutationError(response, err)
 			return
@@ -500,7 +569,7 @@ func (a *API) playlist(response http.ResponseWriter, request *http.Request) {
 			return
 		}
 		replacement.ID = id
-		if err := a.store.PutPlaylist(replacement); err != nil {
+		if err := a.store.PutPlaylist(replacement, mutationOptions(request)); err != nil {
 			writeError(response, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -512,7 +581,7 @@ func (a *API) playlist(response http.ResponseWriter, request *http.Request) {
 		if !a.requireAdmin(response, request) {
 			return
 		}
-		if err := a.store.DeletePlaylist(id); err != nil {
+		if err := a.store.DeletePlaylist(id, mutationOptions(request)); err != nil {
 			writeError(response, 400, err.Error())
 			return
 		}
@@ -526,7 +595,7 @@ func (a *API) playlist(response http.ResponseWriter, request *http.Request) {
 	tracks := make([]Track, 0, len(playlist.TrackIDs))
 	for _, trackID := range playlist.TrackIDs {
 		if track, exists := a.store.Track(trackID); exists {
-			tracks = append(tracks, track)
+			tracks = append(tracks, publicTrack(track, authFromRequest(request)))
 		}
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"playlist": playlist, "tracks": tracks})
@@ -537,7 +606,7 @@ func writePlaylistMutationError(response http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, errPlaylistNotFound), errors.Is(err, errMemberNotFound):
 		status = http.StatusNotFound
-	case errors.Is(err, errLibraryMembers), errors.Is(err, errPlaylistConflict):
+	case errors.Is(err, errLibraryMembers), errors.Is(err, errPlaylistConflict), errors.Is(err, errVersionConflict):
 		status = http.StatusConflict
 	}
 	writeError(response, status, err.Error())
@@ -561,7 +630,7 @@ func (a *API) playlistTracks(response http.ResponseWriter, request *http.Request
 			writeError(response, http.StatusBadRequest, "track_ids are required")
 			return
 		}
-		playlist, err := a.store.AddPlaylistTracks(id, body.TrackIDs)
+		playlist, err := a.store.AddPlaylistTracks(id, body.TrackIDs, mutationOptions(request))
 		if err != nil {
 			writePlaylistMutationError(response, err)
 			return
@@ -578,7 +647,7 @@ func (a *API) playlistTracks(response http.ResponseWriter, request *http.Request
 			writeError(response, http.StatusBadRequest, "track_ids and expected_track_ids are required")
 			return
 		}
-		playlist, err := a.store.ReorderPlaylistTracks(id, body.ExpectedTrackIDs, body.TrackIDs)
+		playlist, err := a.store.ReorderPlaylistTracks(id, body.ExpectedTrackIDs, body.TrackIDs, mutationOptions(request))
 		if err != nil {
 			writePlaylistMutationError(response, err)
 			return
@@ -597,7 +666,7 @@ func (a *API) playlistTracks(response http.ResponseWriter, request *http.Request
 				writeError(response, http.StatusBadRequest, "note is required")
 				return
 			}
-			playlist, err := a.store.UpdatePlaylistTrackNote(id, trackID, *body.Note)
+			playlist, err := a.store.UpdatePlaylistTrackNote(id, trackID, *body.Note, mutationOptions(request))
 			if err != nil {
 				writePlaylistMutationError(response, err)
 				return
@@ -605,7 +674,7 @@ func (a *API) playlistTracks(response http.ResponseWriter, request *http.Request
 			writeJSON(response, http.StatusOK, playlist)
 			return
 		case http.MethodDelete:
-			if err := a.store.RemovePlaylistTrack(id, trackID); err != nil {
+			if err := a.store.RemovePlaylistTrack(id, trackID, mutationOptions(request)); err != nil {
 				writePlaylistMutationError(response, err)
 				return
 			}
@@ -617,7 +686,7 @@ func (a *API) playlistTracks(response http.ResponseWriter, request *http.Request
 }
 
 func (a *API) track(response http.ResponseWriter, request *http.Request) {
-	id := strings.TrimPrefix(request.URL.Path, "/api/v1/tracks/")
+	id := strings.TrimPrefix(request.URL.Path, "/api/v2/tracks/")
 	if strings.HasSuffix(id, "/cover") || strings.HasSuffix(id, "/lyrics") {
 		a.trackResource(response, request, id)
 		return
@@ -628,7 +697,7 @@ func (a *API) track(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if request.Method == http.MethodGet && !canReadTrack(authFromRequest(request), a.store, id) {
-		writeError(response, http.StatusForbidden, "TRACK_ACCESS_DENIED", "current key cannot access this track")
+		writeError(response, http.StatusNotFound, "TRACK_NOT_FOUND", "track not found")
 		return
 	}
 	if request.Method == http.MethodPatch {
@@ -640,7 +709,7 @@ func (a *API) track(response http.ResponseWriter, request *http.Request) {
 			writeError(response, 400, "invalid metadata JSON")
 			return
 		}
-		if err := a.store.UpdateTrack(id, fields); err != nil {
+		if err := a.store.UpdateTrack(id, fields, mutationOptions(request)); err != nil {
 			writeError(response, 400, err.Error())
 			return
 		}
@@ -652,7 +721,7 @@ func (a *API) track(response http.ResponseWriter, request *http.Request) {
 		if !a.requireAdmin(response, request) {
 			return
 		}
-		if err := a.store.DeleteTrack(id); err != nil {
+		if err := a.store.DeleteTrack(id, mutationOptions(request)); err != nil {
 			writeError(response, 500, err.Error())
 			return
 		}
@@ -663,7 +732,7 @@ func (a *API) track(response http.ResponseWriter, request *http.Request) {
 		writeError(response, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	writeJSON(response, http.StatusOK, track)
+	writeJSON(response, http.StatusOK, publicTrack(track, authFromRequest(request)))
 }
 
 func (a *API) trackResource(response http.ResponseWriter, request *http.Request, path string) {
@@ -700,12 +769,12 @@ func (a *API) trackResource(response http.ResponseWriter, request *http.Request,
 		return
 	}
 	if kind == "cover" {
-		err = a.store.SetTrackCover(id, data)
+		err = a.store.SetTrackCover(id, data, mutationOptions(request))
 	} else {
 		var text string
 		text, err = decodeLyricsFile(data)
 		if err == nil {
-			err = a.store.UpdateTrack(id, map[string]string{"lyrics": text})
+			err = a.store.UpdateTrack(id, map[string]string{"lyrics": text}, mutationOptions(request))
 		}
 	}
 	if err != nil {
@@ -737,14 +806,14 @@ func (a *API) media(response http.ResponseWriter, request *http.Request) {
 		writeError(response, 405, "method not allowed")
 		return
 	}
-	id := strings.TrimPrefix(request.URL.Path, "/api/v1/media/")
+	id := strings.TrimPrefix(request.URL.Path, "/api/v2/media/")
 	track, ok := a.store.Track(id)
 	if !ok {
 		writeError(response, http.StatusNotFound, "TRACK_NOT_FOUND", "track not found")
 		return
 	}
 	if !canReadTrack(authFromRequest(request), a.store, id) {
-		writeError(response, http.StatusForbidden, "TRACK_ACCESS_DENIED", "current key cannot access this track")
+		writeError(response, http.StatusNotFound, "TRACK_NOT_FOUND", "track not found")
 		return
 	}
 	_, err := a.store.MediaPath(track)
@@ -786,12 +855,12 @@ func (a *API) scan(response http.ResponseWriter, request *http.Request) {
 		writeError(response, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	count, err := a.store.Scan()
+	status, err := a.store.StartScan(request.URL.Query().Get("full") == "true", mutationOptions(request))
 	if err != nil {
-		writeError(response, http.StatusInternalServerError, err.Error())
+		writeError(response, 409, "SCAN_BUSY", err.Error())
 		return
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"tracks": count, "revision": a.store.Revision()})
+	writeJSON(response, http.StatusAccepted, status)
 }
 
 func (a *API) upload(response http.ResponseWriter, request *http.Request) {
@@ -824,7 +893,7 @@ func (a *API) upload(response http.ResponseWriter, request *http.Request) {
 			metadata[field] = value
 		}
 	}
-	track, err := a.store.ImportAudioWithMetadata(header.Filename, file, metadata)
+	track, err := a.store.ImportAudioWithMetadata(header.Filename, file, metadata, mutationOptions(request))
 	if err != nil {
 		writeError(response, 400, err.Error())
 		return
@@ -877,7 +946,7 @@ func (a *API) stageUpload(response http.ResponseWriter, request *http.Request) {
 		writeError(response, http.StatusBadRequest, "INVALID_COVER_SOURCE", "cover_source must be manual or external")
 		return
 	}
-	preview, err := a.store.stageAudioWithAssets(header.Filename, file, fields, uploadAssets{Lyrics: lyrics, Cover: cover, CoverSource: coverSource})
+	preview, err := a.store.stageAudioWithAssets(header.Filename, file, fields, uploadAssets{Lyrics: lyrics, Cover: cover, CoverSource: coverSource}, mutationOptions(request))
 	if err != nil {
 		writeError(response, http.StatusBadRequest, "STAGE_FAILED", err.Error())
 		return
@@ -889,13 +958,18 @@ func (a *API) stagedUpload(response http.ResponseWriter, request *http.Request) 
 	if !a.requireAdmin(response, request) {
 		return
 	}
-	path := strings.TrimPrefix(request.URL.Path, "/api/v1/uploads/stage/")
+	path := strings.TrimPrefix(request.URL.Path, "/api/v2/uploads/stage/")
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if len(parts) == 0 || !validID.MatchString(parts[0]) || len(parts) > 2 || (len(parts) == 2 && parts[1] != "commit" && parts[1] != "cover") {
 		writeError(response, http.StatusBadRequest, "INVALID_STAGE", "invalid upload stage id")
 		return
 	}
 	id := parts[0]
+	var stageOwner string
+	if a.store.db.QueryRow("SELECT user_id FROM upload_staging WHERE id=?", id).Scan(&stageOwner) != nil || stageOwner != authFromRequest(request).userID {
+		writeError(response, 404, "STAGE_NOT_FOUND", "upload stage not found")
+		return
+	}
 	if len(parts) == 2 && parts[1] == "cover" {
 		if request.Method != http.MethodGet {
 			writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
@@ -924,7 +998,7 @@ func (a *API) stagedUpload(response http.ResponseWriter, request *http.Request) 
 				return
 			}
 		}
-		track, duplicate, err := a.store.commitUploadStageWithMetadata(id, fields)
+		track, duplicate, err := a.store.commitUploadStageWithMetadata(id, fields, mutationOptions(request))
 		if errors.Is(err, os.ErrNotExist) {
 			writeError(response, http.StatusNotFound, "STAGE_NOT_FOUND", "upload stage not found or expired")
 			return
@@ -965,7 +1039,7 @@ func (a *API) keys(response http.ResponseWriter, request *http.Request) {
 	if !a.requireAdmin(response, request) {
 		return
 	}
-	path := strings.TrimPrefix(request.URL.Path, "/api/v1/auth/keys")
+	path := strings.TrimPrefix(request.URL.Path, "/api/v2/auth/keys")
 	if path == "" || path == "/" {
 		switch request.Method {
 		case http.MethodGet:
@@ -976,17 +1050,25 @@ func (a *API) keys(response http.ResponseWriter, request *http.Request) {
 			writeJSON(response, http.StatusOK, views)
 		case http.MethodPost:
 			var input APIKeyCreateRequest
-			if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
+			decoder := json.NewDecoder(request.Body)
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&input); err != nil {
 				writeError(response, http.StatusBadRequest, "INVALID_KEY", "invalid key JSON")
 				return
 			}
-			created, err := a.store.CreateAPIKey(input)
+			created, err := a.store.CreateAPIKey(input, mutationOptions(request))
 			if err != nil {
 				writeError(response, http.StatusBadRequest, "INVALID_KEY", err.Error())
 				return
 			}
 			created.APIKey = publicAPIKey(created.APIKey)
 			writeJSON(response, http.StatusCreated, created)
+		case http.MethodDelete:
+			if err := a.store.RevokeAccountKeys(authFromRequest(request).userID, mutationOptions(request)); err != nil {
+				writeError(response, 500, "KEY_REVOKE_FAILED", "could not revoke keys")
+				return
+			}
+			response.WriteHeader(204)
 		default:
 			writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
 		}
@@ -999,7 +1081,7 @@ func (a *API) keys(response http.ResponseWriter, request *http.Request) {
 			writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
 			return
 		}
-		rotated, err := a.store.RotateAPIKey(id)
+		rotated, err := a.store.RotateAPIKey(id, mutationOptions(request))
 		if errors.Is(err, os.ErrNotExist) {
 			writeError(response, http.StatusNotFound, "KEY_NOT_FOUND", "key not found")
 			return
@@ -1014,11 +1096,13 @@ func (a *API) keys(response http.ResponseWriter, request *http.Request) {
 	}
 	if len(parts) == 1 && request.Method == http.MethodPatch {
 		var input APIKeyUpdateRequest
-		if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
+		decoder := json.NewDecoder(request.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&input); err != nil {
 			writeError(response, http.StatusBadRequest, "INVALID_KEY", "invalid key JSON")
 			return
 		}
-		updated, err := a.store.UpdateAPIKey(id, input)
+		updated, err := a.store.UpdateAPIKey(id, input, mutationOptions(request))
 		if errors.Is(err, os.ErrNotExist) {
 			writeError(response, http.StatusNotFound, "KEY_NOT_FOUND", "key not found")
 			return
@@ -1034,7 +1118,7 @@ func (a *API) keys(response http.ResponseWriter, request *http.Request) {
 		writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
 		return
 	}
-	if err := a.store.RevokeAPIKey(id); errors.Is(err, os.ErrNotExist) {
+	if err := a.store.RevokeAPIKey(id, mutationOptions(request)); errors.Is(err, os.ErrNotExist) {
 		writeError(response, http.StatusNotFound, "KEY_NOT_FOUND", "key not found")
 	} else if err != nil {
 		writeError(response, http.StatusInternalServerError, "KEY_REVOKE_FAILED", err.Error())
@@ -1102,6 +1186,10 @@ func writeJSON(response http.ResponseWriter, status int, value any) {
 
 func writeError(response http.ResponseWriter, status int, args ...string) {
 	code, message := "REQUEST_FAILED", "request failed"
+	if len(args) > 0 && args[len(args)-1] == errVersionConflict.Error() {
+		status = 409
+		args = []string{"VERSION_CONFLICT", errVersionConflict.Error()}
+	}
 	if len(args) == 1 {
 		message = args[0]
 	} else if len(args) >= 2 {
@@ -1116,4 +1204,68 @@ func writeError(response http.ResponseWriter, status int, args ...string) {
 
 func writeErrorWithID(response http.ResponseWriter, status int, code, message, requestID string) {
 	writeJSON(response, status, map[string]any{"error": map[string]string{"code": code, "message": message, "request_id": requestID}})
+}
+
+func mutationOptions(request *http.Request) MutationOptions {
+	expected, _ := strconv.ParseInt(strings.Trim(request.Header.Get("If-Match"), string(rune(34))), 10, 64)
+	auth := authFromRequest(request)
+	kind := "api_key"
+	if auth.session {
+		kind = "session"
+	}
+	return MutationOptions{Actor: auth.username, UserID: auth.userID, ActorType: kind, CredentialID: auth.keyID, ExpectedVersion: expected}
+}
+func needsVersion(request *http.Request) bool {
+	if request.Method == http.MethodGet || request.Method == http.MethodHead {
+		return false
+	}
+	path := request.URL.Path
+	if strings.HasPrefix(path, "/api/v2/tracks/") {
+		return true
+	}
+	if strings.HasPrefix(path, "/api/v2/playlists/") && path != "/api/v2/playlists/order" {
+		return true
+	}
+	return strings.HasPrefix(path, "/api/v2/admin/removed/")
+}
+func (a *API) maintenance(response http.ResponseWriter, request *http.Request) {
+	if !a.requireAdmin(response, request) {
+		return
+	}
+	path := request.URL.Path
+	switch {
+	case path == "/api/v2/admin/removed" && request.Method == http.MethodGet:
+		writeJSON(response, 200, a.store.RemovedTracks())
+	case strings.HasPrefix(path, "/api/v2/admin/removed/") && request.Method == http.MethodPost:
+		id := strings.TrimPrefix(path, "/api/v2/admin/removed/")
+		if err := a.store.RestoreTrack(id, mutationOptions(request)); err != nil {
+			writeError(response, 400, err.Error())
+			return
+		}
+		track, _ := a.store.Track(id)
+		writeJSON(response, 200, track)
+	case path == "/api/v2/admin/audit" && request.Method == http.MethodGet:
+		limit, _ := strconv.Atoi(request.URL.Query().Get("limit"))
+		before, _ := strconv.ParseInt(request.URL.Query().Get("before"), 10, 64)
+		result, err := a.store.Audit(limit, before)
+		if err != nil {
+			writeError(response, 500, err.Error())
+			return
+		}
+		writeJSON(response, 200, result)
+	case path == "/api/v2/admin/backups" && request.Method == http.MethodPost:
+		path, err := a.store.Backup()
+		if err != nil {
+			writeError(response, 500, err.Error())
+			return
+		}
+		writeJSON(response, 201, map[string]string{"path": path})
+	case path == "/api/v2/admin/scan/status" && request.Method == http.MethodGet:
+		writeJSON(response, 200, a.store.ScanStatus())
+	case path == "/api/v2/admin/scan/cancel" && request.Method == http.MethodPost:
+		a.store.CancelScan()
+		writeJSON(response, 202, a.store.ScanStatus())
+	default:
+		writeError(response, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+	}
 }

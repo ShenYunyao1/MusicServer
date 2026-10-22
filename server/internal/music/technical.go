@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"io"
 	"math"
 	"os"
@@ -13,6 +14,27 @@ import (
 	"strings"
 	"time"
 )
+
+func validateAudio(path, configured string) error {
+	candidates := []string{configured, os.Getenv("MUSIC_SERVER_FFPROBE")}
+	if found, err := exec.LookPath("ffprobe"); err == nil {
+		candidates = append(candidates, found)
+	}
+	available := false
+	for _, candidate := range candidates {
+		if strings.TrimSpace(candidate) == "" {
+			continue
+		}
+		available = true
+		if _, ok := probeWithFFprobe(path, candidate); ok {
+			return nil
+		}
+	}
+	if !available {
+		return errors.New("FFPROBE_REQUIRED: configure ffprobe to validate uploads")
+	}
+	return errors.New("AUDIO_INVALID: no valid audio stream found or ffprobe failed; full decoding has not been performed")
+}
 
 // audioTechnical contains container/codec facts useful to clients. Zero
 // values mean that the available parser could not determine a field.
@@ -43,6 +65,10 @@ type ffprobeOutput struct {
 // technicalMetadata probes ffprobe when configured, then falls back to the
 // compact WAV/FLAC stream headers. A missing probe is nonfatal to scanning.
 func technicalMetadata(path, ffprobePath string) audioTechnical {
+	return technicalMetadataContext(context.Background(), path, ffprobePath)
+}
+
+func technicalMetadataContext(ctx context.Context, path, ffprobePath string) audioTechnical {
 	candidates := []string{ffprobePath, os.Getenv("MUSIC_SERVER_FFPROBE")}
 	if found, err := exec.LookPath("ffprobe"); err == nil {
 		candidates = append(candidates, found)
@@ -54,7 +80,7 @@ func technicalMetadata(path, ffprobePath string) audioTechnical {
 			continue
 		}
 		seen[candidate] = true
-		if result, ok := probeWithFFprobe(path, candidate); ok {
+		if result, ok := probeWithFFprobeContext(ctx, path, candidate); ok {
 			return result
 		}
 	}
@@ -62,7 +88,11 @@ func technicalMetadata(path, ffprobePath string) audioTechnical {
 }
 
 func probeWithFFprobe(path, ffprobePath string) (audioTechnical, bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	return probeWithFFprobeContext(context.Background(), path, ffprobePath)
+}
+
+func probeWithFFprobeContext(parent context.Context, path, ffprobePath string) (audioTechnical, bool) {
+	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, ffprobePath, "-v", "error", "-print_format", "json", "-show_streams", "-show_format", path)
 	var output limitedBuffer

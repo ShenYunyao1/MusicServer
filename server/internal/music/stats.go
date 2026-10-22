@@ -3,6 +3,7 @@ package music
 import (
 	"errors"
 	"log"
+	"strings"
 	"time"
 )
 
@@ -95,10 +96,15 @@ func (a *API) readCallStats() apiStatsResponse {
 		seen[key.KeyID] = true
 	}
 	a.concurrencyMu.Lock()
+	active := map[string]int{}
 	for id, count := range a.active {
+		active[strings.TrimSuffix(id, "/downloads")] += count
+	}
+	for id, count := range active {
 		if !seen[id] {
 			result.Keys = append(result.Keys, apiCallStats{KeyID: id, ActiveRequests: count})
 			result.Total.ActiveRequests += count
+			seen[id] = true
 		}
 	}
 	a.concurrencyMu.Unlock()

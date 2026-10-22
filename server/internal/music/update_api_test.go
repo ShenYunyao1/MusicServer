@@ -42,20 +42,22 @@ func TestUpdateRepositoryPersistsAndRejectsInvalidURLs(t *testing.T) {
 func TestUpdateStatusRequiresAdministrator(t *testing.T) {
 	api, _ := testAPI(t)
 	api.SetUpdater(update.NewManager(filepath.Join(t.TempDir(), "updates"), func() string { return "" }))
-	_, playerSecret := createPersistentKey(t, api, APIKeyCreateRequest{Name: "player", Role: "player", Scopes: []string{ScopeSettingsManage}})
+	_, playerSecret := createPersistentKey(t, api, APIKeyCreateRequest{Name: "player"})
 	for _, tc := range []struct {
 		method, path, key string
 		want              int
 	}{
-		{http.MethodGet, "/api/v1/admin/update", "", http.StatusUnauthorized},
-		{http.MethodPost, "/api/v1/admin/update/check", "", http.StatusUnauthorized},
-		{http.MethodGet, "/api/v1/admin/update", playerSecret, http.StatusForbidden},
-		{http.MethodPost, "/api/v1/admin/update/check", playerSecret, http.StatusForbidden},
-		{http.MethodGet, "/api/v1/admin/update", "secret", http.StatusOK},
-		{http.MethodPost, "/api/v1/admin/update/check", "secret", http.StatusAccepted},
+		{http.MethodGet, "/api/v2/admin/update", "", http.StatusUnauthorized},
+		{http.MethodPost, "/api/v2/admin/update/check", "", http.StatusUnauthorized},
+		{http.MethodGet, "/api/v2/admin/update", playerSecret, http.StatusForbidden},
+		{http.MethodPost, "/api/v2/admin/update/check", playerSecret, http.StatusForbidden},
+		{http.MethodGet, "/api/v2/admin/update", "secret", http.StatusOK},
+		{http.MethodPost, "/api/v2/admin/update/check", "secret", http.StatusAccepted},
 	} {
 		request := httptest.NewRequest(tc.method, tc.path, nil)
-		if tc.key != "" {
+		if tc.key == "secret" {
+			authorizeTestAdmin(api, request)
+		} else if tc.key != "" {
 			request.Header.Set("X-API-Key", tc.key)
 		}
 		response := httptest.NewRecorder()

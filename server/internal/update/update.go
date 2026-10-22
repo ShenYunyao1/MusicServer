@@ -35,6 +35,7 @@ type Status struct {
 	LatestVersion  string    `json:"latest_version,omitempty"`
 	ReleaseURL     string    `json:"release_url,omitempty"`
 	PackagePath    string    `json:"package_path,omitempty"`
+	BackupPath     string    `json:"backup_path,omitempty"`
 	Message        string    `json:"message,omitempty"`
 	CheckedAt      time.Time `json:"checked_at,omitzero"`
 }
@@ -52,17 +53,28 @@ type release struct {
 }
 
 type Manager struct {
-	mu         sync.Mutex
-	status     Status
-	dir        string
-	repository func() string
-	client     *http.Client
-	apiBase    string
-	allowHTTP  bool // Test servers only; production URLs must use HTTPS.
+	mu             sync.Mutex
+	status         Status
+	dir            string
+	repository     func() string
+	client         *http.Client
+	apiBase        string
+	allowHTTP      bool // Test servers only; production URLs must use HTTPS.
+	beforeDownload func() (string, error)
+	context        context.Context
+	cancel         context.CancelFunc
+	workers        sync.WaitGroup
+	closed         bool
 }
 
-func NewManager(dir string, repository func() string) *Manager {
+func NewManager(dir string, repository func() string, beforeDownload ...func() (string, error)) *Manager {
+	ctx, cancel := context.WithCancel(context.Background())
+	var backup func() (string, error)
+	if len(beforeDownload) > 0 {
+		backup = beforeDownload[0]
+	}
 	return &Manager{
+		context: ctx, cancel: cancel, beforeDownload: backup,
 		dir: dir, repository: repository, apiBase: "https://api.github.com",
 		client: &http.Client{CheckRedirect: func(request *http.Request, via []*http.Request) error {
 			if request.URL.Scheme != "https" {
@@ -98,7 +110,9 @@ func (m *Manager) Status() Status {
 	repository := m.repository()
 	if status.Repository != repository {
 		status = Status{State: "disabled", Repository: repository, CurrentVersion: version.Version}
-		if repository != "" { status.State = "checking" }
+		if repository != "" {
+			status.State = "checking"
+		}
 	}
 	return status
 }
@@ -106,12 +120,21 @@ func (m *Manager) Status() Status {
 func (m *Manager) begin() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.status.State == "checking" || m.status.State == "downloading" {
+	if m.closed || m.status.State == "checking" || m.status.State == "downloading" {
 		return false
 	}
 	m.status.State = "checking"
 	m.status.Message = ""
+	m.workers.Add(1)
 	return true
+}
+
+func (m *Manager) Close() {
+	m.mu.Lock()
+	m.closed = true
+	m.cancel()
+	m.mu.Unlock()
+	m.workers.Wait()
 }
 
 func (m *Manager) finish(status Status, err error) {
@@ -133,8 +156,11 @@ func (m *Manager) Check(ctx context.Context) error {
 }
 
 func (m *Manager) run(ctx context.Context) error {
+	defer m.workers.Done()
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
+	stop := context.AfterFunc(m.context, cancel)
+	defer stop()
 	status, err := m.check(ctx)
 	m.finish(status, err)
 	return err
@@ -149,15 +175,25 @@ func (m *Manager) Trigger() bool {
 }
 
 func (m *Manager) Start(ctx context.Context) {
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return
+	}
+	m.workers.Add(1)
+	m.mu.Unlock()
 	go func() {
-		m.Trigger()
+		defer m.workers.Done()
+		_ = m.Check(ctx)
 		ticker := time.NewTicker(6 * time.Hour)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
-				m.Trigger()
+				_ = m.Check(ctx)
 			case <-ctx.Done():
+				return
+			case <-m.context.Done():
 				return
 			}
 		}
@@ -275,6 +311,12 @@ func (m *Manager) check(ctx context.Context) (Status, error) {
 		digest, err := hex.DecodeString(strings.TrimPrefix(asset.Digest, "sha256:"))
 		if err != nil {
 			return status, fmt.Errorf("invalid release digest: %w", err)
+		}
+		if m.beforeDownload != nil {
+			status.BackupPath, err = m.beforeDownload()
+			if err != nil {
+				return status, fmt.Errorf("backup before update: %w", err)
+			}
 		}
 		status.State = "downloading"
 		m.mu.Lock()

@@ -86,13 +86,13 @@ func TestUploadSidecarsPersistAcrossReopenAndScan(t *testing.T) {
 	if _, ok := reopened.Cover(track.CoverID); !ok {
 		t.Fatal("cover bytes did not persist")
 	}
-	newAPI := NewAPI(reopened, "secret")
-	response := callAPI(newAPI, "GET", "/api/v1/covers/"+track.CoverID, "")
+	newAPI := NewAPI(reopened)
+	response := callAPI(newAPI, "GET", "/api/v2/covers/"+track.CoverID, "")
 	if response.Code != 200 || !bytes.Equal(response.Body.Bytes(), tinyPNG()) || !strings.Contains(response.Header().Get("Cache-Control"), "private") {
 		t.Fatalf("cover HTTP response: %d %v", response.Code, response.Header())
 	}
 	_, deniedKey := createPersistentKey(t, newAPI, APIKeyCreateRequest{Name: "no-grants", Scopes: []string{ScopeMediaRead}})
-	if denied := callAPIWithKey(newAPI, "GET", "/api/v1/covers/"+track.CoverID, "", deniedKey); denied.Code != 403 {
+	if denied := callAPIWithKey(newAPI, "GET", "/api/v2/covers/"+track.CoverID, "", deniedKey); denied.Code != 404 {
 		t.Fatalf("unauthorized artwork visible: %d", denied.Code)
 	}
 }
@@ -110,7 +110,7 @@ func TestUploadStageFailedCommitCanRetry(t *testing.T) {
 	if _, _, err := api.store.CommitUploadStage(preview.ID); err == nil {
 		t.Fatal("commit unexpectedly succeeded")
 	}
-	if api.store.Revision() != before || len(api.store.data.CoverAssets) != 0 {
+	if api.store.Revision() != before || coverCount(t, api.store) != 0 {
 		t.Fatal("failed commit changed snapshot")
 	}
 	entries, err := os.ReadDir(filepath.Join(root, "uploads"))
@@ -220,8 +220,8 @@ func TestStageHTTPAcceptsLargeAudioWithResourceFiles(t *testing.T) {
 	part, _ = form.CreateFormFile("cover", "http.png")
 	_, _ = part.Write(tinyPNG())
 	_ = form.Close()
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/uploads/stage", &body)
-	request.Header.Set("X-API-Key", "secret")
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/uploads/stage", &body)
+	authorizeTestAdmin(api, request)
 	request.Header.Set("Content-Type", form.FormDataContentType())
 	response := httptest.NewRecorder()
 	api.ServeHTTP(response, request)
@@ -235,7 +235,7 @@ func TestStageHTTPAcceptsLargeAudioWithResourceFiles(t *testing.T) {
 	if preview.Track.LyricsSource != "sidecar" || preview.Track.CoverSource != "manual" {
 		t.Fatalf("sidecar preview response: %+v", preview)
 	}
-	commit := callAPI(api, "POST", "/api/v1/uploads/stage/"+preview.ID+"/commit", `{"title":"HTTP edit"}`)
+	commit := callAPI(api, "POST", "/api/v2/uploads/stage/"+preview.ID+"/commit", `{"title":"HTTP edit"}`)
 	if commit.Code != 200 || !strings.Contains(commit.Body.String(), "HTTP edit") {
 		t.Fatalf("commit response: %d %s", commit.Code, commit.Body)
 	}
@@ -257,8 +257,8 @@ func stageCoverHTTP(t *testing.T, api *API, audio []byte, source string, image [
 	_, _ = part.Write(image)
 	_ = form.WriteField("cover_source", source)
 	_ = form.Close()
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/uploads/stage", &body)
-	request.Header.Set("X-API-Key", "secret")
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/uploads/stage", &body)
+	authorizeTestAdmin(api, request)
 	request.Header.Set("Content-Type", form.FormDataContentType())
 	response := httptest.NewRecorder()
 	api.ServeHTTP(response, request)
@@ -328,7 +328,7 @@ func TestUploadedExternalArtworkPersistsAsSidecar(t *testing.T) {
 		t.Fatal(err)
 	}
 	rescanned, _ := api.store.Track(track.ID)
-	if rescanned.CoverID != track.CoverID || rescanned.CoverSource != "external" || api.store.data.Overrides[track.ID]["cover_id"] != "" {
+	if rescanned.CoverID != track.CoverID || rescanned.CoverSource != "external" || overrideValue(t, api.store, track.ID, "cover_id") != "" {
 		t.Fatalf("external artwork precedence was frozen as manual: %+v", rescanned)
 	}
 	databasePath := api.store.DataPath()

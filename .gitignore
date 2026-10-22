@@ -6,6 +6,7 @@
 /server/data/
 /server/media/
 /server/dist/
+/server/.server-archive/
 *.exe
 *.exe~
 *.dll
@@ -16,6 +17,7 @@
 *.sqlite-journal
 *.sqlite-wal
 *.sqlite-shm
+*.sqlite.lock
 *.db
 .env
 .env.*

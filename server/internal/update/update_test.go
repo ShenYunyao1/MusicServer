@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func testPackageName() string {
@@ -121,5 +123,51 @@ func TestRepositoryValidation(t *testing.T) {
 	}
 	if err := ValidateRepository("https://github.com/example/musicserver"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestUpdateRequiresBackupBeforePreparingPackage(t *testing.T) {
+	payload := []byte("new package")
+	sum := sha256.Sum256(payload)
+	manager, _ := testManager(t, "9.0.0", "sha256:"+hex.EncodeToString(sum[:]), payload)
+	manager.beforeDownload = func() (string, error) { return "", errors.New("backup failed") }
+	if err := manager.Check(context.Background()); err == nil || manager.Status().PackagePath != "" {
+		t.Fatal("prepared update without required backup")
+	}
+	manager.beforeDownload = func() (string, error) { return "verified.sqlite", nil }
+	if err := manager.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if manager.Status().BackupPath != "verified.sqlite" || manager.Status().State != "downloaded" {
+		t.Fatalf("missing upgrade backup: %+v", manager.Status())
+	}
+}
+
+func TestCloseCancelsAndWaitsForUpdate(t *testing.T) {
+	started := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		close(started)
+		<-request.Context().Done()
+	}))
+	defer server.Close()
+	manager := NewManager(t.TempDir(), func() string { return "https://github.com/example/musicserver" })
+	manager.apiBase, manager.allowHTTP = server.URL, true
+	if !manager.Trigger() {
+		t.Fatal("update did not start")
+	}
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("update request did not start")
+	}
+	closed := make(chan struct{})
+	go func() { manager.Close(); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("close did not cancel update")
+	}
+	if manager.Trigger() {
+		t.Fatal("closed updater started another job")
 	}
 }

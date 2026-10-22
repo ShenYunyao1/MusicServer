@@ -22,7 +22,7 @@ func TestPlaylistMemberOperations(t *testing.T) {
 	if err := api.store.PutPlaylist(Playlist{ID: "mix", Name: "Mix", TrackIDs: []string{first}}); err != nil {
 		t.Fatal(err)
 	}
-	base := "/api/v1/playlists/mix"
+	base := "/api/v2/playlists/mix"
 	assertStatus := func(method, path, body string, want int) {
 		t.Helper()
 		response := callAPI(api, method, path, body)
@@ -41,7 +41,7 @@ func TestPlaylistMemberOperations(t *testing.T) {
 	assertStatus(http.MethodPut, base+"/tracks/order", `{"track_ids":["`+first+`","`+second+`"],"expected_track_ids":["`+first+`","`+second+`"]}`, http.StatusConflict)
 	assertStatus(http.MethodDelete, base+"/tracks/"+first, "", http.StatusNoContent)
 	assertStatus(http.MethodDelete, base+"/tracks/"+first, "", http.StatusNotFound)
-	assertStatus(http.MethodPost, "/api/v1/playlists/library/tracks", `{"track_ids":["`+first+`"]}`, http.StatusConflict)
+	assertStatus(http.MethodPost, "/api/v2/playlists/library/tracks", `{"track_ids":["`+first+`"]}`, http.StatusConflict)
 	assertStatus(http.MethodPost, base+"/tracks", `{"track_ids":["missing"]}`, http.StatusBadRequest)
 	assertStatus(http.MethodPut, base+"/tracks/order", `{"track_ids":["`+second+`","`+second+`"],"expected_track_ids":["`+second+`"]}`, http.StatusBadRequest)
 	if _, exists := api.store.Track(first); !exists {
@@ -60,7 +60,7 @@ func TestPlaylistMemberOperations(t *testing.T) {
 	if !reflect.DeepEqual(playlist.TrackIDs, []string{second}) || playlist.TrackNotes[second] != "Play next" {
 		t.Fatalf("member state lost after restart: %+v", playlist)
 	}
-	response := callAPI(NewAPI(reopened, "secret"), http.MethodGet, base, "")
+	response := callAPI(NewAPI(reopened), http.MethodGet, base, "")
 	var detail struct {
 		Playlist Playlist `json:"playlist"`
 		Tracks   []Track  `json:"tracks"`

@@ -31,11 +31,11 @@ func (w *blockingWriter) Write(value []byte) (int, error) {
 
 func TestScopeDeniedIsStructuredAndRecorded(t *testing.T) {
 	api, _ := testAPI(t)
-	view, secret := createPersistentKey(t, api, APIKeyCreateRequest{Name: "media-only", Role: "player", Scopes: []string{ScopeMediaRead}})
+	view, secret := createPersistentKey(t, api, APIKeyCreateRequest{Name: "media-only", Scopes: []string{ScopeMediaRead}})
 	if view.ID == "" {
 		t.Fatal("key ID is empty")
 	}
-	response := callAPIWithKey(api, http.MethodGet, "/api/v1/playlists", "", secret)
+	response := callAPIWithKey(api, http.MethodGet, "/api/v2/playlists", "", secret)
 	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "SCOPE_DENIED") {
 		t.Fatalf("scope response = %d %s", response.Code, response.Body.String())
 	}
@@ -56,15 +56,15 @@ func TestScopeDeniedIsStructuredAndRecorded(t *testing.T) {
 
 func TestKeyManagementTrailingSlashRequiresScope(t *testing.T) {
 	api, _ := testAPI(t)
-	created := callAPI(api, http.MethodPost, "/api/v1/auth/keys", `{"name":"admin-without-scopes","role":"admin","scopes":[]}`)
+	created := callAPI(api, http.MethodPost, "/api/v2/auth/keys", `{"name":"without-scopes","scopes":[]}`)
 	var key APIKeyView
 	if err := json.Unmarshal(created.Body.Bytes(), &key); err != nil || created.Code != http.StatusCreated {
 		t.Fatalf("could not create restricted admin: %d %s", created.Code, created.Body.String())
 	}
 	secret := key.Secret
 	for _, method := range []string{http.MethodGet, http.MethodPost} {
-		response := callAPIWithKey(api, method, "/api/v1/auth/keys/", `{"name":"forbidden","role":"admin"}`, secret)
-		if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "SCOPE_DENIED") {
+		response := callAPIWithKey(api, method, "/api/v2/auth/keys/", `{"name":"forbidden"}`, secret)
+		if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "SESSION_REQUIRED") {
 			t.Fatalf("trailing slash %s bypassed key management scope: %d %s", method, response.Code, response.Body.String())
 		}
 	}
@@ -72,8 +72,8 @@ func TestKeyManagementTrailingSlashRequiresScope(t *testing.T) {
 
 func TestKeyConcurrencyLimit(t *testing.T) {
 	api, _ := testAPI(t)
-	view, secret := createPersistentKey(t, api, APIKeyCreateRequest{Name: "one-at-a-time", Role: "player", Scopes: []string{ScopeLibraryRead}, MaxConcurrency: 1})
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/playlists", nil)
+	view, secret := createPersistentKey(t, api, APIKeyCreateRequest{Name: "one-at-a-time", Scopes: []string{ScopeLibraryRead}, MaxConcurrency: 1})
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/playlists", nil)
 	req.Header.Set("X-API-Key", secret)
 	auth, ok := api.authenticate(req)
 	if !ok || auth.keyID != view.ID {
@@ -97,52 +97,52 @@ func TestKeyConcurrencyLimit(t *testing.T) {
 
 func TestConcurrencyLeaseCoversStatisticsWrite(t *testing.T) {
 	api, _ := testAPI(t)
-	view, secret := createPersistentKey(t, api, APIKeyCreateRequest{Name: "statistics-lease", Role: "player", MaxConcurrency: 1})
+	view, secret := createPersistentKey(t, api, APIKeyCreateRequest{Name: "statistics-lease", MaxConcurrency: 1})
+	writer := &blockingWriter{header: make(http.Header), started: make(chan struct{}), release: make(chan struct{})}
+	request := httptest.NewRequest(http.MethodGet, "/api/v2/playlists", nil)
+	request.Header.Set("X-API-Key", secret)
+	done := make(chan struct{})
+	go func() { api.ServeHTTP(writer, request); close(done) }()
+	select {
+	case <-writer.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("response not started")
+	}
 	tx, err := api.store.db.Begin()
 	if err != nil {
+		close(writer.release)
 		t.Fatal(err)
 	}
-	done := make(chan struct{})
-	defer func() {
-		_ = tx.Rollback()
-		select {
-		case <-done:
-		case <-time.After(time.Second):
-			t.Error("request did not finish after statistics connection was released")
-		}
-	}()
+	defer tx.Rollback()
 	waits := api.store.db.Stats().WaitCount
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/unknown", nil)
-	request.Header.Set("X-API-Key", secret)
-	go func() {
-		api.ServeHTTP(httptest.NewRecorder(), request)
-		close(done)
-	}()
-	deadline := time.Now().Add(time.Second)
+	close(writer.release)
+	deadline := time.Now().Add(3 * time.Second)
 	for api.store.db.Stats().WaitCount == waits {
 		if time.Now().After(deadline) {
-			t.Fatal("statistics write did not wait for database connection")
+			t.Fatal("statistics did not wait")
 		}
 		time.Sleep(time.Millisecond)
 	}
-	if active := api.activeRequests(view.ID); active != 1 {
-		t.Fatalf("request released concurrency lease before statistics finished: active=%d", active)
+	if api.activeRequests(view.ID) != 1 {
+		t.Fatal("lease released before statistics")
 	}
-	if err := tx.Rollback(); err != nil {
-		t.Fatal(err)
+	_ = tx.Rollback()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("request did not finish")
 	}
-	<-done
-	if active := api.activeRequests(view.ID); active != 0 {
-		t.Fatalf("completed request retained concurrency lease: active=%d", active)
+	if api.activeRequests(view.ID) != 0 {
+		t.Fatal("lease retained")
 	}
 }
 
 func TestHTTPConcurrencyLimitWhileMediaResponseBlocked(t *testing.T) {
 	api, _ := testAPI(t)
 	track := api.store.Tracks()[0]
-	_, secret := createPersistentKey(t, api, APIKeyCreateRequest{Name: "media", Role: "player", Scopes: []string{ScopeMediaRead}, AllowedPlaylistIDs: []string{"library"}, MaxConcurrency: 1})
+	_, secret := createPersistentKey(t, api, APIKeyCreateRequest{Name: "media", Scopes: []string{ScopeMediaRead}, AllowedPlaylistIDs: []string{"library"}, MaxConcurrency: 1})
 	first := &blockingWriter{header: make(http.Header), started: make(chan struct{}), release: make(chan struct{})}
-	request := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/media/%s", track.ID), nil)
+	request := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v2/media/%s", track.ID), nil)
 	request.Header.Set("X-API-Key", secret)
 	done := make(chan struct{})
 	go func() { api.ServeHTTP(first, request); close(done) }()
@@ -151,7 +151,7 @@ func TestHTTPConcurrencyLimitWhileMediaResponseBlocked(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("first media request did not reach writer")
 	}
-	second := callAPIWithKey(api, http.MethodGet, "/api/v1/media/"+track.ID, "", secret)
+	second := callAPIWithKey(api, http.MethodGet, "/api/v2/media/"+track.ID, "", secret)
 	if second.Code != http.StatusTooManyRequests || !strings.Contains(second.Body.String(), "KEY_CONCURRENCY_LIMIT") {
 		t.Fatalf("second concurrent response = %d %s", second.Code, second.Body.String())
 	}
@@ -165,11 +165,11 @@ func TestHTTPConcurrencyLimitWhileMediaResponseBlocked(t *testing.T) {
 
 func TestCallStatsSurviveStoreReopen(t *testing.T) {
 	api, _ := testAPI(t)
-	_, secret := createPersistentKey(t, api, APIKeyCreateRequest{Name: "reader", Role: "player", Scopes: []string{ScopeLibraryRead}})
-	if response := callAPIWithKey(api, http.MethodGet, "/api/v1/playlists", "", secret); response.Code != http.StatusOK {
+	_, secret := createPersistentKey(t, api, APIKeyCreateRequest{Name: "reader", Scopes: []string{ScopeLibraryRead}})
+	if response := callAPIWithKey(api, http.MethodGet, "/api/v2/playlists", "", secret); response.Code != http.StatusOK {
 		t.Fatalf("request status = %d", response.Code)
 	}
-	if response := callAPIWithKey(api, http.MethodGet, "/api/v1/playlists", "", "bad-secret"); response.Code != http.StatusUnauthorized {
+	if response := callAPIWithKey(api, http.MethodGet, "/api/v2/playlists", "", "bad-secret"); response.Code != http.StatusUnauthorized {
 		t.Fatalf("invalid request status = %d", response.Code)
 	}
 	path := api.store.DataPath()
@@ -182,7 +182,7 @@ func TestCallStatsSurviveStoreReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	reopenedAPI := NewAPI(reopened, "secret")
+	reopenedAPI := NewAPI(reopened)
 	stats := reopenedAPI.readCallStats()
 	if stats.Total.TotalRequests < 2 {
 		t.Fatalf("reopened stats = %+v", stats)

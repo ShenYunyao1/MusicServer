@@ -92,6 +92,9 @@ func seedStore(t *testing.T) (*Store, string, []Track) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := store.InitializeAdmin("admin", "test administrator password"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := store.Scan(); err != nil {
 		closeStoreForTest(t, store)
 		t.Fatal(err)
@@ -109,7 +112,7 @@ func TestSQLiteRelationsAndIntegrity(t *testing.T) {
 		t.Fatal(err)
 	}
 	db := sqliteConnection(t, path)
-	for _, table := range []string{"tracks", "playlists", "playlist_tracks", "api_keys", "key_playlist_grants", "scopes", "metadata_overrides", "excluded_tracks", "meta"} {
+	for _, table := range []string{"tracks", "playlists", "playlist_tracks", "api_keys", "key_playlist_grants", "scopes", "metadata_overrides", "meta"} {
 		var count int
 		if err := db.QueryRow("SELECT count(*) FROM " + table).Scan(&count); err != nil {
 			t.Fatalf("missing relation %s: %v", table, err)
@@ -159,11 +162,11 @@ func TestSQLiteTransactionRollsBackEntireSnapshot(t *testing.T) {
 	if store.Revision() != beforeRevision || !reflect.DeepEqual(after, before) {
 		t.Fatal("failed transaction changed live snapshot")
 	}
-	durable, err := readSQLiteSnapshot(store.db)
+	durable, err := readTrackFrom(store.db, track.ID, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if durable.Revision != beforeRevision || !reflect.DeepEqual(durable.Tracks[track.ID], before) {
+	if apiRevisionForTest(store) != beforeRevision || !reflect.DeepEqual(durable, before) {
 		t.Fatal("failed transaction left a partial durable snapshot")
 	}
 	if _, err := store.db.Exec("DROP TRIGGER reject_title"); err != nil {
@@ -180,7 +183,7 @@ func TestSQLiteRejectsNewerSchemaVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.db.Exec("PRAGMA user_version = 3"); err != nil {
+	if _, err := store.db.Exec("PRAGMA user_version = 999"); err != nil {
 		t.Fatal(err)
 	}
 	closeStoreForTest(t, store)
@@ -198,7 +201,7 @@ func TestSQLitePersistsUpdatesExclusionsAndKeyLifecycle(t *testing.T) {
 	if err := store.PutPlaylist(Playlist{ID: "mix", Name: "Mix", TrackIDs: []string{tracks[1].ID, tracks[0].ID}, TrackNotes: map[string]string{tracks[0].ID: "Cue"}}); err != nil {
 		t.Fatal(err)
 	}
-	view, err := store.CreateAPIKey(APIKeyCreateRequest{Name: "Player", Role: "device", Scopes: []string{"media:read"}, AllowedPlaylistIDs: []string{"mix"}, DeviceID: "desktop"})
+	view, err := store.CreateAPIKey(APIKeyCreateRequest{Name: "Player", Scopes: []string{"media:read"}, AllowedPlaylistIDs: []string{"mix"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,11 +217,11 @@ func TestSQLitePersistsUpdatesExclusionsAndKeyLifecycle(t *testing.T) {
 	}
 	revision := store.Revision()
 	closeStoreForTest(t, store)
-	reopened, err := NewStore(path, filepath.Dir(path))
+	reopened, err := NewStore(path, store.mediaRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reopened.Revision() != revision || !reopened.data.Excluded[tracks[0].ID] || reopened.data.Overrides[tracks[0].ID]["title"] != "Edited" {
+	if reopened.Revision() != revision || !removedForTest(t, reopened, tracks[0].ID) || overrideValue(t, reopened, tracks[0].ID, "title") != "Edited" {
 		closeStoreForTest(t, reopened)
 		t.Fatal("revision, overrides, or exclusions lost after track deletion")
 	}
@@ -258,4 +261,30 @@ func TestSQLitePersistsUpdatesExclusionsAndKeyLifecycle(t *testing.T) {
 	if content, err := os.ReadFile(path); err != nil || strings.Contains(string(content), rotated.Secret) {
 		t.Fatalf("raw key secret persisted: %v", err)
 	}
+}
+
+func apiRevisionForTest(store *Store) int64 { return store.Revision() }
+func removedForTest(t *testing.T, store *Store, id string) bool {
+	t.Helper()
+	track, err := readTrackFrom(store.db, id, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return track.Removed
+}
+func overrideValue(t *testing.T, store *Store, id, field string) string {
+	t.Helper()
+	values, err := readOverrides(store.db, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return values[field]
+}
+func coverCount(t *testing.T, store *Store) int {
+	t.Helper()
+	var count int
+	if err := store.db.QueryRow("SELECT count(*) FROM cover_assets").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	return count
 }

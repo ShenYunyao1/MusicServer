@@ -1,17 +1,17 @@
 package music
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"sort"
@@ -19,33 +19,42 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"musicserver/internal/update"
 )
 
-var audioExtensions = map[string]bool{
-	".aac": true, ".flac": true, ".m4a": true, ".mp3": true,
-	".oga": true, ".ogg": true, ".opus": true, ".wav": true, ".wma": true,
-}
+var audioExtensions = map[string]bool{".aac": true, ".flac": true, ".m4a": true, ".mp3": true, ".oga": true, ".ogg": true, ".opus": true, ".wav": true, ".wma": true}
+var validID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+var errPlaylistNotFound = errors.New("playlist not found")
+var errMemberNotFound = errors.New("playlist member not found")
+var errLibraryMembers = errors.New("the library playlist manages its own tracks")
+var errPlaylistConflict = errors.New("playlist members changed; reload before reordering")
+var errVersionConflict = errors.New("record changed; refresh before editing")
 
 type Store struct {
-	mu        sync.RWMutex
-	dataPath  string
-	mediaRoot string
-	data      Library
-	db        *sql.DB
+	dataPath   string
+	mediaRoot  string
+	db         *sql.DB
+	writeMu    sync.Mutex
+	stageMu    sync.Mutex
+	mediaMu    sync.RWMutex
+	scanMu     sync.Mutex
+	scanCancel context.CancelFunc
+	scanStatus ScanStatus
+	workers    sync.WaitGroup
+	closed     bool
 }
 
 func NewStore(dataPath, mediaRoot string) (*Store, error) {
 	if strings.EqualFold(filepath.Ext(dataPath), ".json") {
-		return nil, errors.New("JSON data paths are no longer supported; use a SQLite database path")
+		return nil, errors.New("JSON data paths are unsupported; use a new SQLite database")
 	}
 	root, err := filepath.Abs(mediaRoot)
 	if err != nil {
-		return nil, fmt.Errorf("resolve media root: %w", err)
+		return nil, err
 	}
-	root = filepath.Clean(root)
-	store := &Store{dataPath: dataPath, mediaRoot: root, data: emptyLibrary()}
-	if err := store.load(); err != nil {
+	store := &Store{dataPath: dataPath, mediaRoot: filepath.Clean(root)}
+	if err := store.loadSQLite(); err != nil {
 		if store.db != nil {
 			_ = store.db.Close()
 		}
@@ -53,760 +62,561 @@ func NewStore(dataPath, mediaRoot string) (*Store, error) {
 	}
 	return store, nil
 }
-
-func (s *Store) load() error {
-	return s.loadSQLite()
-}
-
-func randomToken(bytes int) (string, error) {
-	value := make([]byte, bytes)
+func randomToken(count int) (string, error) {
+	value := make([]byte, count)
 	if _, err := rand.Read(value); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(value), nil
 }
-
 func hashSecret(secret string) string {
 	digest := sha256.Sum256([]byte(secret))
 	return hex.EncodeToString(digest[:])
 }
-
-func normalizeRole(role string) string {
-	if role == "admin" || role == "readonly" || role == "device" {
-		return role
-	}
-	return "player"
-}
-
-func cloneStrings(values []string) []string {
-	return append([]string{}, values...)
-}
-
+func cloneStrings(values []string) []string { return append([]string{}, values...) }
 func cloneAPIKey(value APIKey) APIKey {
 	value.Scopes = cloneStrings(value.Scopes)
 	value.AllowedPlaylistIDs = cloneStrings(value.AllowedPlaylistIDs)
 	return value
 }
-
 func publicAPIKey(value APIKey) APIKey {
 	value = cloneAPIKey(value)
 	value.SecretHash = ""
 	return value
 }
 
-func (s *Store) CreateAPIKey(request APIKeyCreateRequest) (APIKeyView, error) {
-	name := strings.TrimSpace(request.Name)
-	if name == "" {
+func validateKeyGrants(tx *sql.Tx, key APIKey) error {
+	user, err := readUser(tx, key.UserID)
+	if err != nil {
+		return err
+	}
+	for _, id := range key.AllowedPlaylistIDs {
+		playlist, err := readPlaylistFrom(tx, id)
+		if err != nil {
+			return err
+		}
+		if user.Role != "admin" && (playlist.System || playlist.OwnerID != user.ID) {
+			return errors.New("key owner cannot access requested playlist")
+		}
+	}
+	return nil
+}
+
+func saveKey(tx *sql.Tx, key APIKey) error {
+	encoded, err := json.Marshal(key)
+	if err != nil {
+		return err
+	}
+	if _, err = tx.Exec("INSERT INTO api_keys VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET secret_hash=excluded.secret_hash,payload=excluded.payload", key.ID, key.SecretHash, string(encoded), key.UserID); err != nil {
+		return err
+	}
+	if _, err = tx.Exec("DELETE FROM key_playlist_grants WHERE key_id=?", key.ID); err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	for position, id := range key.AllowedPlaylistIDs {
+		if seen[id] {
+			return errors.New("duplicate playlist grant")
+		}
+		seen[id] = true
+		if _, err = tx.Exec("INSERT INTO key_playlist_grants VALUES(?,?,?)", key.ID, id, position); err != nil {
+			return err
+		}
+	}
+	if _, err = tx.Exec("DELETE FROM scopes WHERE key_id=?", key.ID); err != nil {
+		return err
+	}
+	for position, scope := range key.Scopes {
+		if _, err = tx.Exec("INSERT INTO scopes VALUES(?,?,?)", key.ID, position, scope); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func (s *Store) CreateAPIKey(request APIKeyCreateRequest, options ...MutationOptions) (APIKeyView, error) {
+	if strings.TrimSpace(request.Name) == "" {
 		return APIKeyView{}, errors.New("key name is required")
 	}
 	secret, err := randomToken(32)
 	if err != nil {
 		return APIKeyView{}, err
 	}
-	scopes := cloneStrings(request.Scopes)
-	if request.Scopes == nil {
+	scopes := request.Scopes
+	if scopes == nil {
 		scopes = defaultScopes()
-		if normalizeRole(request.Role) == "admin" {
-			scopes = []string{ScopeLibraryRead, ScopeLibraryWrite, ScopeMediaRead, ScopeUploadsWrite, ScopeKeysManage, ScopeSettingsManage, ScopeStatsRead}
+	}
+	if err := validatePlayerScopes(scopes); err != nil {
+		return APIKeyView{}, err
+	}
+	key := APIKey{ID: uuid.NewString(), Name: strings.TrimSpace(request.Name), SecretHash: hashSecret(secret), Scopes: cloneStrings(scopes), AllowedPlaylistIDs: cloneStrings(request.AllowedPlaylistIDs), MaxConcurrency: request.MaxConcurrency, MaxDownloads: request.MaxDownloads, CreatedAt: time.Now().UTC(), ExpiresAt: request.ExpiresAt}
+	if key.MaxConcurrency < 1 {
+		key.MaxConcurrency = 4
+	}
+	if key.MaxDownloads < 1 {
+		key.MaxDownloads = 1
+	}
+	if key.MaxConcurrency > 64 || key.MaxDownloads > 16 {
+		return APIKeyView{}, errors.New("concurrency limits exceeded")
+	}
+	err = s.transaction(func(tx *sql.Tx) error {
+		owner, err := internalOwner(tx, options)
+		if err != nil {
+			return err
+		}
+		key.UserID = owner
+		if err := validateKeyGrants(tx, key); err != nil {
+			return err
+		}
+		if err := saveKey(tx, key); err != nil {
+			return err
+		}
+		return auditMutation(tx, "key.create", key.ID, nil, publicAPIKey(key), options)
+	})
+	return APIKeyView{APIKey: key, Secret: secret}, err
+}
+func (s *Store) APIKeys() []APIKey {
+	keys, _ := queryJSON[APIKey](s.db, "SELECT payload FROM api_keys ORDER BY id")
+	for index := range keys {
+		var last string
+		if s.db.QueryRow("SELECT last_called_at FROM api_call_stats WHERE key_id=?", keys[index].ID).Scan(&last) == nil {
+			keys[index].LastUsedAt, _ = parsePersistedTime(last)
 		}
 	}
-	if err := validateScopes(scopes); err != nil {
-		return APIKeyView{}, err
-	}
-	id, err := randomToken(12)
-	if err != nil {
-		return APIKeyView{}, err
-	}
-	key := APIKey{ID: id, Name: name, SecretHash: hashSecret(secret), Role: normalizeRole(request.Role), Scopes: scopes, AllowedPlaylistIDs: cloneStrings(request.AllowedPlaylistIDs), DeviceID: strings.TrimSpace(request.DeviceID), MaxDevices: request.MaxDevices, MaxConcurrency: request.MaxConcurrency, CreatedAt: time.Now().UTC(), ExpiresAt: request.ExpiresAt}
-	if key.MaxDevices < 1 {
-		key.MaxDevices = 1
-	}
-	if key.MaxConcurrency < 1 {
-		key.MaxConcurrency = 1
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	previous := s.cloneLocked()
-	if s.data.Keys == nil {
-		s.data.Keys = map[string]APIKey{}
-	}
-	s.data.Keys[id] = key
-	s.data.Revision++
-	if err := s.commitLocked(previous); err != nil {
-		return APIKeyView{}, err
-	}
-	return APIKeyView{APIKey: cloneAPIKey(s.data.Keys[id]), Secret: secret}, nil
-}
-
-func (s *Store) APIKeys() []APIKey {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	keys := make([]APIKey, 0, len(s.data.Keys))
-	for _, key := range s.data.Keys {
-		keys = append(keys, cloneAPIKey(key))
-	}
-	sort.Slice(keys, func(i, j int) bool { return keys[i].CreatedAt.Before(keys[j].CreatedAt) })
 	return keys
 }
-
 func (s *Store) AuthenticateSecret(secret string) (APIKey, bool) {
 	if secret == "" {
 		return APIKey{}, false
 	}
-	hash := hashSecret(secret)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for id, key := range s.data.Keys {
-		if subtle.ConstantTimeCompare([]byte(key.SecretHash), []byte(hash)) != 1 {
-			continue
-		}
-		if !key.RevokedAt.IsZero() || (!key.ExpiresAt.IsZero() && time.Now().UTC().After(key.ExpiresAt)) {
-			return APIKey{}, false
-		}
-		key.LastUsedAt = time.Now().UTC()
-		s.data.Keys[id] = key
-		return cloneAPIKey(key), true
+	var raw string
+	if err := s.db.QueryRow("SELECT payload FROM api_keys WHERE secret_hash=?", hashSecret(secret)).Scan(&raw); err != nil {
+		return APIKey{}, false
 	}
-	return APIKey{}, false
+	var key APIKey
+	if json.Unmarshal([]byte(raw), &key) != nil || !key.RevokedAt.IsZero() || (!key.ExpiresAt.IsZero() && !time.Now().Before(key.ExpiresAt)) {
+		return APIKey{}, false
+	}
+	return key, true
 }
-
-func (s *Store) RevokeAPIKey(id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	key, ok := s.data.Keys[id]
-	if !ok {
-		return os.ErrNotExist
-	}
-	if !key.RevokedAt.IsZero() {
-		return nil
-	}
-	previous := s.cloneLocked()
-	key.RevokedAt = time.Now().UTC()
-	s.data.Keys[id] = key
-	s.data.Revision++
-	return s.commitLocked(previous)
+func (s *Store) mutateKey(id, action string, edit func(*APIKey) error, options []MutationOptions) (APIKey, error) {
+	var result APIKey
+	err := s.transaction(func(tx *sql.Tx) error {
+		var raw string
+		if err := tx.QueryRow("SELECT payload FROM api_keys WHERE id=?", id).Scan(&raw); err != nil {
+			return err
+		}
+		if err := json.Unmarshal([]byte(raw), &result); err != nil {
+			return err
+		}
+		before := publicAPIKey(result)
+		if err := edit(&result); err != nil {
+			return err
+		}
+		if action == "key.update" {
+			if err := validateKeyGrants(tx, result); err != nil {
+				return err
+			}
+		}
+		if err := saveKey(tx, result); err != nil {
+			return err
+		}
+		return auditMutation(tx, action, id, before, publicAPIKey(result), options)
+	})
+	return result, err
 }
-
-func (s *Store) RotateAPIKey(id string) (APIKeyView, error) {
+func (s *Store) RevokeAPIKey(id string, options ...MutationOptions) error {
+	_, err := s.mutateKey(id, "key.revoke", func(key *APIKey) error { key.RevokedAt = time.Now().UTC(); return nil }, options)
+	return err
+}
+func (s *Store) RotateAPIKey(id string, options ...MutationOptions) (APIKeyView, error) {
 	secret, err := randomToken(32)
 	if err != nil {
 		return APIKeyView{}, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	key, ok := s.data.Keys[id]
-	if !ok {
-		return APIKeyView{}, os.ErrNotExist
-	}
-	previous := s.cloneLocked()
-	key.SecretHash = hashSecret(secret)
-	key.RevokedAt = time.Time{}
-	key.LastUsedAt = time.Time{}
-	s.data.Keys[id] = key
-	s.data.Revision++
-	if err := s.commitLocked(previous); err != nil {
-		return APIKeyView{}, err
-	}
-	return APIKeyView{APIKey: cloneAPIKey(key), Secret: secret}, nil
+	key, err := s.mutateKey(id, "key.rotate", func(key *APIKey) error { key.SecretHash = hashSecret(secret); key.RevokedAt = time.Time{}; return nil }, options)
+	return APIKeyView{APIKey: key, Secret: secret}, err
 }
-
-func (s *Store) UpdateAPIKey(id string, request APIKeyUpdateRequest) (APIKey, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	key, ok := s.data.Keys[id]
-	if !ok {
-		return APIKey{}, os.ErrNotExist
-	}
-	if request.Name != nil {
-		name := strings.TrimSpace(*request.Name)
-		if name == "" {
-			return APIKey{}, errors.New("key name is required")
-		}
-		key.Name = name
-	}
-	if request.Role != nil {
-		key.Role = normalizeRole(*request.Role)
-	}
-	if request.Scopes != nil {
-		if err := validateScopes(*request.Scopes); err != nil {
-			return APIKey{}, err
-		}
-		key.Scopes = cloneStrings(*request.Scopes)
-	}
-	if request.AllowedPlaylistIDs != nil {
-		key.AllowedPlaylistIDs = cloneStrings(*request.AllowedPlaylistIDs)
-	}
-	if request.DeviceID != nil {
-		key.DeviceID = strings.TrimSpace(*request.DeviceID)
-	}
-	if request.MaxDevices != nil {
-		if *request.MaxDevices < 1 {
-			return APIKey{}, errors.New("max_devices must be at least 1")
-		}
-		key.MaxDevices = *request.MaxDevices
-	}
-	if request.MaxConcurrency != nil {
-		if *request.MaxConcurrency < 1 {
-			return APIKey{}, errors.New("max_concurrency must be at least 1")
-		}
-		key.MaxConcurrency = *request.MaxConcurrency
-	}
-	if request.ExpiresAt != nil {
-		key.ExpiresAt = request.ExpiresAt.UTC()
-	}
-	previous := s.cloneLocked()
-	s.data.Keys[id] = key
-	s.data.Revision++
-	if err := s.commitLocked(previous); err != nil {
-		return APIKey{}, err
-	}
-	return cloneAPIKey(s.data.Keys[id]), nil
-}
-
-func (s *Store) saveLocked() error {
-	if err := saveSQLiteSnapshot(s.db, s.data); err != nil {
-		return err
-	}
-	dropMissingPlaylistGrants(&s.data)
-	return nil
-}
-
-func (s *Store) Scan() (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	previous := s.cloneLocked()
-	success := false
-	defer func() {
-		if !success {
-			s.data = previous
-		}
-	}()
-	if _, err := os.Stat(s.mediaRoot); err != nil {
-		return 0, fmt.Errorf("media root: %w", err)
-	}
-	tracks := map[string]Track{}
-	err := filepath.WalkDir(s.mediaRoot, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() {
-			if entry.Name() == ".staging" {
-				return filepath.SkipDir
+func (s *Store) UpdateAPIKey(id string, request APIKeyUpdateRequest, options ...MutationOptions) (APIKey, error) {
+	return s.mutateKey(id, "key.update", func(key *APIKey) error {
+		if request.Name != nil {
+			if strings.TrimSpace(*request.Name) == "" {
+				return errors.New("key name is required")
 			}
-			return nil
+			key.Name = strings.TrimSpace(*request.Name)
 		}
-		if entry.Type()&os.ModeSymlink != 0 || !audioExtensions[strings.ToLower(filepath.Ext(entry.Name()))] {
-			return nil
-		}
-		track, metadata, err := s.readTrackWithMetadata(path, filepath.Base(path))
-		if err != nil {
-			return err
-		}
-		if metadata.CoverSource != "" {
-			coverID, coverErr := s.saveCoverLocked(metadata.Cover, metadata.CoverMIME, metadata.CoverSource)
-			if coverErr != nil {
-				return coverErr
+		if request.Scopes != nil {
+			if err := validatePlayerScopes(*request.Scopes); err != nil {
+				return err
 			}
-			track.CoverID = coverID
+			key.Scopes = cloneStrings(*request.Scopes)
 		}
-		if !s.data.Excluded[track.ID] {
-			applyMetadata(&track, s.data.Overrides[track.ID])
-			tracks[track.ID] = track
+		if request.AllowedPlaylistIDs != nil {
+			key.AllowedPlaylistIDs = cloneStrings(*request.AllowedPlaylistIDs)
+		}
+		if request.MaxConcurrency != nil {
+			if *request.MaxConcurrency < 1 || *request.MaxConcurrency > 64 {
+				return errors.New("max_concurrency must be 1..64")
+			}
+			key.MaxConcurrency = *request.MaxConcurrency
+		}
+		if request.MaxDownloads != nil {
+			if *request.MaxDownloads < 1 || *request.MaxDownloads > 16 {
+				return errors.New("max_downloads must be 1..16")
+			}
+			key.MaxDownloads = *request.MaxDownloads
+		}
+		if request.ExpiresAt != nil {
+			key.ExpiresAt = request.ExpiresAt.UTC()
 		}
 		return nil
-	})
-	if err != nil {
-		return 0, fmt.Errorf("scan media: %w", err)
-	}
-	s.data.Tracks = tracks
-	s.data.Revision++
-	if playlist, ok := s.data.Playlists["library"]; !ok || playlist.Name == "" {
-		playlist = Playlist{ID: "library", Name: "All music"}
-		playlist.TrackIDs = sortedTrackIDs(tracks)
-		playlist.UpdatedAt = time.Now().UTC()
-		s.data.Playlists[playlist.ID] = playlist
-	} else {
-		playlist.TrackIDs = sortedTrackIDs(tracks)
-		playlist.UpdatedAt = time.Now().UTC()
-		s.data.Playlists[playlist.ID] = playlist
-	}
-	for id, playlist := range s.data.Playlists {
-		remaining := []string{}
-		for _, trackID := range playlist.TrackIDs {
-			if _, exists := tracks[trackID]; exists {
-				remaining = append(remaining, trackID)
-			} else {
-				delete(playlist.TrackNotes, trackID)
-			}
-		}
-		playlist.TrackIDs = remaining
-		s.data.Playlists[id] = playlist
-	}
-	if err := s.commitLocked(previous); err != nil {
-		return 0, err
-	}
-	success = true
-	return len(tracks), nil
-}
-
-func (s *Store) readTrack(path string) (Track, error) {
-	track, _, err := s.readTrackWithMetadata(path, filepath.Base(path))
-	return track, err
-}
-
-func (s *Store) readTrackWithMetadata(path, originalName string) (Track, audioMetadata, error) {
-	relativePath, err := filepath.Rel(s.mediaRoot, path)
-	if err != nil {
-		return Track{}, audioMetadata{}, err
-	}
-	relativePath = filepath.ToSlash(relativePath)
-	root, err := os.OpenRoot(s.mediaRoot)
-	if err != nil {
-		return Track{}, audioMetadata{}, err
-	}
-	defer root.Close()
-	file, err := root.Open(relativePath)
-	if err != nil {
-		return Track{}, audioMetadata{}, err
-	}
-	defer file.Close()
-	info, err := file.Stat()
-	if err != nil {
-		return Track{}, audioMetadata{}, err
-	}
-	identity := sha256.Sum256([]byte(relativePath))
-	hasher := sha256.New()
-	_, err = io.Copy(hasher, file)
-	if err != nil {
-		return Track{}, audioMetadata{}, err
-	}
-	contentDigest := hex.EncodeToString(hasher.Sum(nil))
-	// Invalid or absent tags retain filename defaults without rejecting audio.
-	metadata, _ := readAudioMetadata(file)
-	// Embedded artwork wins; when absent, use a validated same-basename or
-	// conventional folder image. Asset persistence is performed by the caller
-	// that owns the SQLite assets table; this reader returns the bytes in the
-	// metadata value for that purpose.
-	if s.data.Settings.ScanExternalCovers {
-		metadata = selectCover(root, relativePath, metadata)
-	}
-	technical := technicalMetadata(path, s.data.Settings.FFprobePath)
-	baseName := strings.TrimSuffix(filepath.Base(originalName), filepath.Ext(originalName))
-	title, artist := baseName, ""
-	if parts := strings.SplitN(baseName, " - ", 2); len(parts) == 2 {
-		title, artist = strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
-	}
-	if metadata.Title != "" {
-		title = metadata.Title
-	}
-	if metadata.Artist != "" {
-		artist = metadata.Artist
-	}
-	embeddedLyrics := metadata.Lyrics != ""
-	lyrics, lyricsSource := metadata.Lyrics, metadata.LyricsSource
-	if s.data.Settings.ScanExternalLyrics {
-		if value, source := readExternalLyrics(root, relativePath); source != "" {
-			lyrics, lyricsSource = value, source
-		}
-	}
-	return Track{
-		ID:             hex.EncodeToString(identity[:]),
-		Title:          title,
-		Artist:         artist,
-		Album:          metadata.Album,
-		Genre:          metadata.Genre,
-		Comment:        metadata.Comment,
-		Lyrics:         lyrics,
-		EmbeddedLyrics: embeddedLyrics,
-		LyricsSource:   lyricsSource,
-		CoverMIME:      metadata.CoverMIME,
-		CoverSource:    metadata.CoverSource,
-		DurationMS:     technical.DurationMS,
-		BitrateKbps:    int64(technical.BitrateKbps),
-		SampleRate:     technical.SampleRate,
-		Channels:       technical.Channels,
-		BitsPerSample:  technical.BitsPerSample,
-		Path:           relativePath,
-		Size:           info.Size(),
-		ContentHash:    contentDigest,
-		Format:         strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), "."),
-		ModifiedAt:     info.ModTime().UTC(),
-	}, metadata, nil
-}
-
-func sortedTrackIDs(tracks map[string]Track) []string {
-	ids := make([]string, 0, len(tracks))
-	for id := range tracks {
-		ids = append(ids, id)
-	}
-	sort.Slice(ids, func(first, second int) bool {
-		if tracks[ids[first]].Title == tracks[ids[second]].Title {
-			return ids[first] < ids[second]
-		}
-		return tracks[ids[first]].Title < tracks[ids[second]].Title
-	})
-	return ids
-}
-
-func (s *Store) Revision() int64 {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.data.Revision
+	}, options)
 }
 
 func (s *Store) Tracks() []Track {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	tracks := make([]Track, 0, len(s.data.Tracks))
-	for _, track := range s.data.Tracks {
-		tracks = append(tracks, track)
-	}
-	sort.Slice(tracks, func(i, j int) bool { return tracks[i].Title < tracks[j].Title })
+	tracks, _ := queryJSON[Track](s.db, "SELECT payload FROM tracks WHERE removed=0 ORDER BY title,id")
 	return tracks
 }
-
-func (s *Store) Track(id string) (Track, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	track, ok := s.data.Tracks[id]
-	return track, ok
+func (s *Store) RemovedTracks() []Track {
+	tracks, _ := queryJSON[Track](s.db, "SELECT payload FROM tracks WHERE removed=1 ORDER BY title,id")
+	return tracks
 }
-
+func (s *Store) Track(id string) (Track, bool) {
+	track, err := readTrackFrom(s.db, id, false)
+	return track, err == nil
+}
+func (s *Store) allTracks() ([]Track, error) {
+	return queryJSON[Track](s.db, "SELECT payload FROM tracks ORDER BY id")
+}
 func (s *Store) Playlists() []Playlist {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	playlists := make([]Playlist, 0, len(s.data.Playlists))
-	for _, playlist := range s.data.Playlists {
-		playlists = append(playlists, clonePlaylist(playlist))
-	}
-	sort.SliceStable(playlists, func(i, j int) bool {
-		if playlists[i].SortOrder == playlists[j].SortOrder {
-			return playlists[i].Name < playlists[j].Name
+	playlists, _ := queryJSON[Playlist](s.db, "SELECT payload FROM playlists ORDER BY id")
+	sort.Slice(playlists, func(first, second int) bool {
+		if playlists[first].SortOrder != playlists[second].SortOrder {
+			return playlists[first].SortOrder < playlists[second].SortOrder
 		}
-		return playlists[i].SortOrder < playlists[j].SortOrder
+		if playlists[first].Name != playlists[second].Name {
+			return playlists[first].Name < playlists[second].Name
+		}
+		return playlists[first].ID < playlists[second].ID
 	})
 	return playlists
 }
-
 func (s *Store) Playlist(id string) (Playlist, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	playlist, ok := s.data.Playlists[id]
-	return clonePlaylist(playlist), ok
+	playlist, err := readPlaylistFrom(s.db, id)
+	return playlist, err == nil
 }
-
-func (s *Store) PutPlaylist(playlist Playlist) error {
+func clonePlaylist(value Playlist) Playlist {
+	value.TrackIDs = cloneStrings(value.TrackIDs)
+	notes := map[string]string{}
+	for id, note := range value.TrackNotes {
+		notes[id] = note
+	}
+	value.TrackNotes = notes
+	return value
+}
+func (s *Store) PutPlaylist(playlist Playlist, options ...MutationOptions) error {
 	if !validID.MatchString(playlist.ID) || strings.TrimSpace(playlist.Name) == "" {
 		return errors.New("playlist id and name are required")
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	playlist = clonePlaylist(playlist)
-	if playlist.ID == "library" {
-		playlist.TrackIDs = sortedTrackIDs(s.data.Tracks)
-	}
-	seen := make(map[string]bool, len(playlist.TrackIDs))
-	for _, trackID := range playlist.TrackIDs {
-		if _, ok := s.data.Tracks[trackID]; !ok {
-			return fmt.Errorf("unknown track: %s", trackID)
+	return s.transaction(func(tx *sql.Tx) error {
+		before, err := readPlaylistFrom(tx, playlist.ID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
 		}
-		if seen[trackID] {
-			return fmt.Errorf("duplicate playlist track: %s", trackID)
+		if before.ID != "" && len(options) > 0 && options[0].CreateOnly {
+			return errVersionConflict
 		}
-		seen[trackID] = true
-	}
-	members := make(map[string]struct{}, len(playlist.TrackIDs))
-	for _, trackID := range playlist.TrackIDs {
-		members[trackID] = struct{}{}
-	}
-	for trackID := range playlist.TrackNotes {
-		if _, ok := members[trackID]; !ok {
-			return fmt.Errorf("track note references non-member track: %s", trackID)
+		if err := checkVersion(before.Version, options); err != nil {
+			return err
 		}
-	}
-	previous := s.cloneLocked()
-	playlist.UpdatedAt = time.Now().UTC()
-	if existing, exists := s.data.Playlists[playlist.ID]; exists {
-		// Display order changes only through ReorderPlaylists, never a stale PUT.
-		playlist.SortOrder = existing.SortOrder
-	} else if playlist.ID != "library" {
-		maxOrder := 0
-		for _, existing := range s.data.Playlists {
-			if existing.SortOrder > maxOrder {
-				maxOrder = existing.SortOrder
+		if playlist.ID == "library" {
+			return errLibraryMembers
+		}
+		members := map[string]bool{}
+		for _, id := range playlist.TrackIDs {
+			if members[id] {
+				return errors.New("duplicate playlist track")
+			}
+			members[id] = true
+			if _, err := readTrackFrom(tx, id, false); err != nil {
+				return fmt.Errorf("unknown track %s", id)
 			}
 		}
-		playlist.SortOrder = maxOrder + 1
-	}
-	if playlist.TrackIDs == nil {
-		playlist.TrackIDs = []string{}
-	}
-	s.data.Playlists[playlist.ID] = playlist
-	s.data.Revision++
-	return s.commitLocked(previous)
+		for id := range playlist.TrackNotes {
+			if !members[id] {
+				return errors.New("track note references non-member track")
+			}
+		}
+		if before.ID != "" {
+			playlist.OwnerID = before.OwnerID
+			playlist.SortOrder = before.SortOrder
+		} else {
+			owner, err := internalOwner(tx, options)
+			if err != nil {
+				return err
+			}
+			playlist.OwnerID = owner
+			var count int
+			if err := tx.QueryRow("SELECT count(*) FROM playlists").Scan(&count); err != nil {
+				return err
+			}
+			playlist.SortOrder = count + 1
+		}
+		playlist.Version = before.Version + 1
+		playlist.UpdatedAt = time.Now().UTC()
+		playlist.TrackIDs = cloneStrings(playlist.TrackIDs)
+		if err := writePlaylist(tx, playlist); err != nil {
+			return err
+		}
+		if err := recordChange(tx, "playlist", playlist.ID, false); err != nil {
+			return err
+		}
+		return auditMutation(tx, "playlist.put", playlist.ID, before, playlist, options)
+	})
 }
-
-// mutatePlaylist keeps read, edit, and durable save under one lock.
-func (s *Store) mutatePlaylist(id string, members bool, edit func(*Playlist) error) (Playlist, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	playlist, ok := s.data.Playlists[id]
-	if !ok {
-		return Playlist{}, errPlaylistNotFound
-	}
-	if members && id == "library" {
-		return Playlist{}, errLibraryMembers
-	}
-	playlist = clonePlaylist(playlist)
-	if err := edit(&playlist); err != nil {
-		return Playlist{}, err
-	}
-	previous := s.cloneLocked()
-	playlist.UpdatedAt = time.Now().UTC()
-	s.data.Playlists[id] = playlist
-	s.data.Revision++
-	if err := s.commitLocked(previous); err != nil {
-		return Playlist{}, err
-	}
-	return clonePlaylist(playlist), nil
+func (s *Store) mutatePlaylist(id string, members bool, edit func(*Playlist) error, options ...MutationOptions) (Playlist, error) {
+	var result Playlist
+	err := s.transaction(func(tx *sql.Tx) error {
+		before, err := readPlaylistFrom(tx, id)
+		if errors.Is(err, sql.ErrNoRows) {
+			return errPlaylistNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if members && id == "library" {
+			return errLibraryMembers
+		}
+		if err := checkVersion(before.Version, options); err != nil {
+			return err
+		}
+		result = clonePlaylist(before)
+		if err := edit(&result); err != nil {
+			return err
+		}
+		for _, trackID := range result.TrackIDs {
+			track, err := readTrackFrom(tx, trackID, true)
+			if err != nil || track.Removed && !slices.Contains(before.TrackIDs, trackID) {
+				return fmt.Errorf("unknown track: %s", trackID)
+			}
+		}
+		if reflect.DeepEqual(before, result) {
+			return nil
+		}
+		result.Version++
+		result.UpdatedAt = time.Now().UTC()
+		if err := writePlaylist(tx, result); err != nil {
+			return err
+		}
+		if err := recordChange(tx, "playlist", id, false); err != nil {
+			return err
+		}
+		return auditMutation(tx, "playlist.update", id, before, result, options)
+	})
+	return result, err
 }
-
-func (s *Store) UpdatePlaylistMetadata(id string, name, description *string) (Playlist, error) {
-	return s.mutatePlaylist(id, false, func(p *Playlist) error {
+func (s *Store) UpdatePlaylistMetadata(id string, name, description *string, options ...MutationOptions) (Playlist, error) {
+	return s.mutatePlaylist(id, false, func(playlist *Playlist) error {
 		if name != nil {
 			if strings.TrimSpace(*name) == "" {
 				return errors.New("playlist name is required")
 			}
-			p.Name = *name
+			playlist.Name = *name
 		}
 		if description != nil {
-			p.Description = *description
+			playlist.Description = *description
 		}
 		return nil
-	})
+	}, options...)
 }
-
-func (s *Store) AddPlaylistTracks(id string, ids []string) (Playlist, error) {
-	return s.mutatePlaylist(id, true, func(p *Playlist) error {
-		for _, trackID := range ids {
-			if _, ok := s.data.Tracks[trackID]; !ok {
-				return fmt.Errorf("unknown track: %s", trackID)
-			}
-		}
-		seen := make(map[string]bool, len(p.TrackIDs))
-		for _, trackID := range p.TrackIDs {
-			seen[trackID] = true
-		}
-		for _, trackID := range ids {
-			if !seen[trackID] {
-				p.TrackIDs = append(p.TrackIDs, trackID)
-				seen[trackID] = true
-			}
-		}
-		return nil
-	})
-}
-
-func (s *Store) UpdatePlaylistTrackNote(id, trackID, note string) (Playlist, error) {
-	return s.mutatePlaylist(id, true, func(p *Playlist) error {
-		for _, member := range p.TrackIDs {
-			if member == trackID {
-				if p.TrackNotes == nil {
-					p.TrackNotes = map[string]string{}
-				}
-				if note == "" {
-					delete(p.TrackNotes, trackID)
-				} else {
-					p.TrackNotes[trackID] = note
-				}
-				return nil
-			}
-		}
-		return errMemberNotFound
-	})
-}
-
-func (s *Store) RemovePlaylistTrack(id, trackID string) error {
-	_, err := s.mutatePlaylist(id, true, func(p *Playlist) error {
-		for index, member := range p.TrackIDs {
-			if member == trackID {
-				p.TrackIDs = append(p.TrackIDs[:index], p.TrackIDs[index+1:]...)
-				delete(p.TrackNotes, trackID)
-				return nil
-			}
-		}
-		return errMemberNotFound
-	})
-	return err
-}
-
-func (s *Store) ReorderPlaylistTracks(id string, expected, order []string) (Playlist, error) {
-	return s.mutatePlaylist(id, true, func(p *Playlist) error {
-		if !slices.Equal(p.TrackIDs, expected) {
-			return errPlaylistConflict
-		}
-		if len(order) != len(expected) {
-			return errors.New("track_ids must contain every member exactly once")
-		}
-		seen := make(map[string]bool, len(expected))
-		for _, member := range expected {
+func (s *Store) AddPlaylistTracks(id string, ids []string, options ...MutationOptions) (Playlist, error) {
+	return s.mutatePlaylist(id, true, func(playlist *Playlist) error {
+		seen := map[string]bool{}
+		for _, member := range playlist.TrackIDs {
 			seen[member] = true
 		}
-		for _, member := range order {
+		for _, member := range ids {
 			if !seen[member] {
-				return errors.New("track_ids must contain every member exactly once")
+				playlist.TrackIDs = append(playlist.TrackIDs, member)
+				seen[member] = true
 			}
-			delete(seen, member)
 		}
-		p.TrackIDs = cloneStrings(order)
+		return nil
+	}, options...)
+}
+func (s *Store) UpdatePlaylistTrackNote(id, trackID, note string, options ...MutationOptions) (Playlist, error) {
+	return s.mutatePlaylist(id, true, func(playlist *Playlist) error {
+		if !slices.Contains(playlist.TrackIDs, trackID) {
+			return errMemberNotFound
+		}
+		if playlist.TrackNotes == nil {
+			playlist.TrackNotes = map[string]string{}
+		}
+		if note == "" {
+			delete(playlist.TrackNotes, trackID)
+		} else {
+			playlist.TrackNotes[trackID] = note
+		}
+		return nil
+	}, options...)
+}
+func (s *Store) RemovePlaylistTrack(id, trackID string, options ...MutationOptions) error {
+	_, err := s.mutatePlaylist(id, true, func(playlist *Playlist) error {
+		index := slices.Index(playlist.TrackIDs, trackID)
+		if index < 0 {
+			return errMemberNotFound
+		}
+		playlist.TrackIDs = slices.Delete(playlist.TrackIDs, index, index+1)
+		delete(playlist.TrackNotes, trackID)
+		return nil
+	}, options...)
+	return err
+}
+func (s *Store) ReorderPlaylistTracks(id string, expected, order []string, options ...MutationOptions) (Playlist, error) {
+	return s.mutatePlaylist(id, true, func(playlist *Playlist) error {
+		if !slices.Equal(playlist.TrackIDs, expected) {
+			return errPlaylistConflict
+		}
+		first, second := cloneStrings(expected), cloneStrings(order)
+		sort.Strings(first)
+		sort.Strings(second)
+		if !slices.Equal(first, second) {
+			return errors.New("order must contain every member exactly once")
+		}
+		playlist.TrackIDs = cloneStrings(order)
+		return nil
+	}, options...)
+}
+func (s *Store) ReorderPlaylists(order []string, options ...MutationOptions) error {
+	return s.transaction(func(tx *sql.Tx) error {
+		playlists, err := queryJSON[Playlist](tx, "SELECT payload FROM playlists")
+		if err != nil {
+			return err
+		}
+		if len(options) > 0 && options[0].ExpectedOrder != nil {
+			sort.Slice(playlists, func(first, second int) bool {
+				if playlists[first].SortOrder != playlists[second].SortOrder {
+					return playlists[first].SortOrder < playlists[second].SortOrder
+				}
+				if playlists[first].Name != playlists[second].Name {
+					return playlists[first].Name < playlists[second].Name
+				}
+				return playlists[first].ID < playlists[second].ID
+			})
+			current := []string{}
+			for _, playlist := range playlists {
+				current = append(current, playlist.ID)
+			}
+			if !slices.Equal(current, options[0].ExpectedOrder) {
+				return errPlaylistConflict
+			}
+		}
+		if len(order) != len(playlists) {
+			return errPlaylistConflict
+		}
+		available := map[string]Playlist{}
+		for _, playlist := range playlists {
+			available[playlist.ID] = playlist
+		}
+		for position, id := range order {
+			playlist, ok := available[id]
+			if !ok {
+				return errPlaylistConflict
+			}
+			delete(available, id)
+			if playlist.SortOrder == position {
+				continue
+			}
+			before := playlist
+			playlist.SortOrder = position
+			playlist.Version++
+			playlist.UpdatedAt = time.Now().UTC()
+			if err := writePlaylist(tx, playlist); err != nil {
+				return err
+			}
+			if err := recordChange(tx, "playlist", id, false); err != nil {
+				return err
+			}
+			if err := auditMutation(tx, "playlist.order", id, before, playlist, options); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 }
-
-func (s *Store) ReorderPlaylists(order []string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	seen := map[string]bool{}
-	next := make([]string, 0, len(s.data.Playlists))
-	for _, id := range order {
-		if _, ok := s.data.Playlists[id]; !ok || seen[id] {
-			continue
+func (s *Store) DeletePlaylist(id string, options ...MutationOptions) error {
+	if id == "library" {
+		return errLibraryMembers
+	}
+	return s.transaction(func(tx *sql.Tx) error {
+		before, err := readPlaylistFrom(tx, id)
+		if err != nil {
+			return err
 		}
-		seen[id] = true
-		next = append(next, id)
-	}
-	for id := range s.data.Playlists {
-		if !seen[id] {
-			next = append(next, id)
+		if err := checkVersion(before.Version, options); err != nil {
+			return err
 		}
-	}
-	previous := s.cloneLocked()
-	for position, id := range next {
-		playlist := s.data.Playlists[id]
-		playlist.SortOrder = position
-		playlist.UpdatedAt = time.Now().UTC()
-		s.data.Playlists[id] = playlist
-	}
-	s.data.Revision++
-	return s.commitLocked(previous)
+		keys, err := queryJSON[APIKey](tx, "SELECT payload FROM api_keys")
+		if err != nil {
+			return err
+		}
+		for _, key := range keys {
+			index := slices.Index(key.AllowedPlaylistIDs, id)
+			if index >= 0 {
+				key.AllowedPlaylistIDs = slices.Delete(key.AllowedPlaylistIDs, index, index+1)
+				if err := saveKey(tx, key); err != nil {
+					return err
+				}
+			}
+		}
+		if _, err := tx.Exec("DELETE FROM playlists WHERE id=?", id); err != nil {
+			return err
+		}
+		if err := recordChange(tx, "playlist", id, true); err != nil {
+			return err
+		}
+		return auditMutation(tx, "playlist.delete", id, before, nil, options)
+	})
 }
-
 func (s *Store) Settings() ServerSettings {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	settings := s.data.Settings
+	var raw string
+	var settings ServerSettings
+	if s.db.QueryRow("SELECT value FROM settings WHERE key='server'").Scan(&raw) == nil {
+		_ = json.Unmarshal([]byte(raw), &settings)
+	}
 	settings.MediaRoot = s.mediaRoot
 	return settings
 }
-
-func (s *Store) UpdateSettings(settings ServerSettings) error {
-	if settings.MediaRoot != "" && filepath.Clean(settings.MediaRoot) != s.mediaRoot {
-		return errors.New("media_root is a startup setting; change -media-root and restart the server")
+func (s *Store) UpdateSettings(settings ServerSettings, options ...MutationOptions) error {
+	if settings.MediaRoot != "" && settings.MediaRoot != s.mediaRoot {
+		return errors.New("media_root is read-only")
 	}
-	if settings.FFprobePath != "" {
-		if info, err := os.Stat(settings.FFprobePath); err != nil || info.IsDir() {
-			return errors.New("ffprobe_path must point to an existing executable")
-		}
-	}
-	if settings.MaxUploadBytes < 1<<20 || settings.MaxUploadBytes > 4<<30 {
-		return errors.New("max_upload_bytes must be between 1 MiB and 4 GiB")
+	if settings.MaxUploadBytes < 1 || settings.MaxUploadBytes > 4<<30 {
+		return errors.New("upload limit must be between 1 byte and 4 GiB")
 	}
 	if err := update.ValidateRepository(settings.UpdateRepository); err != nil {
 		return err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	previous := s.cloneLocked()
 	settings.MediaRoot = s.mediaRoot
-	s.data.Settings = settings
-	s.data.Revision++
-	return s.commitLocked(previous)
-}
-
-func (s *Store) Sync(since int64) SyncResponse {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	response := SyncResponse{Revision: s.data.Revision, Changed: []Track{}, Playlists: []Playlist{}}
-	if since == s.data.Revision {
-		return response
-	}
-	response.FullSnapshot = true
-	response.Changed = make([]Track, 0, len(s.data.Tracks))
-	for _, track := range s.data.Tracks {
-		response.Changed = append(response.Changed, track)
-	}
-	response.Playlists = make([]Playlist, 0, len(s.data.Playlists))
-	for _, playlist := range s.data.Playlists {
-		response.Playlists = append(response.Playlists, clonePlaylist(playlist))
-	}
-	sort.Slice(response.Playlists, func(i, j int) bool {
-		first, second := response.Playlists[i], response.Playlists[j]
-		if first.SortOrder != second.SortOrder {
-			return first.SortOrder < second.SortOrder
+	return s.transaction(func(tx *sql.Tx) error {
+		var before string
+		if err := tx.QueryRow("SELECT value FROM settings WHERE key='server'").Scan(&before); err != nil {
+			return err
 		}
-		if first.Name != second.Name {
-			return first.Name < second.Name
+		encoded, err := json.Marshal(settings)
+		if err != nil {
+			return err
 		}
-		return first.ID < second.ID
+		if _, err = tx.Exec("UPDATE settings SET value=? WHERE key='server'", string(encoded)); err != nil {
+			return err
+		}
+		var previous ServerSettings
+		_ = json.Unmarshal([]byte(before), &previous)
+		return auditMutation(tx, "settings.update", "server", previous, settings, options)
 	})
-	return response
 }
-
-func (s *Store) MediaPath(track Track) (string, error) {
-	path := filepath.Join(s.mediaRoot, filepath.FromSlash(track.Path))
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return "", err
-	}
-	rootWithSeparator := s.mediaRoot + string(os.PathSeparator)
-	if absPath != s.mediaRoot && !strings.HasPrefix(absPath, rootWithSeparator) {
-		return "", errors.New("track path escapes media root")
-	}
-	return absPath, nil
-}
-
-var validID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
-
-var errPlaylistNotFound = errors.New("playlist not found")
-var errMemberNotFound = errors.New("playlist member not found")
-var errLibraryMembers = errors.New("the library playlist manages its own tracks")
-var errPlaylistConflict = errors.New("playlist members changed; reload before reordering")
-
-func clonePlaylist(value Playlist) Playlist {
-	value.TrackIDs = append([]string{}, value.TrackIDs...)
-	if value.TrackNotes != nil {
-		notes := map[string]string{}
-		for id, note := range value.TrackNotes {
-			notes[id] = note
-		}
-		value.TrackNotes = notes
-	}
-	return value
-}
-
-func (s *Store) cloneLocked() Library {
-	encoded, _ := json.Marshal(s.data)
-	var copy Library
-	_ = json.Unmarshal(encoded, &copy)
-	normalizeLibrary(&copy)
-	for id, asset := range s.data.CoverAssets {
-		asset.Data = append([]byte(nil), asset.Data...)
-		copy.CoverAssets[id] = asset
-	}
-	return copy
-}
-
-func (s *Store) commitLocked(previous Library) error {
-	if err := s.saveLocked(); err != nil {
-		s.data = previous
-		return err
-	}
-	return nil
-}
-
 func applyMetadata(track *Track, values map[string]string) {
-	for key, value := range values {
-		switch key {
+	for field, value := range values {
+		switch field {
 		case "title":
 			track.Title = value
 		case "artist":
@@ -829,158 +639,113 @@ func applyMetadata(track *Track, values map[string]string) {
 		}
 	}
 }
-
-func (s *Store) UpdateTrack(id string, fields map[string]string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	track, exists := s.data.Tracks[id]
-	if !exists {
-		return os.ErrNotExist
+func (s *Store) UpdateTrack(id string, fields map[string]string, options ...MutationOptions) error {
+	if err := validMetadataFields(fields); err != nil {
+		return err
 	}
-	for key := range fields {
-		if key != "title" && key != "artist" && key != "album" && key != "genre" && key != "comment" && key != "lyrics" {
-			return fmt.Errorf("unsupported metadata field: %s", key)
+	return s.transaction(func(tx *sql.Tx) error {
+		before, err := readTrackFrom(tx, id, false)
+		if err != nil {
+			return err
 		}
-	}
-	previous := s.cloneLocked()
-	normalizeLibrary(&s.data)
-	if s.data.Overrides[id] == nil {
-		s.data.Overrides[id] = map[string]string{}
-	}
-	for key, value := range fields {
-		s.data.Overrides[id][key] = value
-	}
-	applyMetadata(&track, fields)
-	s.data.Tracks[id] = track
-	s.data.Revision++
-	return s.commitLocked(previous)
-}
-
-func (s *Store) DeleteTrack(id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, exists := s.data.Tracks[id]; !exists {
-		return os.ErrNotExist
-	}
-	previous := s.cloneLocked()
-	delete(s.data.Tracks, id)
-	s.data.Excluded[id] = true
-	for playlistID, playlist := range s.data.Playlists {
-		remaining := []string{}
-		for _, trackID := range playlist.TrackIDs {
-			if trackID != id {
-				remaining = append(remaining, trackID)
-			}
+		if err := checkVersion(before.Version, options); err != nil {
+			return err
 		}
-		playlist.TrackIDs = remaining
-		delete(playlist.TrackNotes, id)
-		playlist.UpdatedAt = time.Now().UTC()
-		s.data.Playlists[playlistID] = playlist
-	}
-	s.data.Revision++
-	return s.commitLocked(previous)
-}
-
-func (s *Store) DeletePlaylist(id string) error {
-	if id == "library" {
-		return errors.New("the library playlist cannot be deleted")
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, exists := s.data.Playlists[id]; !exists {
-		return os.ErrNotExist
-	}
-	previous := s.cloneLocked()
-	delete(s.data.Playlists, id)
-	s.data.Revision++
-	return s.commitLocked(previous)
-}
-
-func (s *Store) ImportAudio(name string, reader io.Reader) (Track, error) {
-	return s.ImportAudioWithMetadata(name, reader, nil)
-}
-
-// ImportAudioWithMetadata commits the file's tags and user edits as one mutation.
-// A failed save restores the library and removes the newly uploaded file.
-func (s *Store) ImportAudioWithMetadata(name string, reader io.Reader, fields map[string]string) (Track, error) {
-	extension := strings.ToLower(filepath.Ext(filepath.Base(name)))
-	if !audioExtensions[extension] {
-		return Track{}, errors.New("unsupported audio extension")
-	}
-	for key := range fields {
-		if key != "title" && key != "artist" && key != "album" && key != "genre" && key != "comment" && key != "lyrics" {
-			return Track{}, fmt.Errorf("unsupported metadata field: %s", key)
+		track := before
+		applyMetadata(&track, fields)
+		track.Version++
+		if err := writeTrack(tx, track); err != nil {
+			return err
 		}
+		if err := writeOverrides(tx, id, fields); err != nil {
+			return err
+		}
+		if err := recordChange(tx, "track", id, false); err != nil {
+			return err
+		}
+		return auditMutation(tx, "track.update", id, before, track, options)
+	})
+}
+func (s *Store) DeleteTrack(id string, options ...MutationOptions) error {
+	return s.setRemoved(id, true, options)
+}
+func (s *Store) RestoreTrack(id string, options ...MutationOptions) error {
+	return s.setRemoved(id, false, options)
+}
+func (s *Store) setRemoved(id string, removed bool, options []MutationOptions) error {
+	return s.transaction(func(tx *sql.Tx) error {
+		before, err := readTrackFrom(tx, id, true)
+		if err != nil {
+			return err
+		}
+		if err := checkVersion(before.Version, options); err != nil {
+			return err
+		}
+		if before.Removed == removed {
+			return nil
+		}
+		track := before
+		track.Removed = removed
+		track.Version++
+		if err := writeTrack(tx, track); err != nil {
+			return err
+		}
+		if err := recordChange(tx, "track", id, removed); err != nil {
+			return err
+		}
+		if err := refreshLibrary(tx); err != nil {
+			return err
+		}
+		return auditMutation(tx, "track.removed", id, before, track, options)
+	})
+}
+func refreshLibrary(tx *sql.Tx) error {
+	before, err := readPlaylistFrom(tx, "library")
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	root, err := os.OpenRoot(s.mediaRoot)
+	tracks, err := queryJSON[Track](tx, "SELECT payload FROM tracks WHERE removed=0 ORDER BY title,id")
 	if err != nil {
-		return Track{}, err
+		return err
 	}
-	defer root.Close()
-	if err := root.MkdirAll("uploads", 0o755); err != nil {
-		return Track{}, err
+	ids := []string{}
+	for _, track := range tracks {
+		ids = append(ids, track.ID)
 	}
-	storedName := fmt.Sprintf("uploads/%d%s", time.Now().UnixNano(), extension)
-	file, err := root.OpenFile(storedName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-	if err != nil {
-		return Track{}, err
+	if before.ID != "" && slices.Equal(before.TrackIDs, ids) {
+		return nil
 	}
-	_, copyErr := io.Copy(file, reader)
-	closeErr := file.Close()
-	if copyErr != nil || closeErr != nil {
-		_ = root.Remove(storedName)
-		return Track{}, errors.Join(copyErr, closeErr)
-	}
-	track, metadata, err := s.readTrackWithMetadata(filepath.Join(s.mediaRoot, filepath.FromSlash(storedName)), name)
-	if err != nil {
-		_ = root.Remove(storedName)
-		return Track{}, err
-	}
-	for _, existing := range s.data.Tracks {
-		if existing.ContentHash != "" && existing.ContentHash == track.ContentHash {
-			_ = root.Remove(storedName)
-			return existing, nil
-		}
-	}
-	previous := s.cloneLocked()
-	if metadata.CoverSource != "" {
-		coverID, coverErr := s.saveCoverLocked(metadata.Cover, metadata.CoverMIME, metadata.CoverSource)
-		if coverErr != nil {
-			_ = root.Remove(storedName)
-			return Track{}, coverErr
-		}
-		track.CoverID = coverID
-	}
-	overrides := map[string]string{}
-	// Preserve original-name defaults when the stored filename is a timestamp.
-	if metadata.Title == "" {
-		overrides["title"] = track.Title
-	}
-	if metadata.Artist == "" && track.Artist != "" {
-		overrides["artist"] = track.Artist
-	}
-	for key, value := range fields {
-		overrides[key] = value
-	}
-	applyMetadata(&track, fields)
-	s.data.Tracks[track.ID] = track
-	if len(overrides) > 0 {
-		s.data.Overrides[track.ID] = overrides
-	}
-	playlist := s.data.Playlists["library"]
+	playlist := before
 	playlist.ID = "library"
+	playlist.System = true
 	if playlist.Name == "" {
 		playlist.Name = "All music"
 	}
-	playlist.TrackIDs = sortedTrackIDs(s.data.Tracks)
+	playlist.TrackIDs = ids
+	playlist.Version++
 	playlist.UpdatedAt = time.Now().UTC()
-	s.data.Playlists["library"] = playlist
-	s.data.Revision++
-	if err := s.commitLocked(previous); err != nil {
-		_ = root.Remove(storedName)
+	if err := writePlaylist(tx, playlist); err != nil {
+		return err
+	}
+	return recordChange(tx, "playlist", "library", false)
+}
+func (s *Store) MediaPath(track Track) (string, error) {
+	if !filepath.IsLocal(filepath.FromSlash(track.Path)) {
+		return "", errors.New("track path escapes media root")
+	}
+	return filepath.Join(s.mediaRoot, filepath.FromSlash(track.Path)), nil
+}
+func (s *Store) ImportAudio(name string, reader io.Reader) (Track, error) {
+	return s.ImportAudioWithMetadata(name, reader, nil)
+}
+func (s *Store) ImportAudioWithMetadata(name string, reader io.Reader, fields map[string]string, options ...MutationOptions) (Track, error) {
+	stage, err := s.StageAudio(name, reader, fields, options...)
+	if err != nil {
 		return Track{}, err
 	}
-	return track, nil
+	track, _, err := s.CommitUploadStage(stage.ID, options...)
+	if err != nil {
+		_ = s.DeleteUploadStage(stage.ID)
+	}
+	return track, err
 }

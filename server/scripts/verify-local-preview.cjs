@@ -6,10 +6,10 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 // This script imports a sample into an isolated empty validation server.
 async function main() {
   const base = process.env.MUSIC_SERVER_UI_URL;
-  const key = process.env.MUSIC_SERVER_UI_KEY;
+  const { login } = require('./account-session.cjs');
   const root = process.env.MUSIC_SERVER_UI_SAMPLES;
   const screenshots = process.env.MUSIC_SERVER_UI_SCREENSHOTS;
-  assert(base && key && root && screenshots, 'Set the validation URL, key, sample root and screenshot directory');
+  assert(base && root && screenshots, 'Set the validation URL, sample root and screenshot directory');
   const mp3 = path.join(root, '暂存', '麻雀 - 李荣浩.mp3');
   const song = path.join(root, '[1]默认列表', '爱殇');
   const withAttachments = ['.mp3', '.lrc', '.jpg'].map(extension => song + extension);
@@ -22,14 +22,15 @@ async function main() {
     page.on('pageerror', error => errors.push(String(error)));
     page.on('request', request => {
       const pathname = new URL(request.url()).pathname;
-      if (['POST', 'PUT', 'PATCH'].includes(request.method()) && pathname.startsWith('/api/v1/uploads')) uploadRequests.push(request.url());
+      if (['POST', 'PUT', 'PATCH'].includes(request.method()) && pathname.startsWith('/api/v2/uploads')) uploadRequests.push(request.url());
       if (request.method() === 'POST' && /\/uploads\/stage$/.test(pathname)) stageRequests.push(request.url());
     });
-    const headers = { 'X-API-Key': key };
-    const tracks = await page.request.get(base + '/api/v1/tracks', { headers });
+    const headers = await login(page, base);
+    const tracks = await page.request.get(base + '/api/v2/tracks', { headers });
     assert.equal(tracks.status(), 200);
     assert.deepEqual(await tracks.json(), [], 'Validation library must be empty');
     await page.goto(base);
+    await page.waitForFunction(() => state.user && state.revision !== null);
     await page.locator('[data-page="upload"]').click();
     await page.locator('#uploadInput').setInputFiles(mp3);
     await page.waitForFunction(() => state.uploads[0]?.localStatus === '已完成');
@@ -38,7 +39,7 @@ async function main() {
     assert.equal(local.artist, '李荣浩');
     assert.equal(local.embedded_lyrics, true);
     assert(local.lyrics.length > 100);
-    assert.equal(uploadRequests.length, 0, 'Local preview must work before authentication without uploads');
+    assert.equal(uploadRequests.length, 0, 'Local preview must work without uploading the selected files');
     await page.locator('.upload-text summary').click();
     assert((await page.locator('[data-upload-field="lyrics"]').inputValue()).length > 100);
     await page.locator('[data-upload-field="comment"]').fill('Local preview comment');
@@ -70,7 +71,7 @@ async function main() {
     assert(await page.locator('.upload-item').nth(1).innerText().then(value => value.includes('等待服务端确认') && value.includes('内嵌歌词待确认')));
     await page.waitForFunction(() => [...document.querySelectorAll('.upload-cover img')].some(image => image.complete && image.naturalWidth > 0));
     assert.equal(uploadRequests.length, 0);
-    const count = await page.request.get(base + '/api/v1/tracks', { headers });
+    const count = await page.request.get(base + '/api/v2/tracks', { headers });
     assert.deepEqual(await count.json(), []);
     const first = page.locator('.upload-item').first();
     await first.locator('.upload-text summary').click();
@@ -81,13 +82,13 @@ async function main() {
       await page.screenshot({ path: path.join(screenshots, `v061-local-preview-${viewport.width}.png`), fullPage: true });
     }
     await page.setViewportSize({ width: 1440, height: 1000 });
-    await page.locator('#key').fill(key);
-    await page.locator('#connect').click();
+
+
     await page.waitForFunction(() => state.revision !== null && !requestActive && requestQueue.length === 0);
     await first.locator('[data-upload-field="title"]').fill('Local Preview Regression');
     let release;
     const gate = new Promise(resolve => { release = resolve; });
-    await page.route('**/api/v1/uploads/stage', async route => {
+    await page.route('**/api/v2/uploads/stage', async route => {
       await gate;
       await route.continue();
     });
@@ -100,7 +101,7 @@ async function main() {
       release();
     }
     await page.waitForFunction(() => state.uploads[0]?.status === '待确认');
-    await page.unroute('**/api/v1/uploads/stage');
+    await page.unroute('**/api/v2/uploads/stage');
     assert.equal(stageRequests.length, 1);
     const preview = await page.evaluate(() => state.uploads[0].preview.track);
     assert.equal(preview.title, 'Local Preview Regression');
@@ -111,7 +112,7 @@ async function main() {
     await first.locator('[data-upload-field="comment"]').fill('Preserve manual comment');
     await first.locator('[data-confirm-upload]').click();
     await page.waitForFunction(() => state.uploads[0]?.status === '完成');
-    const saved = await page.request.get(base + '/api/v1/tracks', { headers });
+    const saved = await page.request.get(base + '/api/v2/tracks', { headers });
     const stored = await saved.json();
     assert.equal(stored.length, 1);
     assert.equal(stored[0].lyrics, '[00:00.00]Local editor regression');
@@ -137,7 +138,7 @@ async function main() {
     assert(stageRequests.length > requestsBeforeDuplicate);
     await page.locator('[data-confirm-upload]').click();
     await page.waitForFunction(() => state.uploads[0]?.status === '已去重');
-    const unchanged = await (await page.request.get(base + '/api/v1/tracks', { headers })).json();
+    const unchanged = await (await page.request.get(base + '/api/v2/tracks', { headers })).json();
     assert.equal(unchanged.length, 1);
     assert.equal(unchanged[0].lyrics, stored[0].lyrics);
     await page.locator('#clearUploads').click();

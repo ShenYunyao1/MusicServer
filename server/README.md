@@ -1,130 +1,197 @@
-# 音乐服务器 0.6.3
+# 音乐服务器 0.9.0
 
-Go 1.26+，使用 SQLite 和音频标签依赖。提供 HTTP API 和内置中文 Web 管理页；Windows 和 Linux 均可构建运行。
+Go 1.26+，SQLite schema 4，HTTP API `/api/v2`，内置中文管理页。支持 Windows 和 Linux。
+
+本版采用账号密码登录和账号所属的播放器 Key。schema 1–3、旧启动管理员 Key、匿名管理员模式、JSON 文件及 `/api/v1` 均不支持，不执行旧库迁移。使用新的数据库路径初始化；旧库原样保留。重新扫描不会恢复旧歌单和人工覆盖。
 
 ## 启动
 
-```powershell
-cd D:\Develop\Study\MusicPlayer\server
-.\musicserver.exe -addr 127.0.0.1:18080 -media-root 'D:\Download\音乐下载\MusicPlayer目录' -data 'D:\Develop\Runtimes\MusicServerTest\library.sqlite' -api-key dev-test-key
+Windows 使用两个批处理脚本：`build.bat` 执行测试、`go vet` 和编译，成功后明确输出 `BUILD SUCCEEDED` 和程序路径；失败输出 `BUILD FAILED` 并返回非零状态。`start.bat` 在前台启动编译后的程序，首次启动引导设置管理员密码。从其他目录调用也可；源码更新后先重新编译。
+
+```bat
+cd server
+call build.bat
+call start.bat
 ```
 
-浏览器打开 `http://127.0.0.1:18080/`，输入相同 API Key，连接后即可管理曲目和歌单。
-以上密钥仅用于本机开发测试。实际部署使用自己的密钥，可通过 `MUSIC_SERVER_API_KEY` 环境变量提供。默认监听 `127.0.0.1:8080`。
+首次启动自动在终端隐藏输入并确认密码，账号名为 `admin`，密码至少 12 个字符、最多 1024 字节；不设置默认密码。后续启动直接进入服务。也可提前执行 `musicserver.exe admin init`；`--data` 和 `--username` 仅用于覆盖默认值，均可省略。自定义用户名为 3–64 个 ASCII 字母、数字、点、短横线或下划线，首字符为字母或数字，忽略大小写。
 
-### 管理员 Key
+程序默认监听 `127.0.0.1:8080`，媒体库为 **musicserver.exe 所在目录及其子目录**，数据库为该目录下的 `data\library-v4.sqlite`，无需显式传参。音频可直接放在程序旁，或放入 `音乐\专辑\`、`media\` 等子目录。数据库目录、`.staging` 和 `.server-archive` 不参与媒体扫描。上传音频保存在 `uploads`，备份和更新暂存在 `data` 下。
 
-启动参数 `-api-key`（或环境变量 `MUSIC_SERVER_API_KEY`）是稳定的管理员 Key。它不会因为重启改变，也不依赖数据库中的 Key 记录；管理员可以用它登录 Web 管理页并创建、授权或撤销播放器 Key。
+默认路径和显式传入的相对路径都以 **程序所在目录** 为基准，不受终端当前目录影响。`start.bat` 支持全部可选参数，例如 `-media-root "D:\Music"`、`-data` 和 `-no-scan`；只有使用自定义数据库时，初始化/重置才需要传入相同的 `--data`。按 Ctrl+C 停止服务。
 
-如需在本机启动日志中显示该 Key，可显式添加 `-show-api-key`：
+`build.bat` 自动查找现有 Go 安装，也可传入 `-GoRoot "C:\Program Files\Go"`。依赖 ffprobe 的上传校验仍要求安装 ffprobe，见下文；远程部署仍需 HTTPS 和外部地址配置，本机默认使用无需这些参数。
+
+也可直接使用 Go 和 PowerShell 启动：
 
 ```powershell
-.\musicserver.exe -api-key 'change-this-admin-key' -show-api-key
+cd server
+go build -o musicserver.exe ./cmd/musicserver
+.\musicserver.exe
 ```
 
-日志中的完整 Key 属于敏感信息，生产部署不要启用 `-show-api-key`，也不要把日志提交或公开。未配置 `-api-key` 且数据文件中没有持久化 Key 时，服务会以无需认证的开发模式启动，并在日志中发出警告。
+浏览器打开 `http://127.0.0.1:8080/`，输入账号密码登录。管理页支持修改密码、查看和撤销登录会话、创建和撤销播放器 Key。Key 是播放器凭证，不能用于管理接口。首次启动若处于无交互的后台环境，退出并提示先在终端初始化，不创建默认密码。
 
-远程部署时监听 `0.0.0.0:8080`，配置 API Key，并通过反向代理提供 HTTPS。数据文件和媒体目录应持久化保存；备份时停止服务，再复制数据文件及媒体目录。单个数据文件只允许一个服务进程使用。
+密码采用 Argon2id，独立 16 字节盐、19 MiB 内存、2 次迭代、并行度 1；数据库只保存密码哈希和会话令牌哈希。Cookie 使用 HttpOnly、SameSite=Strict，HTTPS 部署启用 Secure。浏览器写请求验证 Origin/Referer 和 `X-CSRF-Token`；登录验证来源，失败提示统一，账号每分钟最多 5 次尝试、IP 每分钟 30 次，最多 2 个并发密码哈希任务。成功登录重置该账号的尝试计数。
 
-## 当前功能
+会话空闲 2 小时、绝对 7 天过期；后台轮询不续期，真实用户活动限频续期。刷新页面保持登录，服务重启撤销全部旧会话，播放器 Key 不受重启影响。改密撤销全部浏览器会话，普通改密不撤销播放器 Key；页面可显式撤销我的全部 Key。
 
-- 启动扫描音频目录，包括子目录；读取 MP3/FLAC/Ogg/Opus/MP4/WAV 的标题、作者、专辑、风格、备注及支持的内嵌歌词；关联同路径同名 `.lrc`、`.elrc`、`.txt` 歌词，支持 UTF-8/BOM、带 BOM 的 UTF-16 和 GB18030。不请求外部歌词平台。
-- 没有音频标签时按文件名 `标题 - 歌手` 提取标题和作者，专辑与风格保持为空，不使用上传文件夹名。信息可在管理页修改，人工修改在重扫后保留。
-- 上传页面支持多文件、文件夹和拖放目录；MP3 添加后立即在浏览器预览 ID3v2 标签、内嵌歌词和封面，并展示已选择的外置附件；其他格式及本地未支持的 MP3 标签帧等待服务端确认。本地预览不上传音频，点击“上传校验”后才暂存，由服务端最终解析、校验和去重，确认后才入库；已有暂存可“重新校验”。可以修改预览字段，展开“歌词与注释”查看和编辑文本，手动指定歌词/封面附件；相同 SHA-256 的音频使用已存在曲目，不覆盖其元数据。
-- 编辑曲目元数据；创建、编辑、删除歌单，并在歌单详情中添加、移出曲目、编辑成员备注和拖拽排序。曲目列表显示所属用户歌单并支持筛选孤立曲目，不把系统 `All music` 计作歌单归属。
-- 外置歌词按同名 `.lrc`、`.elrc`、`.txt` 自动关联，来源返回为 `sidecar`；封面支持内嵌图片、同名图片、精确匹配作者和专辑的 `AlbumCover - 作者 - 专辑` 图片，以及同目录 `cover`、`folder`、`albumcover` 图片，返回 `cover_id`、`cover_source` 和 `cover_mime`。详细规则见 `Docs/外置歌词与封面处理.md`。
-- 曲目返回 `duration_ms`、`bitrate_kbps`、`sample_rate`、`channels`、`bits_per_sample` 等技术参数；封面可通过 `/api/v1/covers/{cover_id}` 获取。
-- 删除曲目只移除库记录并保留原文件，重扫不会重新加入已移除记录。第一版尚未提供恢复移除记录的界面。
-- SQLite 文件保存曲目、歌单、顺序与注释、API Key 授权、人工覆盖、排除记录、封面资产、设置、暂存上传和调用统计；库变更使用事务，失败会回滚内存和数据库快照。当前 SQLite schema v1 自动升级为 v2；不读取旧 JSON，`.json` 数据路径会直接拒绝。
-- SHA-256 内容哈希、带认证的媒体下载、HTTP Range 和 ETag。
-- 修订号同步：有变化时返回完整快照；没有变化时返回空数组。不是逐项增量同步。
-- 设置页可修改 ffprobe 路径、上传限制、外置歌词/封面扫描开关，保存后立即用于后续扫描/上传；已有曲目需要重扫才能更新。音乐目录由 `-media-root` 指定，在页面只读。
-- 调用统计按 Key 记录请求数、成功/失败、传输字节和耗时，并持久化；包括启动管理员与匿名认证失败，健康检查不计入。当前并发数只存在于当前服务进程。
+远程部署通过 HTTPS 反向代理，并配置 `-public-url https://music.example.com` 或 `MUSIC_SERVER_PUBLIC_URL`。非回环监听必须配置 HTTPS 外部地址；HTTP 配置仅允许监听地址和外部主机均为回环的本机开发环境。服务不信任任意转发头，代理后的登录 IP 限流以代理连接地址计。建议后端仅绑定回环或受限内部接口。
 
-上传限制默认 512 MiB（含 multipart 请求），可在服务器设置页调整；元数据请求限制 2 MiB；内嵌标签读取预算 32 MiB、单条歌词上限 2 MiB。同名歌词读取上限 2 MiB。上传按照文件扩展名接收，当前不验证完整音频解码有效性。
+忘记密码时停服后在终端执行（可选 `--revoke-keys` 同时撤销该账号播放器凭证）：
 
-技术参数优先调用设置的 ffprobe、环境变量 `MUSIC_SERVER_FFPROBE` 或 PATH 中的 ffprobe；没有 ffprobe 时使用 WAV、FLAC、MP3 的有限解析。读取不到的参数保持为空，MP3 没有定义 PCM 位深时不会显示伪造的位深。
+```bat
+musicserver.exe admin reset-password
+```
 
-浏览器本地标签解析使用随服务端打包的 jsmediatags 3.9.7，不依赖 CDN。BSD-3-Clause 许可见 `internal/music/vendor/jsmediatags-LICENSE.md`，本地 UTF-16 文本解码补丁说明见 `internal/music/vendor/README.md`。
+服务和本机管理命令共用 OS 文件锁，服务运行时拒绝初始化/重置同一库，进程退出时自动释放锁。初始化和重置要求真实交互终端，不接受密码参数或重定向密码输入。
 
-## Key 权限与并发
+启动自动开始后台快速扫描，`-no-scan` 可关闭。Ctrl+C 或 SIGTERM 会取消扫描、停止更新任务并尝试等待 HTTP 请求退出。数据库和媒体目录应放在持久存储中，一个数据库只运行一个服务进程。
 
-持久化 Key 默认角色为播放器、无歌单授权、最大并发请求数为 1。角色、scopes、歌单授权分别检查；管理员写入必须同时具有管理员角色和接口需要的 scope。显式空 scopes 表示禁用全部功能。启动管理员 Key 可用于恢复管理权限，不受持久化 Key 的并发上限约束。
+上传要求安装 ffprobe：在设置中指定 `ffprobe_path`，或配置 `MUSIC_SERVER_FFPROBE`，或将 ffprobe 加入 PATH。没有可用探测工具时上传校验失败；本地目录扫描仍可使用有限的 WAV/FLAC/MP3 参数解析。
 
-| Scope | 功能 |
+## 曲目身份与数据
+
+曲目文件位置以媒体库根目录下的相对路径保存。停服后将 **整个服务器目录（含数据库、音频及其他子目录）一起移动**，再次启动即可继续使用，UUID、歌单、人工修改和账号保持不变。只复制音频到新库可重新扫描导入，但不会带回数据库中的 UUID、歌单等信息。若显式配置了外部绝对路径，该外部目录需要一起保留或重新指定；单独移动/重命名音频按下述哈希匹配规则识别，不保证重复文件的无歧义匹配。
+
+- 曲目 `id` 是首次建库时生成的 UUID v4，与数据库记录一一对应。歌单和人工修改引用 UUID。
+- `path` 是媒体目录下的唯一相对路径，可变化；`content_hash` 是文件 SHA-256，用于完整性校验、上传去重和移动识别，不作为曲目主键。
+- 相同路径重扫沿用 UUID。在同一次扫描中，旧路径消失、新路径出现，且哈希仅对应一个旧候选和一个新候选时，认定移动或重命名并沿用 UUID。存在重复内容歧义时创建新记录，旧记录保留为缺失，避免错误合并。
+- 文件丢失标记 `missing=true`，保留曲目、歌单顺序、成员备注及人工覆盖；原路径文件恢复后可通过扫描清除缺失状态。媒体接口对不可用文件返回错误。
+- 移除曲目标记 `removed=true`，保留原文件和用户歌单关系；扫描不会自动恢复被移除的曲目。管理页概览的已移除列表可显式恢复，恢复后 UUID 不变。常规曲目列表和同步不展示已移除曲目；用户歌单管理接口保留成员 ID，便于恢复及排序。
+- 直接在原路径替换文件内容仍视为该记录的文件更新。若需表示新的独立曲目，使用新的文件路径；系统不依据音频相似度猜测关联。
+
+SQLite 为权威数据源。写入针对相关记录，通过同一事务提交业务数据、版本、增量日志与审计；不再维护常驻的全库内存快照，也不在单项修改时清空并重写所有表。封面按内容哈希独立保存，原音频标签不会因管理页编辑而被重写。
+
+## 扫描与上传
+
+`POST /api/v2/admin/scan` 返回 `202`，使用查询参数 `?full=true` 请求全量重算，默认快速扫描。`GET /api/v2/admin/scan/status` 查询状态，`POST /api/v2/admin/scan/cancel` 取消；同一时间只运行一个扫描。管理页提供快速/完整扫描、进度和取消入口。
+
+快速扫描比较文件大小、修改时间和同目录歌词/封面状态，未变化的文件跳过读取和哈希；完整扫描重新读取全部候选。若外部工具修改内容却刻意保留大小和时间，需要完整扫描。`processed` 为实际检查候选数，`changed` 为成功提交的曲目变化数；单文件错误最多保留 100 条。
+
+文件解析、哈希和探测在数据库写事务之外进行，最后一次事务应用结果，重新读取人工覆盖和当前版本，保留并发编辑。单文件失败保留原记录并报告错误；遍历目录失败、取消或事务失败不提交扫描变更。成功扫描没有变化时不增加库修订号。扫描结果提交仍为单事务，大库提交阶段可能短暂阻塞其他数据库请求；此版本使用单连接和 DELETE journal。
+
+支持音频标签、同名 `.lrc`/`.elrc`/`.txt` 外置歌词、内嵌/同名/专辑/目录封面。歌词支持 UTF-8/BOM、带 BOM 的 UTF-16 和 GB18030。封面和歌词匹配规则见 `../Docs/外置歌词与封面处理.md`。不调用外部歌词平台。
+
+管理页支持多文件、文件夹和拖放目录。MP3 可在浏览器本地预览，点击上传校验后才发送文件、暂存并返回 `validation=audio_stream_verified`，确认后入库。ffprobe 验证至少存在可识别音频流，**不代表完整解码或全文件无损坏**。暂存有效期 30 分钟，后台每分钟清理；确认时再次检查内容重复，重复上传复用已有可用曲目且不覆盖其元数据。上传文件发布与扫描读取协调，避免扫描半成品。
+
+默认上传限制 512 MiB，可在设置调整至最多 4 GiB；HTTP 限制包含 multipart 开销。元数据请求限制 2 MiB，标签读取预算 32 MiB，单条歌词最多 2 MiB；封面限制 8 MiB、20 MP。浏览器标签解析使用内置 jsmediatags 3.9.7，许可和本地补丁说明见 `internal/music/vendor/`。
+
+## 条件修改
+
+曲目和歌单返回 `version`。对已有曲目、歌单及其成员/附件的修改、删除，以及曲目恢复，均提交当前版本：
+
+```http
+PATCH /api/v2/tracks/曲目UUID
+Cookie: music_session=登录得到的会话令牌
+Origin: https://music.example.com
+X-CSRF-Token: 登录或auth/me返回的csrf_token
+If-Match: "3"
+Content-Type: application/json
+
+{"title":"新标题"}
+```
+
+缺少有效 `If-Match` 返回 `428 VERSION_REQUIRED`；版本已变化返回 `409 VERSION_CONFLICT`。刷新后由用户重新确认修改，不自动覆盖他人的更改。创建歌单时 ID 已存在返回 `409`。
+
+歌单成员排序同时提交 `track_ids` 和读取时的 `expected_track_ids`；歌单显示排序提交 `order` 和 `expected_order`，以检测并发变化。系统 `library` 歌单自动维护曲目，不允许手工修改成员。用户歌单成员备注独立于曲目备注。
+
+## 增量同步
+
+首次 `GET /api/v2/sync?limit=100` 获取分页快照，以后传入上一页返回的 `cursor`。默认每页 100 项，最多 500 项；按实体或日志条数分页，单条曲目歌词及单个歌单成员列表不会再拆分。
+
+响应包含 `changed_tracks`、`playlists`、`deleted_tracks`、`deleted_playlists`、`cursor`、`has_more`、`full_snapshot`、`reset` 和 `revision`。客户端应：
+
+1. `reset=true` 时清空该服务器的旧缓存；仅新快照的第一页发出 reset。
+2. 按 UUID 应用更新和删除，`has_more=true` 时继续请求下一页。
+3. 完成所有页后保存最终游标；后续轮询使用游标，不能用 `revision` 替代游标。
+
+游标由 HMAC 签名，绑定账号 UUID、权限版本、会话/Key、角色、scopes、歌单授权和可见成员集合；有效期 24 小时。过期、授权或可见成员变化会重新发快照并返回 reset，客户端必须清理失去权限的数据。快照分页期间库发生变化返回 `409 SYNC_RESTART`，丢弃中间结果并不带游标重试。
+
+变更日志持久保留最近 10,000 条事件，游标超出窗口自动退回快照。增量页读取实体当前状态，在连续变化期间以完成后续页达到最终一致；客户端须完成分页。管理页的普通曲目/歌单列表仍是完整列表，大库客户端应使用分页同步。压缩可在反向代理启用。
+
+## 权限与并发
+
+浏览器使用账号会话，管理接口只接受管理员账号会话。播放器认证头使用 `X-API-Key` 或 `Authorization: Bearer ...`，Key 归属账号、只保存密钥哈希，创建/轮换时仅返回一次完整密钥。Key 不再具有独立角色，只能配置 `library:read`、`media:read`，默认无歌单授权；显式空 scopes 禁用全部能力。有效访问范围为账号当前可访问的歌单与 Key 授权的交集。显式 Key 优先于 Cookie，失败时不回退，也不合并权限。
+
+| Scope | 接口能力 |
 | --- | --- |
-| `library:read` | 同步、歌单、曲目读取 |
-| `media:read` | 音频和封面下载 |
-| `library:write` | 曲目/歌单编辑、排序、扫描 |
-| `uploads:write` | 暂存预览、确认、删除暂存与直接上传 |
-| `keys:manage` | API Key 管理 |
-| `settings:manage` | 设置读取和修改 |
-| `stats:read` | 调用统计 |
+| `library:read` | 曲目、歌单、同步 |
+| `media:read` | 音频、封面 |
 
-超出并发上限返回 `429 KEY_CONCURRENCY_LIMIT`，缺少 scope 返回 `403 SCOPE_DENIED`。并发上限统计正在处理的请求，包括音频传输，不等同于独占一个客户端；设备登记与心跳租约尚未实现。管理网页使用串行请求队列，适配并发上限为 1 的管理员 Key。
+`max_concurrency` 为 Key 元数据请求并发数，默认 4，范围 1–64；`max_downloads` 为音频和封面下载并发数，默认 1，范围 1–16。两者独立，下载不会占满元数据限额；超限返回 `429` 和 `Retry-After: 1`。账号会话不受 Key 限额约束。并发计数仅在当前进程有效；设备绑定和心跳租约不在此版本范围内。
 
-## API
+本期只开放管理员界面和本机首次管理员初始化。底层账号、歌单、Key 和暂存已有归属和隔离，停用账号会使会话及 Key 失效；多账户管理页面和歌单分享尚未开放，未增加公开注册或分享链接。
 
-除 `GET /` 与健康检查外，设置了密钥时必须携带 `X-API-Key` 或 `Authorization: Bearer ...`。
+调用统计按会话/Key 持久记录次数、成功/失败、字节和耗时；健康检查不计入，登录请求归入未认证统计。审计记录操作人、凭证类型、账号 ID、凭证 ID、动作、实体和时间，密码和令牌不写入审计。审计和备份可能包含私人元数据，应限制文件访问；Windows 权限还需要由部署目录 ACL 控制。
 
-健康检查响应包含 `version` 字段，可用于播放器判断服务端 API 版本。
+## 接口清单
+
+以下均以 `/api/v2` 开头；除健康检查和登录外需要认证。账号写请求还需 CSRF 令牌和同源 Origin。
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
-| GET | `/api/v1/health` | 状态与修订号 |
-| GET | `/api/v1/sync?since=修订号` | 检查更新，首次可省略 since |
-| GET | `/api/v1/tracks` | 全部曲目 |
-| GET / PATCH / DELETE | `/api/v1/tracks/{id}` | 查询、编辑、移除曲目 |
-| PUT | `/api/v1/tracks/{id}/cover` | multipart 字段 `cover` 指定封面 |
-| PUT | `/api/v1/tracks/{id}/lyrics` | multipart 字段 `lyrics_file` 指定歌词 |
-| POST | `/api/v1/uploads` | multipart 字段 `file` 上传音频 |
-| POST | `/api/v1/uploads/stage` | `file`，可选 `lyrics_file`/`cover` 和元数据，返回解析预览 |
-| GET / DELETE | `/api/v1/uploads/stage/{id}` | 查询或删除暂存上传 |
-| GET | `/api/v1/uploads/stage/{id}/cover` | 暂存封面预览 |
-| POST | `/api/v1/uploads/stage/{id}/commit` | 可选 JSON 元数据，确认入库；返回 `track` 与 `duplicate` |
-| GET / POST | `/api/v1/playlists` | 列出、创建歌单 |
-| GET / PATCH / PUT / DELETE | `/api/v1/playlists/{id}` | 歌单详情、修改元数据、兼容替换、删除 |
-| POST | `/api/v1/playlists/{id}/tracks` | 批量添加歌单成员 |
-| PATCH / DELETE | `/api/v1/playlists/{id}/tracks/{trackID}` | 修改成员备注、移出歌单（不删除曲目） |
-| PUT | `/api/v1/playlists/{id}/tracks/order` | 排序成员，需提交预期成员列表 |
-| GET / HEAD | `/api/v1/media/{id}` | 音频下载，支持 Range |
-| GET / HEAD | `/api/v1/covers/{id}` | 获取封面图片 |
-| POST | `/api/v1/admin/scan` | 重新扫描目录 |
-| PUT | `/api/v1/playlists/order` | 保存歌单显示顺序 |
-| GET / PATCH | `/api/v1/admin/settings` | 读取、修改服务器设置 |
-| GET | `/api/v1/admin/stats` | 查看 API 调用统计 |
-| GET / POST | `/api/v1/auth/keys` | 列出/创建 Key |
-| PATCH / DELETE | `/api/v1/auth/keys/{id}` | 修改/撤销 Key |
+| GET | `/health` | 版本、修订号 |
+| POST | `/auth/login` | JSON username/password，返回 user、csrf_token，并设置会话 Cookie |
+| GET | `/auth/me` | 当前账号与 CSRF 令牌 |
+| POST | `/auth/logout`、`/auth/activity` | 撤销当前会话、更新活动时间 |
+| PUT | `/auth/password` | JSON old_password/new_password，成功后重新登录 |
+| GET / DELETE | `/auth/sessions`、`/auth/sessions/{id}` | 列出、撤销自己的会话 |
+| GET | `/sync?cursor=...&limit=100` | 分页快照与增量同步 |
+| GET | `/tracks` | 完整曲目列表 |
+| GET / PATCH / DELETE | `/tracks/{id}` | 查询、编辑、软移除 |
+| PUT | `/tracks/{id}/cover`、`/tracks/{id}/lyrics` | multipart `cover` / `lyrics_file` |
+| GET / HEAD | `/media/{id}`、`/covers/{id}` | 音频支持 Range/ETag；封面返回 ETag |
+| GET / POST | `/playlists` | 歌单列表、创建 |
+| GET / PATCH / PUT / DELETE | `/playlists/{id}` | 详情、编辑、替换、删除 |
+| POST | `/playlists/{id}/tracks` | 批量添加 `track_ids` |
+| PATCH / DELETE | `/playlists/{id}/tracks/{trackID}` | `note` 备注、移出成员 |
+| PUT | `/playlists/{id}/tracks/order` | 成员排序 |
+| PUT | `/playlists/order` | 歌单显示排序 |
+| POST | `/uploads` | multipart `file` 直接校验并入库 |
+| POST | `/uploads/stage` | 暂存，`file`，可选 `lyrics_file`、`cover`、元数据 |
+| GET / DELETE | `/uploads/stage/{id}` | 查看、取消暂存 |
+| GET | `/uploads/stage/{id}/cover` | 暂存封面 |
+| POST | `/uploads/stage/{id}/commit` | 可选 JSON 元数据；返回 `track`、`duplicate` |
+| POST | `/admin/scan`、`/admin/scan/cancel` | 开始、取消扫描 |
+| GET | `/admin/scan/status` | 扫描进度、错误和状态 |
+| GET | `/admin/removed` | 已移除曲目 |
+| POST | `/admin/removed/{id}` | 条件恢复 |
+| GET | `/admin/audit?limit=100&before=审计ID` | 审计倒序分页 |
+| POST | `/admin/backups` | 创建并校验 SQLite 备份，返回本机路径 |
+| GET / PATCH | `/admin/settings` | ffprobe、上传限制、扫描开关、更新仓库 |
+| GET | `/admin/stats`、`/admin/update` | 调用统计、更新状态 |
+| POST | `/admin/update/check` | 异步检查正式发布并准备更新包 |
+| GET / POST / DELETE | `/auth/keys` | 管理员列出/创建 Key，撤销当前账号全部 Key |
+| PATCH / DELETE | `/auth/keys/{id}` | 更新策略、撤销 |
+| POST | `/auth/keys/{id}/rotate` | 轮换密钥 |
 
-歌单字段：`id`、`name`、`description`、按顺序排列的 `track_ids`、以曲目 ID 为键的 `track_notes`。
-`library` 是自动维护的全部曲目歌单，不能删除。曲目 PATCH 只接受 `title`、`artist`、`album`、`genre`、`comment`、`lyrics` 字符串字段。
-歌词可以随音频暂存上传，也可以在曲目右键菜单中更换歌词文件，或用 PATCH 写入文本。浏览器无法自动读取没有被选择的相邻文件：需要同时选择歌曲和资源文件，选择文件夹，或手动指定附件。暂存接口 `cover_source` 可为 `manual`（默认）或 `external`；自动匹配的 `external` 不覆盖内嵌封面。上传歌词保存为媒体目录内同名 `.lrc`，自动匹配封面保存为同名图片，手工指定封面保存为数据库资产和覆盖值，重新扫描不会丢失。
+## 备份、恢复和更新
 
-## 构建与检查
+管理页概览或备份接口使用 `VACUUM INTO` 生成一致的 SQLite 快照，运行 `integrity_check` 成功后才返回路径。文件位于数据库旁 `backups/`，包括曲目元数据、歌单、Key 哈希、覆盖、封面、审计等数据库内容；**不包含媒体和暂存文件**，这些目录须另外备份。未设置备份自动清理策略，应按实际容量归档或删除旧备份。
 
-```powershell
-.\build.ps1
+恢复步骤：停止服务，保留当前数据库及媒体副本，将已校验的 schema 4 备份复制为启动 `-data` 指定的数据库，恢复匹配的媒体目录，再启动。启动会撤销旧会话；备份仍可能恢复旧密码和旧 Key，需核对并轮换。不要对运行中的数据库直接覆盖。schema 1–3 不能用于本版恢复，需配合原版本程序使用。
+
+配置 `update_repository` 为 GitHub 仓库后，启动、修改配置及每 6 小时检查正式 Release；仅准备当前平台包，验证大小和 Release SHA-256。发现可用新包时先创建数据库备份，备份失败则停止准备；状态返回 `backup_path`、`package_path`。下载完成不会安装、替换程序或自动重启。准备备份到实际安装之间的数据修改需在停服前另做备份。私有仓库使用 `MUSIC_SERVER_GITHUB_TOKEN`。
+
+## 验证
+
+```sh
+go test ./...
+go vet ./...
+go test -race ./...
+go build ./cmd/musicserver
 ```
 
-脚本使用工作机器已验证的独立 Go 工具链，并运行测试、vet 和构建。也可以自行使用 `go test ./...`、`go vet ./...`、`go build -o musicserver.exe ./cmd/musicserver`。
-
-## 程序更新
-
-管理员在“服务器设置”填写本项目仓库地址 `https://github.com/ShenYunyao1/MusicServer`。服务器在启动后、保存设置后，以及之后每 6 小时检查一次该仓库的最新正式版 Release；有更高版本时自动下载当前系统对应的升级包。管理页显示当前版本、最新版本、下载结果和文件路径，也可手动点击“检查更新”。未配置仓库时不会访问 GitHub。
-
-私有仓库需要在启动服务的进程环境中设置 `MUSIC_SERVER_GITHUB_TOKEN`，该令牌须具备该仓库的读取权限；令牌不保存在服务器设置或数据库。已经通过 GitHub CLI 登录的本机可在启动服务前执行：
+Race 检查需要支持的 C 工具链。隔离浏览器回归 `tests/management-ui.cjs` 自建临时媒体、数据库和子进程，不连接现有服务器：
 
 ```powershell
-$env:MUSIC_SERVER_GITHUB_TOKEN = (& gh auth token)
-.\musicserver.exe -api-key 'your-admin-key'
+$env:MUSIC_SERVER_TEST_BINARY = 'C:\Temp\musicserver-validation.exe'
+$env:MUSIC_SERVER_PLAYWRIGHT = 'playwright'
+$env:MUSIC_SERVER_TEST_PYTHON = 'python'
+node tests/management-ui.cjs
 ```
 
-发布包资产名固定为 `musicserver-windows-amd64.zip` 和 `musicserver-linux-amd64.tar.gz`。Release 标签使用 `v主版本.次版本.修订版本`，例如 `v0.6.3`。GitHub API 必须返回资产的 `sha256:` digest；服务器只接受 HTTPS、校验文件大小与 SHA-256，并将包原子写入数据库文件旁的 `updates/版本/` 目录。下载成功后需要停服、备份数据库与程序，并由管理员解压替换可执行文件再重启；服务器不会自动替换自身或执行下载包。
+安装 Playwright 及其 Chromium、Python 后运行；终端初始化测试在 Windows 需要 pywinpty，其他系统需要 pexpect。`MUSIC_SERVER_PLAYWRIGHT` 也可为模块绝对路径。浏览器回归覆盖真实终端隐藏密码初始化、登录、刷新保持会话、改密、注销、撤销会话和原有管理流程。
 
-### Ubuntu 长期运行
-
-云服务器不要通过 SSH 终端前台运行程序。Linux 发布包包含 `deploy/musicserver.service` 和 `deploy/musicserver.env.example`，建议使用 systemd 托管：复制二进制到 `/opt/musicserver/current/musicserver`，将数据库放在 `/var/lib/musicserver`、媒体目录放在 `/srv/musicserver/media`，创建 `musicserver` 系统用户后安装服务单元并执行 `systemctl enable --now musicserver`。这样退出 SSH 后服务继续运行，异常退出时 systemd 会自动重启；管理命令使用 `systemctl status musicserver`、`journalctl -u musicserver` 和 `systemctl restart musicserver`。
-
-维护者在 Windows 上运行 `./package-release.ps1`，完成测试、vet、Windows/Linux 构建并生成两个资产包；发布前核对脚本输出的 SHA-256。运行中的旧程序不会因新包下载而中断。
-
-本版仍是单进程原型：没有转码、外部歌词平台匹配、OpenSubsonic 兼容、后台目录监听和完整管理操作审计。扫描会读取所有音频计算哈希并占用媒体库锁，较大媒体库的重扫可能较慢；暂存文件保留 30 分钟，启动及每分钟清理过期文件和无记录的服务暂存文件。
+`scripts/verify-management.cjs` 和 `scripts/verify-local-preview.cjs` 另依赖真实音乐样本，只能指向隔离测试服务，使用 `MUSIC_SERVER_UI_USERNAME`、`MUSIC_SERVER_UI_PASSWORD` 提供该隔离库的账号。

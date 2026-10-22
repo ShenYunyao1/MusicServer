@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 const uploadStageTTL = 30 * time.Minute
@@ -41,11 +43,11 @@ func validMetadataFields(fields map[string]string) error {
 	return nil
 }
 
-func (s *Store) StageAudio(name string, reader io.Reader, fields map[string]string) (UploadPreview, error) {
-	return s.stageAudioWithAssets(name, reader, fields, uploadAssets{})
+func (s *Store) StageAudio(name string, reader io.Reader, fields map[string]string, options ...MutationOptions) (UploadPreview, error) {
+	return s.stageAudioWithAssets(name, reader, fields, uploadAssets{}, options...)
 }
 
-func (s *Store) stageAudioWithAssets(name string, reader io.Reader, fields map[string]string, assets uploadAssets) (UploadPreview, error) {
+func (s *Store) stageAudioWithAssets(name string, reader io.Reader, fields map[string]string, assets uploadAssets, options ...MutationOptions) (UploadPreview, error) {
 	ext := strings.ToLower(filepath.Ext(filepath.Base(name)))
 	if !audioExtensions[ext] {
 		return UploadPreview{}, errors.New("unsupported audio extension")
@@ -77,8 +79,8 @@ func (s *Store) stageAudioWithAssets(name string, reader io.Reader, fields map[s
 			return UploadPreview{}, errors.New("invalid cover (JPEG, PNG, GIF, WebP; maximum 8 MiB and 20 MP)")
 		}
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.stageMu.Lock()
+	defer s.stageMu.Unlock()
 	if err := s.cleanupUploadStagesLocked(); err != nil {
 		return UploadPreview{}, err
 	}
@@ -99,7 +101,8 @@ func (s *Store) stageAudioWithAssets(name string, reader io.Reader, fields map[s
 	if err != nil {
 		return UploadPreview{}, err
 	}
-	max := s.data.Settings.MaxUploadBytes
+	settings := s.Settings()
+	max := settings.MaxUploadBytes
 	count, copyErr := io.Copy(file, io.LimitReader(reader, max+1))
 	closeErr := file.Close()
 	if copyErr != nil || closeErr != nil || count > max {
@@ -108,6 +111,10 @@ func (s *Store) stageAudioWithAssets(name string, reader io.Reader, fields map[s
 			return UploadPreview{}, errors.New("file exceeds configured upload limit")
 		}
 		return UploadPreview{}, errors.Join(copyErr, closeErr)
+	}
+	if err := validateAudio(filepath.Join(s.mediaRoot, filepath.FromSlash(relative)), settings.FFprobePath); err != nil {
+		_ = root.Remove(relative)
+		return UploadPreview{}, err
 	}
 	track, metadata, err := s.readTrackWithMetadata(filepath.Join(s.mediaRoot, filepath.FromSlash(relative)), name)
 	if err != nil {
@@ -142,7 +149,17 @@ func (s *Store) stageAudioWithAssets(name string, reader io.Reader, fields map[s
 	}
 	created := time.Now().UTC()
 	expires := created.Add(uploadStageTTL)
-	if _, err := s.db.Exec(`INSERT INTO upload_staging (id,original_name,size,content_hash,temp_path,track_json,created_at,expires_at) VALUES (?,?,?,?,?,?,?,?)`, id, filepath.Base(name), count, track.ContentHash, relative, string(encoded), persistedTime(created), persistedTime(expires)); err != nil {
+	owner := ""
+	if len(options) > 0 {
+		owner = options[0].UserID
+	}
+	if owner == "" {
+		if err := s.db.QueryRow("SELECT id FROM users WHERE role='admin' AND enabled=1 ORDER BY created_at,id LIMIT 1").Scan(&owner); err != nil {
+			_ = root.Remove(relative)
+			return UploadPreview{}, err
+		}
+	}
+	if _, err := s.db.Exec(`INSERT INTO upload_staging (id,original_name,size,content_hash,temp_path,track_json,created_at,expires_at,user_id) VALUES (?,?,?,?,?,?,?,?,?)`, id, filepath.Base(name), count, track.ContentHash, relative, string(encoded), persistedTime(created), persistedTime(expires), owner); err != nil {
 		_ = root.Remove(relative)
 		return UploadPreview{}, err
 	}
@@ -150,19 +167,14 @@ func (s *Store) stageAudioWithAssets(name string, reader io.Reader, fields map[s
 }
 
 func (s *Store) previewLocked(id, name string, record stagedRecord, created, expires time.Time) UploadPreview {
-	preview := UploadPreview{ID: id, OriginalName: name, Size: record.Track.Size, ContentHash: record.Track.ContentHash, Track: record.Track, CreatedAt: created, ExpiresAt: expires}
-	for _, trackID := range sortedTrackIDs(s.data.Tracks) {
-		if preview.ContentHash != "" && s.data.Tracks[trackID].ContentHash == preview.ContentHash {
-			preview.DuplicateOf = trackID
-			break
-		}
-	}
+	preview := UploadPreview{ID: id, OriginalName: name, Size: record.Track.Size, ContentHash: record.Track.ContentHash, Track: record.Track, CreatedAt: created, ExpiresAt: expires, Validation: "audio_stream_verified"}
+	_ = s.db.QueryRow("SELECT id FROM tracks WHERE content_hash=? AND removed=0 AND missing=0 ORDER BY id LIMIT 1", record.Track.ContentHash).Scan(&preview.DuplicateOf)
 	return preview
 }
 
 func (s *Store) UploadStage(id string) (UploadPreview, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.stageMu.Lock()
+	defer s.stageMu.Unlock()
 	preview, _, _, err := s.uploadStageLocked(id)
 	if errors.Is(err, os.ErrNotExist) {
 		return UploadPreview{}, false, nil
@@ -200,8 +212,8 @@ func validStagePath(path string) bool {
 }
 
 func (s *Store) UploadStageCover(id string) (CoverAsset, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.stageMu.Lock()
+	defer s.stageMu.Unlock()
 	_, record, _, err := s.uploadStageLocked(id)
 	if err != nil {
 		return CoverAsset{}, err
@@ -213,31 +225,36 @@ func (s *Store) UploadStageCover(id string) (CoverAsset, error) {
 }
 
 func (s *Store) DeleteUploadStage(id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.stageMu.Lock()
+	defer s.stageMu.Unlock()
 	return s.deleteUploadStageLocked(id)
 }
 
-func (s *Store) CommitUploadStage(id string) (Track, bool, error) {
-	return s.commitUploadStageWithMetadata(id, nil)
+func (s *Store) CommitUploadStage(id string, options ...MutationOptions) (Track, bool, error) {
+	return s.commitUploadStageWithMetadata(id, nil, options...)
 }
 
-func (s *Store) commitUploadStageWithMetadata(id string, fields map[string]string) (Track, bool, error) {
+func (s *Store) commitUploadStageWithMetadata(id string, fields map[string]string, options ...MutationOptions) (Track, bool, error) {
 	if err := validMetadataFields(fields); err != nil {
 		return Track{}, false, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.stageMu.Lock()
+	defer s.stageMu.Unlock()
 	preview, record, relative, err := s.uploadStageLocked(id)
 	if err != nil {
 		return Track{}, false, err
 	}
 	if preview.DuplicateOf != "" {
-		if err := s.deleteUploadStageLocked(id); err != nil {
-			return Track{}, false, err
+		track, ok := s.Track(preview.DuplicateOf)
+		if ok && !track.Missing {
+			if err := s.deleteUploadStageLocked(id); err != nil {
+				return Track{}, false, err
+			}
+			return track, true, nil
 		}
-		return s.data.Tracks[preview.DuplicateOf], true, nil
 	}
+	s.mediaMu.Lock()
+	defer s.mediaMu.Unlock()
 	root, err := os.OpenRoot(s.mediaRoot)
 	if err != nil {
 		return Track{}, false, err
@@ -257,6 +274,7 @@ func (s *Store) commitUploadStageWithMetadata(id string, fields map[string]strin
 		return Track{}, false, err
 	}
 	_, copyErr := io.Copy(destination, source)
+	syncErr := destination.Sync()
 	closeErr := destination.Close()
 	lyricsPath := strings.TrimSuffix(final, filepath.Ext(final)) + ".lrc"
 	coverPath := ""
@@ -274,8 +292,8 @@ func (s *Store) commitUploadStageWithMetadata(id string, fields map[string]strin
 			}
 		}
 	}()
-	if copyErr != nil || closeErr != nil {
-		return Track{}, false, errors.Join(copyErr, closeErr)
+	if copyErr != nil || syncErr != nil || closeErr != nil {
+		return Track{}, false, errors.Join(copyErr, syncErr, closeErr)
 	}
 	if record.Sidecar != "" {
 		file, err := root.OpenFile(lyricsPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
@@ -305,9 +323,14 @@ func (s *Store) commitUploadStageWithMetadata(id string, fields map[string]strin
 			return Track{}, false, err
 		}
 	}
-	previous := s.cloneLocked()
 	track := record.Track
-	track.Path, track.ID = final, hashBytes([]byte(final))
+	track.Path, track.ID = final, uuid.NewString()
+	if info, err := root.Stat(final); err != nil {
+		return Track{}, false, err
+	} else {
+		track.ModifiedAt = info.ModTime().UTC()
+	}
+	track.Version = 1
 	if record.Overrides == nil {
 		record.Overrides = map[string]string{}
 	}
@@ -316,39 +339,57 @@ func (s *Store) commitUploadStageWithMetadata(id string, fields map[string]strin
 	}
 	applyMetadata(&track, fields)
 	if len(record.Cover) > 0 {
-		track.CoverID, err = s.saveCoverLocked(record.Cover, track.CoverMIME, track.CoverSource)
-		if err != nil {
-			s.data = previous
-			return Track{}, false, err
-		}
+		track.CoverID = hashBytes(record.Cover)
 		if track.CoverSource == "manual" {
 			record.Overrides["cover_id"] = track.CoverID
 			record.Overrides["cover_mime"] = track.CoverMIME
 			record.Overrides["cover_source"] = "manual"
 		}
 	}
-	s.data.Tracks[track.ID] = track
-	s.data.Overrides[track.ID] = record.Overrides
-	playlist := s.data.Playlists["library"]
-	playlist.ID = "library"
-	if playlist.Name == "" {
-		playlist.Name = "All music"
-	}
-	playlist.TrackIDs = sortedTrackIDs(s.data.Tracks)
-	playlist.UpdatedAt = time.Now().UTC()
-	s.data.Playlists["library"] = playlist
-	s.data.Revision++
-	if err := saveSQLiteSnapshot(s.db, s.data, id); err != nil {
-		s.data = previous
+	duplicate := false
+	if err := s.transaction(func(tx *sql.Tx) error {
+		var existingID string
+		err := tx.QueryRow("SELECT id FROM tracks WHERE content_hash=? AND removed=0 AND missing=0 ORDER BY id LIMIT 1", track.ContentHash).Scan(&existingID)
+		if err == nil {
+			track, err = readTrackFrom(tx, existingID, false)
+			if err != nil {
+				return err
+			}
+			duplicate = true
+			_, err = tx.Exec("DELETE FROM upload_staging WHERE id=?", id)
+			return err
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if err := saveCover(tx, record.Cover, track.CoverMIME); err != nil {
+			return err
+		}
+		if err := writeTrack(tx, track); err != nil {
+			return err
+		}
+		if err := writeOverrides(tx, track.ID, record.Overrides); err != nil {
+			return err
+		}
+		if err := recordChange(tx, "track", track.ID, false); err != nil {
+			return err
+		}
+		if err := refreshLibrary(tx); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("DELETE FROM upload_staging WHERE id=?", id); err != nil {
+			return err
+		}
+		return auditMutation(tx, "track.upload", track.ID, nil, track, options)
+	}); err != nil {
 		return Track{}, false, err
 	}
-	dropMissingPlaylistGrants(&s.data)
-	committed = true
+	committed = !duplicate
 	_ = source.Close()
 	if err := root.Remove(relative); err != nil && !errors.Is(err, os.ErrNotExist) {
 		log.Printf("remove committed upload staging file %q: %v", relative, err)
 	}
-	return track, false, nil
+	return track, duplicate, nil
 }
 
 func (s *Store) deleteUploadStageLocked(id string) error {
@@ -376,8 +417,8 @@ func (s *Store) deleteUploadStageLocked(id string) error {
 }
 
 func (s *Store) CleanupUploadStages() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.stageMu.Lock()
+	defer s.stageMu.Unlock()
 	return s.cleanupUploadStagesLocked()
 }
 

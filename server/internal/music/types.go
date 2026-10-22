@@ -25,9 +25,14 @@ type Track struct {
 	ContentHash    string    `json:"content_hash"`
 	Format         string    `json:"format"`
 	ModifiedAt     time.Time `json:"modified_at"`
+	Version        int64     `json:"version"`
+	Removed        bool      `json:"removed,omitempty"`
+	Missing        bool      `json:"missing,omitempty"`
 }
 
 type Playlist struct {
+	OwnerID     string            `json:"owner_id,omitempty"`
+	System      bool              `json:"system"`
 	ID          string            `json:"id"`
 	Name        string            `json:"name"`
 	Description string            `json:"description,omitempty"`
@@ -35,6 +40,7 @@ type Playlist struct {
 	UpdatedAt   time.Time         `json:"updated_at"`
 	SortOrder   int               `json:"sort_order"`
 	TrackNotes  map[string]string `json:"track_notes,omitempty"`
+	Version     int64             `json:"version"`
 }
 
 type ServerSettings struct {
@@ -61,31 +67,20 @@ type UploadPreview struct {
 	Track        Track     `json:"track"`
 	CreatedAt    time.Time `json:"created_at"`
 	ExpiresAt    time.Time `json:"expires_at"`
-}
-
-type Library struct {
-	Revision    int64                        `json:"revision"`
-	Tracks      map[string]Track             `json:"tracks"`
-	Playlists   map[string]Playlist          `json:"playlists"`
-	Keys        map[string]APIKey            `json:"keys,omitempty"`
-	Overrides   map[string]map[string]string `json:"overrides,omitempty"`
-	Excluded    map[string]bool              `json:"excluded,omitempty"`
-	Settings    ServerSettings               `json:"settings"`
-	CoverAssets map[string]CoverAsset        `json:"-"`
+	Validation   string    `json:"validation"`
 }
 
 // APIKey stores only the hash of a secret. Plaintext is returned once when a
 // key is created or rotated and is never persisted.
 type APIKey struct {
+	UserID             string    `json:"user_id"`
 	ID                 string    `json:"id"`
 	Name               string    `json:"name"`
 	SecretHash         string    `json:"secret_hash,omitempty"`
-	Role               string    `json:"role"`
 	Scopes             []string  `json:"scopes,omitempty"`
 	AllowedPlaylistIDs []string  `json:"allowed_playlist_ids,omitempty"`
-	DeviceID           string    `json:"device_id,omitempty"`
-	MaxDevices         int       `json:"max_devices,omitempty"`
 	MaxConcurrency     int       `json:"max_concurrency,omitempty"`
+	MaxDownloads       int       `json:"max_downloads"`
 	CreatedAt          time.Time `json:"created_at"`
 	ExpiresAt          time.Time `json:"expires_at,omitzero"`
 	LastUsedAt         time.Time `json:"last_used_at,omitzero"`
@@ -99,12 +94,10 @@ type APIKeyView struct {
 
 type APIKeyCreateRequest struct {
 	Name               string    `json:"name"`
-	Role               string    `json:"role"`
 	Scopes             []string  `json:"scopes,omitempty"`
 	AllowedPlaylistIDs []string  `json:"allowed_playlist_ids,omitempty"`
-	DeviceID           string    `json:"device_id,omitempty"`
-	MaxDevices         int       `json:"max_devices,omitempty"`
 	MaxConcurrency     int       `json:"max_concurrency,omitempty"`
+	MaxDownloads       int       `json:"max_downloads,omitempty"`
 	ExpiresAt          time.Time `json:"expires_at,omitempty"`
 }
 
@@ -112,18 +105,54 @@ type APIKeyCreateRequest struct {
 // The secret is changed only through the rotate endpoint.
 type APIKeyUpdateRequest struct {
 	Name               *string    `json:"name,omitempty"`
-	Role               *string    `json:"role,omitempty"`
 	Scopes             *[]string  `json:"scopes,omitempty"`
 	AllowedPlaylistIDs *[]string  `json:"allowed_playlist_ids,omitempty"`
-	DeviceID           *string    `json:"device_id,omitempty"`
-	MaxDevices         *int       `json:"max_devices,omitempty"`
 	MaxConcurrency     *int       `json:"max_concurrency,omitempty"`
+	MaxDownloads       *int       `json:"max_downloads,omitempty"`
 	ExpiresAt          *time.Time `json:"expires_at,omitempty"`
 }
 
 type SyncResponse struct {
-	Revision     int64      `json:"revision"`
-	Changed      []Track    `json:"changed_tracks"`
-	Playlists    []Playlist `json:"playlists"`
-	FullSnapshot bool       `json:"full_snapshot"`
+	Revision         int64      `json:"revision"`
+	Changed          []Track    `json:"changed_tracks"`
+	Playlists        []Playlist `json:"playlists"`
+	FullSnapshot     bool       `json:"full_snapshot"`
+	DeletedTracks    []string   `json:"deleted_tracks"`
+	DeletedPlaylists []string   `json:"deleted_playlists"`
+	Cursor           string     `json:"cursor"`
+	HasMore          bool       `json:"has_more"`
+	Reset            bool       `json:"reset"`
+}
+
+type MutationOptions struct {
+	UserID          string
+	CredentialID    string
+	ActorType       string
+	Actor           string
+	ExpectedVersion int64
+	ExpectedOrder   []string
+	CreateOnly      bool
+}
+
+type ScanStatus struct {
+	ID         string    `json:"id"`
+	State      string    `json:"state"`
+	Full       bool      `json:"full"`
+	Processed  int       `json:"processed"`
+	Changed    int       `json:"changed"`
+	Errors     []string  `json:"errors"`
+	StartedAt  time.Time `json:"started_at"`
+	FinishedAt time.Time `json:"finished_at,omitzero"`
+}
+
+type AuditEntry struct {
+	ActorType    string         `json:"actor_type"`
+	UserID       string         `json:"user_id,omitempty"`
+	CredentialID string         `json:"credential_id,omitempty"`
+	ID           int64          `json:"id"`
+	Actor        string         `json:"actor"`
+	Action       string         `json:"action"`
+	EntityID     string         `json:"entity_id"`
+	Changes      map[string]any `json:"changes"`
+	CreatedAt    time.Time      `json:"created_at"`
 }
