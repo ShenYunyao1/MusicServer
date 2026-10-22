@@ -131,7 +131,12 @@ func saveKey(tx *sql.Tx, key APIKey) error {
 			return err
 		}
 	}
-	return nil
+	if !key.RevokedAt.IsZero() {
+		_, err = tx.Exec("DELETE FROM api_call_stats WHERE key_id=?", key.ID)
+	} else {
+		_, err = tx.Exec("INSERT INTO api_call_stats(key_id) VALUES(?) ON CONFLICT(key_id) DO NOTHING", key.ID)
+	}
+	return err
 }
 func (s *Store) CreateAPIKey(request APIKeyCreateRequest, options ...MutationOptions) (APIKeyView, error) {
 	if strings.TrimSpace(request.Name) == "" {

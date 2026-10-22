@@ -160,7 +160,7 @@ func TestV06PlaylistOrderPersistsInListAndSync(t *testing.T) {
 	check(reopened)
 }
 
-func TestV06CountsStartupAdminAndAnonymousAcrossRestart(t *testing.T) {
+func TestSessionAndAnonymousCallsAreExcludedAcrossRestart(t *testing.T) {
 	api, root := testAPI(t)
 	if response := callAPI(api, http.MethodGet, "/api/v2/tracks", ""); response.Code != http.StatusOK {
 		t.Fatalf("startup admin request failed: %d", response.Code)
@@ -172,25 +172,15 @@ func TestV06CountsStartupAdminAndAnonymousAcrossRestart(t *testing.T) {
 	check := func(api *API) {
 		t.Helper()
 		stats := api.readCallStats()
-		if stats.err != nil || stats.Total.TotalRequests != 2 || stats.Total.SuccessRequests != 1 || stats.Total.FailureRequests != 1 {
+		if stats.err != nil || stats.Total.TotalRequests != 0 || stats.Total.SuccessRequests != 0 || stats.Total.FailureRequests != 0 {
 			t.Fatalf("unexpected total stats: %+v err=%v", stats.Total, stats.err)
 		}
-		byID := map[string]apiCallStats{}
-		for _, value := range stats.Keys {
-			byID[value.KeyID] = value
-		}
-		var sessionStat apiCallStats
-		for id, value := range byID {
-			if id != "anonymous" {
-				sessionStat = value
-			}
-		}
-		if sessionStat.SuccessRequests != 1 || sessionStat.TotalBytes == 0 || byID["anonymous"].FailureRequests != 1 {
-			t.Fatalf("startup/anonymous accounting missing: %+v", byID)
+		if len(stats.Keys) != 0 {
+			t.Fatalf("non-key calls were persisted: %+v", stats.Keys)
 		}
 	}
 	check(api)
-	// A full snapshot write must leave the independently persisted stats intact.
+	// Track updates must not turn management calls into player statistics.
 	track := api.store.Tracks()[0]
 	if err := api.store.UpdateTrack(track.ID, map[string]string{"comment": "Mutation"}); err != nil {
 		t.Fatal(err)

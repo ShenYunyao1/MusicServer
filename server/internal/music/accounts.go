@@ -139,8 +139,12 @@ func (s *Store) BeginServer() error {
 	if err := s.RequireAdministrator(); err != nil {
 		return err
 	}
-	_, err := s.db.Exec("UPDATE sessions SET revoked_at=? WHERE revoked_at=''", persistedTime(time.Now()))
-	return err
+	return s.transaction(func(tx *sql.Tx) error {
+		if _, err := tx.Exec("UPDATE sessions SET revoked_at=? WHERE revoked_at=''", persistedTime(time.Now())); err != nil {
+			return err
+		}
+		return syncCallStats(tx)
+	})
 }
 func (s *Store) reserveLogin(username, ip string) error {
 	return s.transaction(func(tx *sql.Tx) error {

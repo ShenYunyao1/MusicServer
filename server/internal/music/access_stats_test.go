@@ -184,7 +184,7 @@ func TestCallStatsSurviveStoreReopen(t *testing.T) {
 	defer reopened.Close()
 	reopenedAPI := NewAPI(reopened)
 	stats := reopenedAPI.readCallStats()
-	if stats.Total.TotalRequests < 2 {
+	if stats.Total.TotalRequests != 1 || stats.Total.SuccessRequests != 1 || stats.Total.FailureRequests != 0 {
 		t.Fatalf("reopened stats = %+v", stats)
 	}
 	if _, marshalErr := json.Marshal(stats); marshalErr != nil {

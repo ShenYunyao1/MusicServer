@@ -1,14 +1,15 @@
 package music
 
 import (
+	"database/sql"
 	"errors"
 	"log"
-	"strings"
 	"time"
 )
 
 type apiCallStats struct {
 	KeyID           string    `json:"key_id"`
+	KeyName         string    `json:"key_name,omitempty"`
 	TotalRequests   int64     `json:"total_requests"`
 	SuccessRequests int64     `json:"success_requests"`
 	FailureRequests int64     `json:"failure_requests"`
@@ -23,6 +24,18 @@ type apiStatsResponse struct {
 	Keys  []apiCallStats `json:"keys"`
 	Total apiCallStats   `json:"total"`
 	err   error
+}
+
+// Reconcile persisted statistics with current, non-revoked player keys.
+func syncCallStats(tx *sql.Tx) error {
+	if _, err := tx.Exec(`DELETE FROM api_call_stats WHERE key_id NOT IN
+        (SELECT id FROM api_keys WHERE json_extract(payload,'$.revoked_at') IS NULL)`); err != nil {
+		return err
+	}
+	_, err := tx.Exec(`INSERT INTO api_call_stats(key_id)
+        SELECT id FROM api_keys WHERE json_extract(payload,'$.revoked_at') IS NULL
+        ON CONFLICT(key_id) DO NOTHING`)
+	return err
 }
 
 func (a *API) recordCall(keyID string, status int, bytes int64, duration time.Duration) {
@@ -41,7 +54,8 @@ func (a *API) recordCall(keyID string, status int, bytes int64, duration time.Du
 	_, err := a.store.db.Exec(`
 INSERT INTO api_call_stats
     (key_id,total_requests,success_requests,failure_requests,total_bytes,total_duration_ms,last_called_at,last_status)
-VALUES (?,1,?,?,?, ?, ?, ?)
+SELECT id,1,?,?,?,?,?,? FROM api_keys
+WHERE id=? AND json_extract(payload,'$.revoked_at') IS NULL
 ON CONFLICT(key_id) DO UPDATE SET
     total_requests = total_requests + 1,
     success_requests = success_requests + excluded.success_requests,
@@ -49,7 +63,7 @@ ON CONFLICT(key_id) DO UPDATE SET
     total_bytes = total_bytes + excluded.total_bytes,
     total_duration_ms = total_duration_ms + excluded.total_duration_ms,
     last_called_at = excluded.last_called_at,
-    last_status = excluded.last_status`, keyID, success, 1-success, bytes, ms, now, status)
+    last_status = excluded.last_status`, success, 1-success, bytes, ms, now, status, keyID)
 	if err != nil {
 		log.Printf("record API call statistics: %v", err)
 	}
@@ -61,7 +75,11 @@ func (a *API) readCallStats() apiStatsResponse {
 		result.err = errors.New("statistics database is not available")
 		return result
 	}
-	rows, err := a.store.db.Query(`SELECT key_id,total_requests,success_requests,failure_requests,total_bytes,total_duration_ms,last_called_at,last_status FROM api_call_stats ORDER BY key_id`)
+	rows, err := a.store.db.Query(`SELECT k.id,json_extract(k.payload,'$.name'),
+        COALESCE(s.total_requests,0),COALESCE(s.success_requests,0),COALESCE(s.failure_requests,0),
+        COALESCE(s.total_bytes,0),COALESCE(s.total_duration_ms,0),COALESCE(s.last_called_at,''),COALESCE(s.last_status,0)
+        FROM api_keys k LEFT JOIN api_call_stats s ON s.key_id=k.id
+        WHERE json_extract(k.payload,'$.revoked_at') IS NULL ORDER BY k.id`)
 	if err != nil {
 		result.err = err
 		return result
@@ -70,7 +88,7 @@ func (a *API) readCallStats() apiStatsResponse {
 	for rows.Next() {
 		var value apiCallStats
 		var last string
-		if err := rows.Scan(&value.KeyID, &value.TotalRequests, &value.SuccessRequests, &value.FailureRequests, &value.TotalBytes, &value.TotalDurationMS, &last, &value.LastStatus); err != nil {
+		if err := rows.Scan(&value.KeyID, &value.KeyName, &value.TotalRequests, &value.SuccessRequests, &value.FailureRequests, &value.TotalBytes, &value.TotalDurationMS, &last, &value.LastStatus); err != nil {
 			result.err = err
 			return result
 		}
@@ -91,23 +109,6 @@ func (a *API) readCallStats() apiStatsResponse {
 		}
 	}
 	result.err = rows.Err()
-	seen := map[string]bool{}
-	for _, key := range result.Keys {
-		seen[key.KeyID] = true
-	}
-	a.concurrencyMu.Lock()
-	active := map[string]int{}
-	for id, count := range a.active {
-		active[strings.TrimSuffix(id, "/downloads")] += count
-	}
-	for id, count := range active {
-		if !seen[id] {
-			result.Keys = append(result.Keys, apiCallStats{KeyID: id, ActiveRequests: count})
-			result.Total.ActiveRequests += count
-			seen[id] = true
-		}
-	}
-	a.concurrencyMu.Unlock()
 	result.Total.KeyID = "total"
 	return result
 }

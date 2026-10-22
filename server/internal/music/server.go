@@ -63,7 +63,7 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	isAPIRequest := strings.HasPrefix(request.URL.Path, "/api/v2/")
 	trackCall := isAPIRequest && request.URL.Path != "/api/v2/health"
 	started := time.Now()
-	callKeyID := "anonymous"
+	callKeyID := ""
 	var release func()
 	defer func() {
 		if release != nil {
@@ -124,7 +124,9 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 			return
 		}
 		request = request.WithContext(withAuth(request.Context(), auth))
-		callKeyID = auth.keyID
+		if !auth.session {
+			callKeyID = auth.keyID
+		}
 		if auth.session && request.Method != "GET" && request.Method != "HEAD" {
 			if !a.validOrigin(request) || subtle.ConstantTimeCompare([]byte(auth.csrf), []byte(request.Header.Get("X-CSRF-Token"))) != 1 {
 				writeError(response, 403, "CSRF_DENIED", "same-origin CSRF token required")
