@@ -24,6 +24,14 @@ func TestMultiuserPersonalPlaylistsAndOrder(t *testing.T) {
 	a := create(at, "alice-first")
 	a2 := create(at, "alice-second")
 	b := create(bt, "bob-first")
+	spoof := memberVersionRequest(api, at, "PUT", "/api/v2/playlists/"+a.ID, `{"name":"Same name","system":true,"track_ids":[]}`, a.Version)
+	if spoof.Code != 200 {
+		t.Fatal(spoof.Code, spoof.Body.String())
+	}
+	a, _ = api.store.Playlist(a.ID)
+	if a.System {
+		t.Fatal("client promoted private playlist to system")
+	}
 	if a.OwnerID != alice.ID || a2.SortOrder != 2 || b.OwnerID != bob.ID || b.SortOrder != 1 {
 		t.Fatalf("owners/order: %+v %+v %+v", a, a2, b)
 	}

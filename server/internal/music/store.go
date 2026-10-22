@@ -30,6 +30,7 @@ var errMemberNotFound = errors.New("playlist member not found")
 var errLibraryMembers = errors.New("the library playlist manages its own tracks")
 var errPlaylistConflict = errors.New("playlist members changed; reload before reordering")
 var errVersionConflict = errors.New("record changed; refresh before editing")
+var errTrackInUse = errors.New("this track is used by another account's playlist; contact an administrator")
 
 type Store struct {
 	dataPath   string
@@ -341,6 +342,7 @@ func (s *Store) PutPlaylist(playlist Playlist, options ...MutationOptions) error
 		if playlist.ID == "library" {
 			return errLibraryMembers
 		}
+		playlist.System = false
 		members := map[string]bool{}
 		for _, id := range playlist.TrackIDs {
 			if members[id] {
@@ -726,6 +728,24 @@ func (s *Store) setRemoved(id string, removed bool, options []MutationOptions) e
 		if before.ID != "" {
 			if err := checkActorOwner(tx, before.OwnerID, options); err != nil {
 				return err
+			}
+		}
+		if len(options) > 0 && options[0].UserID != "" {
+			actor, err := readUser(tx, options[0].UserID)
+			if err != nil {
+				return err
+			}
+			if actor.Role != "admin" {
+				if !removed {
+					return errResourceHidden
+				}
+				var referenced int
+				if err := tx.QueryRow("SELECT count(*) FROM playlist_tracks m JOIN playlists p ON p.id=m.playlist_id WHERE m.track_id=? AND p.system=0 AND p.owner_id<>?", id, actor.ID).Scan(&referenced); err != nil {
+					return err
+				}
+				if referenced > 0 {
+					return errTrackInUse
+				}
 			}
 		}
 		if err := checkVersion(before.Version, options); err != nil {

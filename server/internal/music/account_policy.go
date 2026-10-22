@@ -74,3 +74,7 @@ func publicTrack(track Track, auth authContext) Track {
 	}
 	return track
 }
+
+func unavailableTrack(track Track) Track {
+	return Track{ID: track.ID, Title: "Unavailable", Removed: track.Removed, Missing: track.Missing, Version: track.Version}
+}

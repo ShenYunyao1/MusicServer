@@ -637,7 +637,10 @@ func (a *API) playlist(response http.ResponseWriter, request *http.Request) {
 	}
 	tracks := make([]Track, 0, len(playlist.TrackIDs))
 	for _, trackID := range playlist.TrackIDs {
-		if track, exists := a.store.Track(trackID); exists {
+		if track, err := readTrackFrom(a.store.db, trackID, true); err == nil {
+			if track.Removed || track.Missing {
+				track = unavailableTrack(track)
+			}
 			tracks = append(tracks, publicTrack(track, authFromRequest(request)))
 		}
 	}
@@ -763,11 +766,15 @@ func (a *API) track(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if request.Method == http.MethodDelete {
-		if !a.requireAdmin(response, request) {
+		if !a.requireAccount(response, request) {
 			return
 		}
 		if err := a.store.DeleteTrack(id, mutationOptions(request)); err != nil {
-			writeError(response, 500, err.Error())
+			if errors.Is(err, errTrackInUse) {
+				writeError(response, 409, "TRACK_IN_USE", err.Error())
+			} else {
+				writeError(response, 400, err.Error())
+			}
 			return
 		}
 		response.WriteHeader(http.StatusNoContent)
@@ -827,7 +834,7 @@ func (a *API) trackResource(response http.ResponseWriter, request *http.Request,
 		return
 	}
 	track, _ := a.store.Track(id)
-	writeJSON(response, http.StatusOK, track)
+	writeJSON(response, http.StatusOK, publicTrack(track, authFromRequest(request)))
 }
 
 func uploadedResource(request *http.Request, field string, limit int64) ([]byte, error) {

@@ -1,8 +1,13 @@
 package music
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -31,6 +36,23 @@ func TestMultiuserGlobalLibraryAndOwnerMetadata(t *testing.T) {
 	}
 	var updated Track
 	json.Unmarshal(w.Body.Bytes(), &updated)
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	file, _ := form.CreateFormFile("lyrics_file", "test.lrc")
+	file.Write([]byte("[00:01]private upload"))
+	form.Close()
+	r := httptest.NewRequest("PUT", "http://example.com/api/v2/tracks/"+track.ID+"/lyrics", &body)
+	r.Header.Set("Content-Type", form.FormDataContentType())
+	r.Header.Set("Origin", "http://example.com")
+	r.Header.Set("X-CSRF-Token", csrfForToken(aliceToken))
+	r.Header.Set("If-Match", fmt.Sprint(updated.Version))
+	r.AddCookie(&http.Cookie{Name: sessionCookie, Value: aliceToken})
+	coverResponse := httptest.NewRecorder()
+	api.ServeHTTP(coverResponse, r)
+	if coverResponse.Code != 200 || strings.Contains(coverResponse.Body.String(), track.Path) {
+		t.Fatal("attachment response path", coverResponse.Code, coverResponse.Body.String())
+	}
+	updated, _ = api.store.Track(track.ID)
 	if w := memberVersionRequest(api, bobToken, "PATCH", "/api/v2/tracks/"+track.ID, `{"title":"Bob hijack"}`, updated.Version); w.Code != 404 {
 		t.Fatalf("foreign metadata: %d", w.Code)
 	}
