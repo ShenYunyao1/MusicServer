@@ -21,7 +21,7 @@ function renderUsers(){
  for(const user of state.users||[]) {
   const row=document.createElement('tr');row.dataset.userId=user.id;
   row.innerHTML='<td><strong>'+txt(user.username)+'</strong><br>'+txt(user.display_name)+'<br><span class="mono">'+txt(user.id)+'</span></td><td>'+txt(user.role==='admin'?'管理员':'成员')+' · '+(user.enabled?'已启用':'已停用')+(user.must_change_password?' · 待改密':'')+'</td><td><div class="actions"><button class="btn small" data-user-action="resources">资源 / Key</button><button class="btn small" data-user-action="display">显示名</button><button class="btn small" data-user-action="reset">重置密码</button><button class="btn small '+(user.enabled?'danger':'primary')+'" data-user-action="enabled">'+(user.enabled?'停用':'重新启用')+'</button></div></td>';
-  row.querySelector('[data-user-action="resources"]').onclick=()=>run(async()=>{state.managedUserID=user.id;state.resourceOffset=0;await loadUserResources()});
+  row.querySelector('[data-user-action="resources"]').onclick=()=>{state.resourceOffset=0;location.hash='#/admin/users/'+user.id};
   row.querySelector('[data-user-action="display"]').onclick=()=>openEditor('修改显示名',{display_name:user.display_name},async fields=>{await api('admin/users/'+user.id,'PATCH',fields,undefined,user.version);await loadUsers()});
   row.querySelector('[data-user-action="reset"]').onclick=()=>openResetUser(user);
   if(user.id===state.user?.id){const button=row.querySelector('[data-user-action="reset"]');button.disabled=true;button.title='请使用顶部的修改密码'}

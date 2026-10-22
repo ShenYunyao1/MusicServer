@@ -1,0 +1,23 @@
+const assert=require('node:assert/strict');
+module.exports=async function({page}){
+  assert.equal(await page.evaluate(()=>location.hash),'#/admin/overview');
+  assert.equal(await page.locator('#accountRole').textContent(),'管理员');
+  await page.click('[data-page="tracks"]');
+  await page.waitForFunction(()=>state.page==='tracks');
+  await page.reload();await page.waitForFunction(()=>state.user&&state.page==='tracks'&&document.querySelector('#status').textContent==='已登录');
+  assert.equal(await page.locator('#pageTitle').textContent(),'全局曲库');
+  await page.click('[data-page="playlists"]');await page.waitForFunction(()=>state.page==='playlists');
+  await page.goBack();await page.waitForFunction(()=>state.page==='tracks');
+  await page.evaluate(()=>location.hash='#/playlists/not-accessible');await page.locator('#routeError').waitFor({state:'visible'});
+  await page.locator('#routeError a').click();await page.waitForFunction(()=>state.page==='tracks');
+  await page.setViewportSize({width:390,height:844});
+  const overflow=await page.evaluate(()=>[...document.querySelectorAll('body *')].filter(el=>{const r=el.getBoundingClientRect();return r.width&&r.right>innerWidth+1&&!el.closest('.table-wrap')}).slice(0,12).map(el=>[el.tagName,el.id,el.className,el.getBoundingClientRect().right]));
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,JSON.stringify(overflow));
+  await page.click('#menuToggle');assert.equal(await page.locator('#menuToggle').getAttribute('aria-expanded'),'true');
+  await page.click('[data-page="upload"]');await page.waitForFunction(()=>state.page==='upload');
+  assert.equal(await page.locator('#menuToggle').getAttribute('aria-expanded'),'false');
+  await page.setViewportSize({width:1440,height:1100});
+  await page.waitForFunction(()=>document.querySelector('.main').getBoundingClientRect().left>=231);
+  await page.click('[data-page="overview"]');await page.waitForFunction(()=>state.page==='overview');
+  console.log('Navigation UI passed: role defaults, reload, history, unavailable detail, mobile menu and viewport.');
+};

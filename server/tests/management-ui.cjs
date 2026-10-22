@@ -73,6 +73,7 @@ async function main() {
     await page.reload();
     await page.waitForFunction(() => state.user?.username === 'admin' && state.tracks.length === 1);
     await page.waitForFunction(() => document.querySelector('#status').textContent === '已登录');
+    await require('./navigation-ui.cjs')({page});
     await page.screenshot({ path: path.join(directory, 'management.png'), fullPage: true });
     await page.evaluate(() => editTrack(state.tracks[0]));
     await page.fill('[data-field="title"]', 'Edited in browser');
@@ -88,6 +89,11 @@ async function main() {
       await page.locator('#status').textContent());
     const createdPlaylistID = await page.evaluate(() => state.playlists.find(p => p.name === 'Browser playlist').id);
     assert.match(createdPlaylistID, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    await page.evaluate(id=>location.hash='#/playlists/'+id,createdPlaylistID);
+    await page.waitForFunction(id=>state.playlistDetailId===id,createdPlaylistID);
+    await page.reload();await page.waitForFunction(id=>state.playlistDetailId===id&&document.querySelector('#status').textContent==='已登录',createdPlaylistID);
+    assert.equal(await page.locator('#playlistDetail').isVisible(),true);
+    await page.click('[data-back-playlists]');await page.waitForFunction(()=>state.playlistDetailId===null);
     await page.evaluate(async () => { await reorder(state.playlists.find(playlist => playlist.name === 'Browser playlist').id, 'library'); });
     await page.evaluate(() => openPlaylistTrackPicker(state.playlists.find(playlist => playlist.name === 'Browser playlist')));
     await page.locator('#modalBody input[type="checkbox"]').check();
@@ -102,9 +108,11 @@ async function main() {
     await page.fill('[data-field="title"]', 'Stale edit');
     await page.click('#saveModal');
     await page.waitForFunction(() => document.querySelector('#status').textContent.includes('409'));
+    assert.equal(await page.locator('#editorError').isVisible(),true);
+    assert.equal(await page.locator('[data-field="title"]').inputValue(),'Stale edit');
     await page.click('#cancelModal');
     await page.evaluate(() => refreshCore());
-    await page.click('[data-page="overview"]');
+    await page.click('[data-page="maintenance"]');
     await page.evaluate(async () => { const track = state.tracks[0]; await api('tracks/' + track.id, 'DELETE', undefined, undefined, track.version); await refreshCore(); });
     await page.click('#viewRemoved');
     await page.locator('#maintenanceResults button').click();
@@ -169,12 +177,14 @@ async function main() {
     await otherPage.fill('#password', password);
     await otherPage.click('#loginButton');
     await otherPage.waitForFunction(() => state.user?.username === 'admin');
+    await page.locator('#accountMenu summary').click();
     await page.click('#manageSessions');
     await page.locator('#modalBody button').filter({ hasText: '撤销' }).click();
     await page.locator('#modalBody button').filter({ hasText: '撤销' }).waitFor({ state: 'detached' });
     assert.equal(await otherPage.evaluate(async () => (await fetch('/api/v2/auth/me')).status), 401);
     await page.click('#cancelModal');
     await otherContext.close();
+    await page.locator('#accountMenu summary').click();
     await page.click('#changePassword');
     await page.fill('[data-field="old_password"]', password);
     await page.fill('[data-field="new_password"]', 'changed administrator password');
@@ -190,6 +200,7 @@ async function main() {
     await page.waitForFunction(() => state.user?.username === 'admin');
     const members=await require('./multiuser-ui.cjs')({browser,adminPage:page,base,audio,directory});
     await require('./users-ui.cjs')({browser,page,base,directory,...members});
+    await page.locator('#accountMenu summary').click();
     await page.click('#logout');
     await page.waitForFunction(() => !state.user);
     assert.equal(await page.evaluate(async () => (await fetch('/api/v2/auth/me')).status), 401);

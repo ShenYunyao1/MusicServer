@@ -28,7 +28,7 @@ $('firstPasswordForm').onsubmit=async event=>{
 };
 $('logoutFirstPassword').onclick=()=>run(async()=>{await api('auth/logout','POST');setLoggedOut()});
 const memberPlayer=document.createElement('audio');memberPlayer.id='memberPlayer';memberPlayer.controls=true;memberPlayer.hidden=true;memberPlayer.style.maxWidth='100%';document.querySelector('.content').prepend(memberPlayer);
-function playTrack(track){if(track.missing || track.removed)return;memberPlayer.src='/api/v2/media/'+encodeURIComponent(track.id);memberPlayer.hidden=false;memberPlayer.play().catch(error=>setStatus(error.message,'error'))}
+function playTrack(track){if(track.missing || track.removed)return;memberPlayer.src='/api/v2/media/'+encodeURIComponent(track.id);memberPlayer.hidden=false;$('previewBar').hidden=false;$('previewTitle').textContent=track.title||'未命名曲目';memberPlayer.play().catch(error=>setStatus(error.message,'error'))}
 
 function setLoggedOut() {
   for (const upload of state.uploads) {
@@ -43,6 +43,8 @@ function setLoggedOut() {
   state.users=[];state.statsUserID="";state.managedUserID=null;state.userResources=[];state.resourceOffset=0;
   $("firstPasswordScreen").hidden=true;$("firstPasswordForm").reset();
   const player=$("memberPlayer");if(player){player.pause();player.removeAttribute("src");player.load();player.hidden=true;}
+  if($('previewBar'))$('previewBar').hidden=true;
+  if($('notifications'))$('notifications').replaceChildren();
   state.csrf = '';
   state.tracks = [];
   state.playlists = [];
@@ -82,7 +84,7 @@ async function enterAccount(identity) {
   $('loginScreen').hidden = true;
   setStatus('正在载入…');
   await connect();
-  showPage('overview');
+  await restoreWorkspaceRoute();
   if (state.user) setStatus('已登录', 'ok');
 }
 
@@ -160,7 +162,6 @@ setInterval(() => {
   }
 }, 15000);
 
-api('auth/me').then(enterAccount).catch(() => setLoggedOut());
 
 const revokeAllKeys = document.createElement('button');
 revokeAllKeys.className = 'btn danger';

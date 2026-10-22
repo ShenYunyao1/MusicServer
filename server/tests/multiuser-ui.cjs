@@ -20,6 +20,9 @@ module.exports=async function runMultiuserUI({browser,adminPage,base,audio,direc
    await page.locator('#loginScreen').waitFor({state:'visible'});
    await page.fill('#username',username);await page.fill('#password',password);await page.click('#loginButton');
    await page.waitForFunction(()=>document.querySelector('#status').textContent==='已登录');
+   assert.equal(await page.evaluate(()=>location.hash),'#/library');
+   await page.evaluate(()=>location.hash='#/admin/users');await page.locator('#routeError').waitFor({state:'visible'});
+   await page.locator('#routeError a').click();await page.waitForFunction(()=>state.page==='tracks'&&document.querySelector('#routeError').hidden);
    assert.equal(await page.locator('[data-page="settings"]').isVisible(),false);
    assert.equal(await page.locator('#fullScan').isVisible(),false);
    fixtures.push({context,page});accounts.push({user:result.user,password,username,page});
@@ -94,7 +97,7 @@ module.exports=async function runMultiuserUI({browser,adminPage,base,audio,direc
   assert.ok((await b.page.locator('#playlistDetail').textContent()).includes('不可用曲目'));assert.ok((await b.page.locator('#playlistDetail').textContent()).includes('Bob personal cue'));
   await adminPage.evaluate(async id=>{const removed=await api('admin/removed');const t=removed.find(t=>t.id===id);await api('admin/removed/'+id,'POST',undefined,undefined,t.version)},track.id);
   await b.page.evaluate(()=>refreshCore());assert.ok((await b.page.locator('#playlistDetail').textContent()).includes('Alice song'));
-  await a.page.click('#logout');await a.page.waitForFunction(()=>!state.user);assert.equal(await a.page.evaluate(()=>state.tracks.length+state.playlists.length+state.keys.length),0);
+  await a.page.locator('#accountMenu summary').click();await a.page.click('#logout');await a.page.waitForFunction(()=>!state.user);assert.equal(await a.page.evaluate(()=>state.tracks.length+state.playlists.length+state.keys.length),0);
   assert.deepEqual(errors,[]);
   console.log('Member UI passed: forced password/reload, global catalogue, owner upload, private notes, own key/stats, reference protection, unavailable placeholder and logout cleanup.');
   return {accounts:accounts.map(({page,...account})=>account),track,playlist,secret,alicePlaylist,aliceSecret};

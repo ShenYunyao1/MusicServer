@@ -4,7 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"database/sql"
-	_ "embed"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,6 +31,9 @@ var accountPageScript []byte
 
 //go:embed users.js
 var usersPageScript []byte
+
+//go:embed management.css navigation.js feedback.js
+var workspaceAssets embed.FS
 
 type API struct {
 	store         *Store
@@ -100,9 +103,24 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if request.URL.Path == "/" && request.Method == http.MethodGet {
+		response.Header().Set("Cache-Control", "no-cache")
 		response.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = response.Write(managementPage)
 		return
+	}
+	if request.Method == http.MethodGet {
+		assets := map[string]string{"/assets/management.css": "text/css; charset=utf-8", "/assets/navigation.js": "text/javascript; charset=utf-8", "/assets/feedback.js": "text/javascript; charset=utf-8"}
+		if contentType, ok := assets[request.URL.Path]; ok {
+			data, err := workspaceAssets.ReadFile(strings.TrimPrefix(request.URL.Path, "/assets/"))
+			if err != nil {
+				http.Error(response, "asset unavailable", http.StatusInternalServerError)
+				return
+			}
+			response.Header().Set("Content-Type", contentType)
+			response.Header().Set("Cache-Control", "no-cache")
+			_, _ = response.Write(data)
+			return
+		}
 	}
 	if request.URL.Path == "/assets/jsmediatags-3.9.7.min.js" && request.Method == http.MethodGet {
 		response.Header().Set("Content-Type", "text/javascript; charset=utf-8")

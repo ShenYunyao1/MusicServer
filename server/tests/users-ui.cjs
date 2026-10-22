@@ -32,7 +32,7 @@ module.exports=async function runUsersUI({browser,page,base,directory,accounts,t
  const resumed=await fetch(base+'/api/v2/tracks',{headers:{'X-API-Key':aliceSecret}});assert.equal(resumed.status,200);assert.deepEqual(await resumed.json(),[]);
  assert.equal((await fetch(base+'/api/v2/playlists/'+alicePlaylist.id,{headers:{'X-API-Key':aliceSecret}})).status,404);
  const after=await page.evaluate(id=>api('admin/stats?user_id='+id),a.user.id);assert.equal(after.keys[0].key_id,before.keys[0].key_id);assert.ok(after.total.total_requests>before.total.total_requests);
- await page.click('[data-page="stats"]');await page.selectOption('#statsUser',a.user.id);await page.waitForFunction(id=>state.stats.keys.every(key=>key.user_id===id),a.user.id);
+ await page.click('[data-page="keys"]');await page.waitForFunction(()=>state.page==='keys');await page.click('[data-page="stats"]');await page.selectOption('#statsUser',a.user.id);await page.waitForFunction(id=>state.stats.keys.every(key=>key.user_id===id),a.user.id);
  const context=await browser.newContext();try{
   const member=await context.newPage();member.on('pageerror',onError);await member.goto(base);await member.fill('#username',a.username);await member.fill('#password',a.password);await member.click('#loginButton');await member.waitForFunction(()=>document.querySelector('#status').textContent==='已登录');
   assert.equal(await member.locator('[data-page="users"]').isVisible(),false);assert.equal(await member.locator('#statsUser').isVisible(),false);
