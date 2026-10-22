@@ -340,6 +340,7 @@ func (s *Store) runScan(ctx context.Context, full bool, options []MutationOption
 				track.ID = current.ID
 				track.Version = current.Version
 				track.Removed = current.Removed
+				track.OwnerID, track.UploadedBy = current.OwnerID, current.UploadedBy
 				previous = current
 			} else {
 				var count int
@@ -349,6 +350,10 @@ func (s *Store) runScan(ctx context.Context, full bool, options []MutationOption
 				if count != 0 {
 					continue
 				}
+				if err := tx.QueryRow("SELECT value FROM meta WHERE key='scan_owner_id'").Scan(&track.OwnerID); err != nil {
+					return errors.New("scan owner is not configured; initialize an administrator first")
+				}
+				track.UploadedBy = track.OwnerID
 			}
 			matched[track.ID] = true
 			overrides, err := readOverrides(tx, track.ID)

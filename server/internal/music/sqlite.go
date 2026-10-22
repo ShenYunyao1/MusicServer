@@ -15,19 +15,22 @@ import (
 	"time"
 )
 
-const sqliteSchemaVersion = 4
+const sqliteSchemaVersion = 5
 const sqliteSchema = `
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-INSERT INTO meta VALUES ('revision','0'),('schema_version','4');
-CREATE TABLE users (id TEXT PRIMARY KEY,username TEXT NOT NULL UNIQUE,display_name TEXT NOT NULL,password_hash TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN ('admin','member')),enabled INTEGER NOT NULL,auth_version INTEGER NOT NULL,version INTEGER NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+INSERT INTO meta VALUES ('revision','0'),('schema_version','5');
+CREATE TABLE users (id TEXT PRIMARY KEY,username TEXT NOT NULL UNIQUE,display_name TEXT NOT NULL,password_hash TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN ('admin','member')),enabled INTEGER NOT NULL,auth_version INTEGER NOT NULL,version INTEGER NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,must_change_password INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE sessions (id TEXT PRIMARY KEY,token_hash TEXT NOT NULL UNIQUE,user_id TEXT NOT NULL REFERENCES users(id),auth_version INTEGER NOT NULL,created_at TEXT NOT NULL,last_active_at TEXT NOT NULL,expires_at TEXT NOT NULL,revoked_at TEXT NOT NULL DEFAULT '');
 CREATE INDEX sessions_user ON sessions(user_id);
 CREATE TABLE login_limits (bucket TEXT PRIMARY KEY,attempts INTEGER NOT NULL,window_start TEXT NOT NULL);
-CREATE TABLE tracks (id TEXT PRIMARY KEY CHECK(length(id)=36),path TEXT NOT NULL UNIQUE,content_hash TEXT NOT NULL,title TEXT NOT NULL,payload TEXT NOT NULL,version INTEGER NOT NULL,removed INTEGER NOT NULL DEFAULT 0,missing INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE tracks (id TEXT PRIMARY KEY CHECK(length(id)=36),path TEXT NOT NULL UNIQUE,content_hash TEXT NOT NULL,title TEXT NOT NULL,payload TEXT NOT NULL,version INTEGER NOT NULL,removed INTEGER NOT NULL DEFAULT 0,missing INTEGER NOT NULL DEFAULT 0,owner_id TEXT NOT NULL REFERENCES users(id),uploaded_by TEXT NOT NULL REFERENCES users(id));
 CREATE INDEX tracks_hash ON tracks(content_hash);
+CREATE INDEX tracks_owner ON tracks(owner_id,id);
+CREATE INDEX tracks_uploader ON tracks(uploaded_by,id);
 CREATE TABLE scan_stamps (track_id TEXT PRIMARY KEY REFERENCES tracks(id), stamp TEXT NOT NULL);
 CREATE TABLE metadata_overrides (track_id TEXT NOT NULL REFERENCES tracks(id),field TEXT NOT NULL,value TEXT NOT NULL,PRIMARY KEY(track_id,field));
-CREATE TABLE playlists (id TEXT PRIMARY KEY,payload TEXT NOT NULL,version INTEGER NOT NULL,owner_id TEXT REFERENCES users(id),system INTEGER NOT NULL DEFAULT 0,CHECK((system=1 AND owner_id IS NULL AND id='library') OR (system=0 AND owner_id IS NOT NULL AND id!='library')));
+CREATE TABLE playlists (id TEXT PRIMARY KEY,payload TEXT NOT NULL,version INTEGER NOT NULL,owner_id TEXT REFERENCES users(id),system INTEGER NOT NULL DEFAULT 0,sort_order INTEGER NOT NULL DEFAULT 0,CHECK((system=1 AND owner_id IS NULL AND id='library') OR (system=0 AND owner_id IS NOT NULL AND id!='library')));
+CREATE INDEX playlists_owner_order ON playlists(owner_id,sort_order,id);
 CREATE TABLE playlist_tracks (playlist_id TEXT NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,track_id TEXT NOT NULL REFERENCES tracks(id),position INTEGER NOT NULL,note TEXT NOT NULL DEFAULT '',PRIMARY KEY(playlist_id,track_id),UNIQUE(playlist_id,position));
 CREATE INDEX playlist_member ON playlist_tracks(track_id);
 CREATE TABLE api_keys (id TEXT PRIMARY KEY,secret_hash TEXT NOT NULL UNIQUE,payload TEXT NOT NULL,user_id TEXT NOT NULL REFERENCES users(id));
@@ -39,7 +42,7 @@ CREATE TABLE upload_staging (id TEXT PRIMARY KEY,original_name TEXT NOT NULL,siz
 CREATE TABLE api_call_stats (key_id TEXT PRIMARY KEY,total_requests INTEGER NOT NULL DEFAULT 0,success_requests INTEGER NOT NULL DEFAULT 0,failure_requests INTEGER NOT NULL DEFAULT 0,total_bytes INTEGER NOT NULL DEFAULT 0,total_duration_ms INTEGER NOT NULL DEFAULT 0,last_called_at TEXT NOT NULL DEFAULT '',last_status INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE changes (revision INTEGER PRIMARY KEY,kind TEXT NOT NULL,entity_id TEXT NOT NULL,deleted INTEGER NOT NULL);
 CREATE TABLE audit (id INTEGER PRIMARY KEY AUTOINCREMENT,actor TEXT NOT NULL,action TEXT NOT NULL,entity_id TEXT NOT NULL,changes TEXT NOT NULL,created_at TEXT NOT NULL,actor_type TEXT NOT NULL,user_id TEXT NOT NULL DEFAULT '',credential_id TEXT NOT NULL DEFAULT '');
-PRAGMA user_version=4;
+PRAGMA user_version=5;
 `
 
 type sqlReader interface {
@@ -230,8 +233,8 @@ func writeTrack(tx *sql.Tx, track Track) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(`INSERT INTO tracks(id,path,content_hash,title,payload,version,removed,missing) VALUES(?,?,?,?,?,?,?,?)
- ON CONFLICT(id) DO UPDATE SET path=excluded.path,content_hash=excluded.content_hash,title=excluded.title,payload=excluded.payload,version=excluded.version,removed=excluded.removed,missing=excluded.missing`, track.ID, track.Path, track.ContentHash, track.Title, string(encoded), track.Version, track.Removed, track.Missing)
+	_, err = tx.Exec(`INSERT INTO tracks(id,path,content_hash,title,payload,version,removed,missing,owner_id,uploaded_by) VALUES(?,?,?,?,?,?,?,?,?,?)
+ ON CONFLICT(id) DO UPDATE SET path=excluded.path,content_hash=excluded.content_hash,title=excluded.title,payload=excluded.payload,version=excluded.version,removed=excluded.removed,missing=excluded.missing,owner_id=excluded.owner_id,uploaded_by=excluded.uploaded_by`, track.ID, track.Path, track.ContentHash, track.Title, string(encoded), track.Version, track.Removed, track.Missing, track.OwnerID, track.UploadedBy)
 	return err
 }
 func writePlaylist(tx *sql.Tx, playlist Playlist) error {
@@ -243,7 +246,7 @@ func writePlaylist(tx *sql.Tx, playlist Playlist) error {
 	if playlist.OwnerID != "" {
 		owner = playlist.OwnerID
 	}
-	if _, err = tx.Exec("INSERT INTO playlists VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,version=excluded.version", playlist.ID, string(encoded), playlist.Version, owner, playlist.System); err != nil {
+	if _, err = tx.Exec("INSERT INTO playlists(id,payload,version,owner_id,system,sort_order) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,version=excluded.version,owner_id=excluded.owner_id,sort_order=excluded.sort_order", playlist.ID, string(encoded), playlist.Version, owner, playlist.System, playlist.SortOrder); err != nil {
 		return err
 	}
 	if _, err = tx.Exec("DELETE FROM playlist_tracks WHERE playlist_id=?", playlist.ID); err != nil {

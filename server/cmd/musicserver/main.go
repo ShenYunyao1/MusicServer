@@ -29,7 +29,7 @@ func main() {
 	}
 	address := flag.String("addr", "127.0.0.1:8080", "HTTP listen address")
 	mediaRoot := flag.String("media-root", defaults.MediaRoot, "music directory (relative paths follow executable directory)")
-	dataPath := flag.String("data", defaults.Data, "schema 4 SQLite database (relative paths follow executable directory)")
+	dataPath := flag.String("data", defaults.Data, "schema 5 SQLite database (relative paths follow executable directory)")
 	publicURL := flag.String("public-url", os.Getenv("MUSIC_SERVER_PUBLIC_URL"), "HTTPS origin for remote deployment, e.g. https://music.example.com")
 	noScan := flag.Bool("no-scan", false, "do not scan on startup")
 	flag.Parse()

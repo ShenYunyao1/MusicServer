@@ -32,7 +32,7 @@ def main():
     password = "isolated layout administrator password"
     initialized = subprocess.run(
         [sys.executable, str(source / "tests/admin-terminal.py"), str(runtime / "musicserver.exe"),
-         str(runtime / "data/library-v4.sqlite"), "admin"],
+         str(runtime / "data/library.sqlite"), "admin"],
         input=password + "\n", capture_output=True, text=True, timeout=35,
     )
     assert initialized.returncode == 0, initialized.stdout + initialized.stderr
@@ -76,7 +76,7 @@ def main():
             time.sleep(0.1)
         assert len(tracks) == 1 and tracks[0]["path"] == "media/Track.wav", tracks
         assert Path(request("admin/settings")["media_root"]) == runtime
-        assert (runtime / "data/library-v4.sqlite").is_file()
+        assert (runtime / "data/library.sqlite").is_file()
         assert sorted(p.name for p in runtime.parent.iterdir()) == ["SourceOnly.mp3", "build", "start.bat"]
         assert not list(foreign.iterdir()), "runtime files leaked into the caller's directory"
         print("Runtime layout passed: fixed build executable, foreign working directory, isolated data and media, Git identity.")

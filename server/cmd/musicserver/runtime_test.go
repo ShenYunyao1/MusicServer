@@ -12,7 +12,7 @@ func TestRuntimeDefaultsFollowExecutable(t *testing.T) {
 	base := t.TempDir()
 	executable := filepath.Join(base, "portable", "musicserver.exe")
 	paths := runtimeDefaults(executable)
-	if paths.MediaRoot != filepath.Dir(executable) || paths.Data != filepath.Join(filepath.Dir(executable), "data", "library-v4.sqlite") {
+	if paths.MediaRoot != filepath.Dir(executable) || paths.Data != filepath.Join(filepath.Dir(executable), "data", "library.sqlite") {
 		t.Fatalf("defaults must follow executable: %+v", paths)
 	}
 	if got := resolveRuntimePath(paths.MediaRoot, "music"); got != filepath.Join(paths.MediaRoot, "music") {

@@ -365,6 +365,10 @@ func (s *Store) commitUploadStageWithMetadata(id string, fields map[string]strin
 		if err := saveCover(tx, record.Cover, track.CoverMIME); err != nil {
 			return err
 		}
+		if err := tx.QueryRow("SELECT user_id FROM upload_staging WHERE id=?", id).Scan(&track.OwnerID); err != nil {
+			return err
+		}
+		track.UploadedBy = track.OwnerID
 		if err := writeTrack(tx, track); err != nil {
 			return err
 		}

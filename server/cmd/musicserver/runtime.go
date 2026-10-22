@@ -12,7 +12,7 @@ type runtimePaths struct{ MediaRoot, Data string }
 
 func runtimeDefaults(executable string) runtimePaths {
 	root := filepath.Dir(executable)
-	return runtimePaths{MediaRoot: root, Data: filepath.Join(root, "data", "library-v4.sqlite")}
+	return runtimePaths{MediaRoot: root, Data: filepath.Join(root, "data", "library.sqlite")}
 }
 
 func executableDefaults() (runtimePaths, error) {

@@ -657,6 +657,7 @@ func TestUploadRechecksDuplicateInsideCommit(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	existing := preview.Track
+	existing.OwnerID, existing.UploadedBy = api.store.Tracks()[0].OwnerID, api.store.Tracks()[0].UploadedBy
 	existing.ID, existing.Path, existing.Version = uuid.NewString(), "external.wav", 1
 	tx, err := api.store.db.Begin()
 	if err != nil {

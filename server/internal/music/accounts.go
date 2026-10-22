@@ -17,14 +17,15 @@ import (
 )
 
 type User struct {
-	ID          string    `json:"id"`
-	Username    string    `json:"username"`
-	DisplayName string    `json:"display_name"`
-	Role        string    `json:"role"`
-	Enabled     bool      `json:"enabled"`
-	AuthVersion int64     `json:"-"`
-	Version     int64     `json:"version"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID                 string    `json:"id"`
+	Username           string    `json:"username"`
+	DisplayName        string    `json:"display_name"`
+	Role               string    `json:"role"`
+	Enabled            bool      `json:"enabled"`
+	MustChangePassword bool      `json:"must_change_password"`
+	AuthVersion        int64     `json:"-"`
+	Version            int64     `json:"version"`
+	CreatedAt          time.Time `json:"created_at"`
 }
 
 type Session struct {
@@ -75,7 +76,7 @@ func verifyPassword(encoded, password string) bool {
 func readUser(reader sqlReader, id string) (User, error) {
 	var user User
 	var created string
-	err := reader.QueryRow("SELECT id,username,display_name,role,enabled,auth_version,version,created_at FROM users WHERE id=?", id).Scan(&user.ID, &user.Username, &user.DisplayName, &user.Role, &user.Enabled, &user.AuthVersion, &user.Version, &created)
+	err := reader.QueryRow("SELECT id,username,display_name,role,enabled,auth_version,version,created_at,must_change_password FROM users WHERE id=?", id).Scan(&user.ID, &user.Username, &user.DisplayName, &user.Role, &user.Enabled, &user.AuthVersion, &user.Version, &created, &user.MustChangePassword)
 	if err == nil {
 		user.CreatedAt, err = parsePersistedTime(created)
 	}
@@ -113,8 +114,13 @@ func (s *Store) createUser(username, password, role string, bootstrap bool) (Use
 				return errors.New("administrator already initialized")
 			}
 		}
-		if _, err := tx.Exec("INSERT INTO users VALUES(?,?,?,?,?,1,1,1,?,?)", user.ID, username, user.DisplayName, encoded, role, persistedTime(now), persistedTime(now)); err != nil {
+		if _, err := tx.Exec("INSERT INTO users(id,username,display_name,password_hash,role,enabled,auth_version,version,created_at,updated_at) VALUES(?,?,?,?,?,1,1,1,?,?)", user.ID, username, user.DisplayName, encoded, role, persistedTime(now), persistedTime(now)); err != nil {
 			return err
+		}
+		if bootstrap {
+			if _, err := tx.Exec("INSERT INTO meta(key,value) VALUES('scan_owner_id',?)", user.ID); err != nil {
+				return err
+			}
 		}
 		return auditMutation(tx, "account.create", user.ID, nil, user, []MutationOptions{{Actor: "local-console", ActorType: "console", UserID: user.ID}})
 	})

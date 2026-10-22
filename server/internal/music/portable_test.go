@@ -21,6 +21,9 @@ func TestRootLibrarySkipsServerDataAndArchives(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
+	if _, err := store.InitializeAdmin("admin", "portable administrator password"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := store.Scan(); err != nil {
 		t.Fatal(err)
 	}

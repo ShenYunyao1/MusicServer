@@ -3,6 +3,8 @@ package music
 import "time"
 
 type Track struct {
+	UploadedBy     string    `json:"uploaded_by"`
+	OwnerID        string    `json:"owner_id"`
 	ID             string    `json:"id"`
 	Title          string    `json:"title"`
 	Artist         string    `json:"artist,omitempty"`
