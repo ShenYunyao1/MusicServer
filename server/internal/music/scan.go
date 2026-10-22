@@ -350,8 +350,16 @@ func (s *Store) runScan(ctx context.Context, full bool, options []MutationOption
 				if count != 0 {
 					continue
 				}
-				if err := tx.QueryRow("SELECT value FROM meta WHERE key='scan_owner_id'").Scan(&track.OwnerID); err != nil {
-					return errors.New("scan owner is not configured; initialize an administrator first")
+				if len(options) > 0 && options[0].UserID != "" {
+					track.OwnerID = options[0].UserID
+				} else {
+					if err := tx.QueryRow("SELECT value FROM meta WHERE key='scan_owner_id'").Scan(&track.OwnerID); err != nil {
+						return errors.New("scan owner is not configured; initialize an administrator first")
+					}
+				}
+				owner, err := readUser(tx, track.OwnerID)
+				if err != nil || owner.Role != "admin" || !owner.Enabled || owner.MustChangePassword {
+					return errors.New("scan owner must be an enabled administrator")
 				}
 				track.UploadedBy = track.OwnerID
 			}

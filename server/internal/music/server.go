@@ -210,6 +210,16 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 			}
 			tracks = filtered
 		}
+		query := strings.ToLower(strings.TrimSpace(request.URL.Query().Get("q")))
+		if query != "" {
+			filtered := make([]Track, 0, len(tracks))
+			for _, track := range tracks {
+				if strings.Contains(strings.ToLower(track.Title+" "+track.Artist+" "+track.Album+" "+track.Genre), query) {
+					filtered = append(filtered, track)
+				}
+			}
+			tracks = filtered
+		}
 		writeJSON(response, http.StatusOK, tracks)
 	case request.URL.Path == "/api/v2/uploads":
 		a.upload(response, request)
@@ -486,7 +496,7 @@ func canReadPlaylist(auth authContext, id string) bool {
 }
 
 func canReadTrack(auth authContext, store *Store, id string) bool {
-	if auth.role == "admin" {
+	if auth.session || auth.role == "admin" {
 		return true
 	}
 	for playlistID, allowed := range auth.allowedPlaylists {
@@ -730,7 +740,7 @@ func (a *API) track(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if request.Method == http.MethodPatch {
-		if !a.requireAdmin(response, request) {
+		if !a.requireAccount(response, request) {
 			return
 		}
 		fields := map[string]string{}
@@ -743,7 +753,7 @@ func (a *API) track(response http.ResponseWriter, request *http.Request) {
 			return
 		}
 		updated, _ := a.store.Track(id)
-		writeJSON(response, http.StatusOK, updated)
+		writeJSON(response, http.StatusOK, publicTrack(updated, authFromRequest(request)))
 		return
 	}
 	if request.Method == http.MethodDelete {
@@ -765,7 +775,7 @@ func (a *API) track(response http.ResponseWriter, request *http.Request) {
 }
 
 func (a *API) trackResource(response http.ResponseWriter, request *http.Request, path string) {
-	if !a.requireAdmin(response, request) {
+	if !a.requireAccount(response, request) {
 		return
 	}
 	if request.Method != http.MethodPut {
