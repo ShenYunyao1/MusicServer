@@ -10,9 +10,12 @@ module.exports=async function runUsersUI({browser,page,base,directory,accounts,t
  await charlie.locator('[data-user-action="reset"]').click();await page.click('#saveModal');await page.locator('#temporaryPasswordDialog').waitFor({state:'visible'});const resetPassword=await page.locator('#temporaryPasswordValue').textContent();assert.ok(resetPassword&&resetPassword!==firstPassword);await page.click('#closeTemporaryPassword');assert.equal(await page.locator('#temporaryPasswordValue').textContent(),'');
  // Conflict keeps the stale operation from silently overwriting a newer account.
  await page.evaluate(()=>loadUsers());
+ const aliceRow=page.locator('[data-user-id="'+a.user.id+'"]');
+ await aliceRow.locator('[data-user-action="display"]').click();
  const stale=await page.evaluate(id=>state.users.find(u=>u.id===id),a.user.id);
  await page.evaluate(async user=>api('admin/users/'+user.id,'PATCH',{display_name:'Alice updated'},undefined,user.version),stale);
- const aliceRow=page.locator('[data-user-id="'+a.user.id+'"]');page.once('dialog',dialog=>dialog.accept());await aliceRow.locator('[data-user-action="enabled"]').click();await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('409'));
+ await page.fill('[data-field="display_name"]','Stale display name');await page.click('#saveModal');await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('409'));
+ await page.click('#cancelModal');await page.click('#refreshUsers');await page.waitForFunction(id=>state.users.some(user=>user.id===id&&user.display_name==='Alice updated'),a.user.id);
  assert.ok((await aliceRow.textContent()).includes('已启用'));
  const before=await page.evaluate(id=>api('admin/stats?user_id='+id),a.user.id);assert.equal(before.keys.length,1);
  page.once('dialog',dialog=>dialog.accept());await aliceRow.locator('[data-user-action="enabled"]').click();await page.waitForFunction(id=>state.users.some(u=>u.id===id&&!u.enabled),a.user.id);
