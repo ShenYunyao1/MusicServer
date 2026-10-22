@@ -327,13 +327,13 @@ func (s *Store) PutPlaylist(playlist Playlist, options ...MutationOptions) error
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		if before.ID != "" && len(options) > 0 && options[0].CreateOnly {
-			return errVersionConflict
-		}
 		if before.ID != "" {
 			if err := checkActorOwner(tx, before.OwnerID, options); err != nil {
 				return err
 			}
+		}
+		if before.ID != "" && len(options) > 0 && options[0].CreateOnly {
+			return errVersionConflict
 		}
 		if err := checkVersion(before.Version, options); err != nil {
 			return err
@@ -364,9 +364,12 @@ func (s *Store) PutPlaylist(playlist Playlist, options ...MutationOptions) error
 			if err != nil {
 				return err
 			}
+			if err := checkActorOwner(tx, owner, options); err != nil {
+				return err
+			}
 			playlist.OwnerID = owner
 			var count int
-			if err := tx.QueryRow("SELECT count(*) FROM playlists").Scan(&count); err != nil {
+			if err := tx.QueryRow("SELECT COALESCE(MAX(sort_order),0) FROM playlists WHERE owner_id=? AND system=0", owner).Scan(&count); err != nil {
 				return err
 			}
 			playlist.SortOrder = count + 1
@@ -501,9 +504,26 @@ func (s *Store) ReorderPlaylistTracks(id string, expected, order []string, optio
 		return nil
 	}, options...)
 }
+func withoutLibrary(ids []string) []string {
+	result := []string{}
+	for _, id := range ids {
+		if id != "library" {
+			result = append(result, id)
+		}
+	}
+	return result
+}
 func (s *Store) ReorderPlaylists(order []string, options ...MutationOptions) error {
 	return s.transaction(func(tx *sql.Tx) error {
-		playlists, err := queryJSON[Playlist](tx, "SELECT payload FROM playlists")
+		owner, err := internalOwner(tx, options)
+		if err != nil {
+			return err
+		}
+		if err := checkActorOwner(tx, owner, options); err != nil {
+			return err
+		}
+		playlists, err := queryJSON[Playlist](tx, "SELECT payload FROM playlists WHERE owner_id=? AND system=0", owner)
+		order = withoutLibrary(order)
 		if err != nil {
 			return err
 		}
@@ -521,7 +541,7 @@ func (s *Store) ReorderPlaylists(order []string, options ...MutationOptions) err
 			for _, playlist := range playlists {
 				current = append(current, playlist.ID)
 			}
-			if !slices.Equal(current, options[0].ExpectedOrder) {
+			if !slices.Equal(current, withoutLibrary(options[0].ExpectedOrder)) {
 				return errPlaylistConflict
 			}
 		}
@@ -538,11 +558,11 @@ func (s *Store) ReorderPlaylists(order []string, options ...MutationOptions) err
 				return errPlaylistConflict
 			}
 			delete(available, id)
-			if playlist.SortOrder == position {
+			if playlist.SortOrder == position+1 {
 				continue
 			}
 			before := playlist
-			playlist.SortOrder = position
+			playlist.SortOrder = position + 1
 			playlist.Version++
 			playlist.UpdatedAt = time.Now().UTC()
 			if err := writePlaylist(tx, playlist); err != nil {

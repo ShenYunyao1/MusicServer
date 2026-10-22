@@ -124,7 +124,7 @@ func TestV06PlaylistOrderPersistsInListAndSync(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	order := []string{"z", "library", "a"}
+	order := []string{"library", "z", "a"}
 	stale, _ := api.store.Playlist("z")
 	if err := api.store.ReorderPlaylists(order); err != nil {
 		t.Fatal(err)

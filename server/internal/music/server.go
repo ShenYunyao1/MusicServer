@@ -249,7 +249,7 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 }
 
 func (a *API) playlistOrder(response http.ResponseWriter, request *http.Request) {
-	if !a.requireAdmin(response, request) {
+	if !a.requireAccount(response, request) {
 		return
 	}
 	if request.Method != http.MethodPut {
@@ -274,7 +274,13 @@ func (a *API) playlistOrder(response http.ResponseWriter, request *http.Request)
 		writePlaylistMutationError(response, err)
 		return
 	}
-	writeJSON(response, http.StatusOK, a.store.Playlists())
+	visible := []Playlist{}
+	for _, p := range a.store.Playlists() {
+		if p.System || p.OwnerID == authFromRequest(request).userID {
+			visible = append(visible, p)
+		}
+	}
+	writeJSON(response, http.StatusOK, visible)
 }
 
 func (a *API) adminSettings(response http.ResponseWriter, request *http.Request) {
@@ -415,7 +421,7 @@ func (a *API) authenticate(request *http.Request) (authContext, bool) {
 	}
 	allowed := map[string]bool{}
 	for _, playlist := range a.store.Playlists() {
-		if !playlist.System && playlist.OwnerID == user.ID {
+		if playlist.System || playlist.OwnerID == user.ID {
 			allowed[playlist.ID] = true
 		}
 	}
@@ -534,13 +540,13 @@ func (a *API) playlists(response http.ResponseWriter, request *http.Request) {
 	case http.MethodGet:
 		playlists := make([]Playlist, 0)
 		for _, playlist := range a.store.Playlists() {
-			if canReadPlaylist(authFromRequest(request), playlist.ID) {
+			if auth := authFromRequest(request); auth.session && (playlist.System || playlist.OwnerID == auth.userID) || !auth.session && canReadPlaylist(auth, playlist.ID) {
 				playlists = append(playlists, playlist)
 			}
 		}
 		writeJSON(response, http.StatusOK, playlists)
 	case http.MethodPost:
-		if !a.requireAdmin(response, request) {
+		if !a.requireAccount(response, request) {
 			return
 		}
 		var playlist Playlist
@@ -577,7 +583,7 @@ func (a *API) playlist(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if request.Method == http.MethodPatch {
-		if !a.requireAdmin(response, request) {
+		if !a.requireAccount(response, request) {
 			return
 		}
 		var patch struct {
@@ -597,7 +603,7 @@ func (a *API) playlist(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if request.Method == http.MethodPut {
-		if !a.requireAdmin(response, request) {
+		if !a.requireAccount(response, request) {
 			return
 		}
 		var replacement Playlist
@@ -615,7 +621,7 @@ func (a *API) playlist(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if request.Method == http.MethodDelete {
-		if !a.requireAdmin(response, request) {
+		if !a.requireAccount(response, request) {
 			return
 		}
 		if err := a.store.DeletePlaylist(id, mutationOptions(request)); err != nil {
@@ -657,7 +663,7 @@ func (a *API) playlistTracks(response http.ResponseWriter, request *http.Request
 		writeError(response, http.StatusNotFound, "playlist endpoint not found")
 		return
 	}
-	if !a.requireAdmin(response, request) {
+	if !a.requireAccount(response, request) {
 		return
 	}
 	id := parts[0]
