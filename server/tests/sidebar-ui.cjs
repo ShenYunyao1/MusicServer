@@ -3,7 +3,11 @@ const path=require('node:path');
 
 module.exports=async function({page,directory}){
  const logo=()=>page.locator('.brand-mark').boundingBox();
- await page.click('#collapse');
+ const logoLeft=(await logo()).x;
+ const iconLeft=(await page.locator('.nav-icon').first().boundingBox()).x;
+ const starting=await page.evaluate(()=>{document.querySelector('#collapse').click();return {logo:document.querySelector('.brand-mark').getBoundingClientRect().left,icon:document.querySelector('.nav-icon').getBoundingClientRect().left}});
+ assert.equal(starting.logo,logoLeft,'Starting the collapse animation must not make the logo jump sideways');
+ assert.ok(Math.abs(starting.icon-iconLeft)<=4,'Navigation icons must not jump to the middle of the expanding sidebar');
  await page.waitForFunction(()=>document.querySelector('#sidebar').getBoundingClientRect().width<=73);
  const collapsedLogo=await logo();
  assert.equal(Math.round(collapsedLogo.width),32,'Collapsed sidebar must not squeeze the logo');
