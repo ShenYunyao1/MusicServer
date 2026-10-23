@@ -194,6 +194,10 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		a.accountAuth(response, request)
 		return
 	}
+	if sharingEndpoint(request.URL.Path) {
+		a.sharing(response, request)
+		return
+	}
 	if strings.HasPrefix(request.URL.Path, "/api/v2/public/") || request.URL.Path == "/api/v2/subscriptions" || strings.HasPrefix(request.URL.Path, "/api/v2/subscriptions/") {
 		a.community(response, request)
 		return

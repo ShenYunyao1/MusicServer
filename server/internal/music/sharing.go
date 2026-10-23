@@ -11,6 +11,7 @@ import (
 var errSharingMode = errors.New("set playlist visibility to shared before inviting accounts")
 var errInvitationState = errors.New("invitation state changed; refresh or explicitly invite again")
 var errInvitationTarget = errors.New("this account cannot be invited")
+var errInvitationLimit = errors.New("playlist invitation limit is 100")
 
 func hasAcceptedInvitation(reader sqlReader, userID string, p Playlist) bool {
 	var accepted bool
@@ -117,7 +118,7 @@ func (s *Store) CreateInvitation(id, username string, options MutationOptions) (
 			return err
 		}
 		if count >= 100 {
-			return errors.New("playlist invitation limit is 100")
+			return errInvitationLimit
 		}
 		inviteID, now := uuid.NewString(), persistedTime(time.Now())
 		if _, err = tx.Exec("INSERT INTO playlist_invitations VALUES(?,?,?,?,?,1,?,?,?)", inviteID, id, p.OwnerID, recipient, "pending", p.Name, now, now); err != nil {
@@ -128,6 +129,22 @@ func (s *Store) CreateInvitation(id, username string, options MutationOptions) (
 			return err
 		}
 		return auditMutation(tx, "invitation.create", inviteID, nil, result, []MutationOptions{options})
+	})
+	return result, err
+}
+
+func (s *Store) ReceivedInvitation(id, userID string) (PlaylistInvitation, error) {
+	var result PlaylistInvitation
+	err := s.transaction(func(tx *sql.Tx) error {
+		if err := subscriberIdentity(tx, MutationOptions{UserID: userID}); err != nil {
+			return err
+		}
+		var err error
+		result, err = readInvitation(tx, id)
+		if errors.Is(err, sql.ErrNoRows) || err == nil && result.RecipientID != userID {
+			return errResourceHidden
+		}
+		return err
 	})
 	return result, err
 }
