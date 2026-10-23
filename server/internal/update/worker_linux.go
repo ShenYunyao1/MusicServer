@@ -62,7 +62,7 @@ func LoadInstaller(configPath string) (*Installer, error) {
 	i := &Installer{Config: config, Stop: run("stop"), Start: run("start"), Healthy: func(ctx context.Context, m Manifest) error { return HealthCheck(ctx, config.HealthURL, m) }}
 	i.Backup = func(target string) error { return backupDatabase(config.Database, target) }
 	i.Restore = func(source string) error {
-		info, err := os.Lstat(config.Database)
+		info, err := os.Lstat(source)
 		if err != nil {
 			return err
 		}
@@ -72,6 +72,11 @@ func LoadInstaller(configPath string) (*Installer, error) {
 		}
 		if err = verifyDatabase(source); err != nil {
 			return err
+		}
+		for _, suffix := range []string{"-wal", "-shm", "-journal"} {
+			if err = os.Remove(config.Database + suffix); err != nil && !os.IsNotExist(err) {
+				return err
+			}
 		}
 		if err = copyRegular(source, config.Database); err != nil {
 			return err
@@ -150,6 +155,17 @@ func backupDatabase(source, target string) error {
 		}
 	}
 	if err := copyRegular(source, target); err != nil {
+		return err
+	}
+	info, err := os.Stat(source)
+	if err != nil {
+		return err
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return errors.New("cannot preserve backup ownership")
+	}
+	if err = os.Chown(target, int(stat.Uid), int(stat.Gid)); err != nil {
 		return err
 	}
 	return verifyDatabase(target)

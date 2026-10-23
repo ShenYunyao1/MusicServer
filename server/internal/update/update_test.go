@@ -28,11 +28,15 @@ func testPackageName() string {
 	return "musicserver-" + runtime.GOOS + "-" + runtime.GOARCH + extension
 }
 
-func testManager(t *testing.T, tag, digest string, payload []byte) (*Manager, *httptest.Server) {
+func testManager(t *testing.T, tag, digest string, payload []byte, schemas ...int) (*Manager, *httptest.Server) {
 	t.Helper()
 	name := testPackageName()
 	pub, key, _ := ed25519.GenerateKey(rand.Reader)
-	manifest, _ := json.Marshal(Manifest{Format: 1, Version: strings.TrimPrefix(tag, "v"), Commit: strings.Repeat("a", 40), Schema: version.Schema, Packages: []Package{{Name: name, OS: runtime.GOOS, Arch: runtime.GOARCH, Size: int64(len(payload)), SHA256: strings.TrimPrefix(digest, "sha256:")}}})
+	schema := version.Schema
+	if len(schemas) > 0 {
+		schema = schemas[0]
+	}
+	manifest, _ := json.Marshal(Manifest{Format: 1, Version: strings.TrimPrefix(tag, "v"), Commit: strings.Repeat("a", 40), Schema: schema, Packages: []Package{{Name: name, OS: runtime.GOOS, Arch: runtime.GOARCH, Size: int64(len(payload)), SHA256: strings.TrimPrefix(digest, "sha256:")}}})
 	signature := []byte(base64.StdEncoding.EncodeToString(ed25519.Sign(key, manifest)))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if os.Getenv("MUSIC_SERVER_GITHUB_TOKEN") != "" && r.Header.Get("Authorization") != "Bearer fixture-token" {
@@ -144,6 +148,34 @@ func TestRepositoryValidation(t *testing.T) {
 	}
 	if err := ValidateRepository("https://github.com/example/musicserver"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCheckRefusesIncompatibleSchemaWithoutDownload(t *testing.T) {
+	sum := sha256.Sum256([]byte("future schema"))
+	m, _ := testManager(t, "9.0.0", "sha256:"+hex.EncodeToString(sum[:]), []byte("future schema"), 999)
+	if err := m.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	s := m.Status()
+	if s.State != "incompatible" || s.Compatible || s.PackagePath != "" {
+		t.Fatalf("incompatible update accepted: %+v", s)
+	}
+	if err := m.Prepare(context.Background()); err == nil {
+		t.Fatal("downloaded incompatible release")
+	}
+}
+
+func TestCheckRefusesUnsignedMetadata(t *testing.T) {
+	sum := sha256.Sum256([]byte("package"))
+	m, _ := testManager(t, "9.0.0", "sha256:"+hex.EncodeToString(sum[:]), []byte("package"))
+	other, _, _ := ed25519.GenerateKey(rand.Reader)
+	m.publicKey = other
+	if err := m.Check(context.Background()); err == nil {
+		t.Fatal("unsigned release accepted")
+	}
+	if m.Status().PackagePath != "" {
+		t.Fatal("downloaded untrusted release")
 	}
 }
 

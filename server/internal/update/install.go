@@ -320,7 +320,10 @@ func replaceLink(root, target string) error {
 		return err
 	}
 	defer os.Remove(temporary)
-	return os.Rename(temporary, filepath.Join(root, "current"))
+	if err := os.Rename(temporary, filepath.Join(root, "current")); err != nil {
+		return err
+	}
+	return syncDir(root)
 }
 
 func copyRegular(source, target string) error {
@@ -355,7 +358,10 @@ func copyRegular(source, target string) error {
 	if closeErr != nil {
 		return closeErr
 	}
-	return os.Rename(f.Name(), target)
+	if err := os.Rename(f.Name(), target); err != nil {
+		return err
+	}
+	return syncDir(filepath.Dir(target))
 }
 
 // ExtractRelease accepts explicit regular files only, with bounded expansion and no links.
@@ -426,7 +432,7 @@ func ExtractRelease(archive, dest string, expected Manifest) error {
 	if build.Version != expected.Version || build.Commit != expected.Commit || build.Schema != expected.Schema {
 		return errors.New("archive build identity differs from signed manifest")
 	}
-	return nil
+	return syncDir(dest)
 }
 
 func HealthCheck(ctx context.Context, address string, expected Manifest) error {

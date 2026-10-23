@@ -34,10 +34,10 @@ jobs:
           cache-dependency-path: server/go.sum
       - name: Install ffprobe (Ubuntu)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        run: command -v ffprobe || (sudo apt-get update && sudo apt-get install -y ffmpeg)
       - name: Install ffprobe (Windows)
         if: runner.os == 'Windows'
-        run: choco install ffmpeg -y --no-progress
+        run: if (!(Get-Command ffprobe -ErrorAction SilentlyContinue)) { choco install ffmpeg -y --no-progress }
       - name: Tests and vet
         run: |
           go test ./... -count=1 -timeout 180s

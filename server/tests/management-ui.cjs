@@ -73,6 +73,7 @@ async function main() {
     await page.reload();
     await page.waitForFunction(() => state.user?.username === 'admin' && state.tracks.length === 1);
     await page.waitForFunction(() => document.querySelector('#status').textContent === '已登录');
+    await require('./updater-ui.cjs')({page});
     await require('./navigation-ui.cjs')({page});
     await require('./sidebar-ui.cjs')({page,directory});
     await require('./page-headings-ui.cjs')({page});

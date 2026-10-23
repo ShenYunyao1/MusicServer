@@ -118,13 +118,19 @@ func atomicWrite(path string, data []byte, mode os.FileMode) error {
 		return err
 	}
 	if runtime.GOOS != "windows" {
-		d, e := os.Open(filepath.Dir(path))
-		if e != nil {
-			return e
-		}
-		defer d.Close()
-		return d.Sync()
+		return syncDir(filepath.Dir(path))
 	}
 	return nil
+}
+func syncDir(path string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	d, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
 }
 func compatible(manifest Manifest) bool { return manifest.Schema == version.Schema }

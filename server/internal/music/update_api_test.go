@@ -72,3 +72,32 @@ func TestUpdateStatusRequiresAdministrator(t *testing.T) {
 		t.Fatal("missing current version")
 	}
 }
+
+func TestUpdateMaintenanceBlocksWritesButKeepsHealth(t *testing.T) {
+	api, _ := testAPI(t)
+	api.SetMaintenance(func() bool { return true })
+	for _, path := range []string{"/api/v2/auth/login", "/api/v2/playlists", "/api/v2/admin/update/apply"} {
+		r := httptest.NewRecorder()
+		api.ServeHTTP(r, httptest.NewRequest("POST", path, nil))
+		if r.Code != 503 || r.Header().Get("Retry-After") == "" {
+			t.Fatalf("maintenance allowed %s: %d", path, r.Code)
+		}
+	}
+	r := httptest.NewRecorder()
+	api.ServeHTTP(r, httptest.NewRequest("GET", "/api/v2/health", nil))
+	if r.Code != 200 || !strings.Contains(r.Body.String(), `"schema":7`) {
+		t.Fatalf("health not available: %d %s", r.Code, r.Body)
+	}
+}
+
+func TestApplyUpdateNeedsAnExplicitVersion(t *testing.T) {
+	api, _ := testAPI(t)
+	api.SetUpdater(update.NewManager(t.TempDir(), func() string { return update.Repository }))
+	request := httptest.NewRequest("POST", "/api/v2/admin/update/apply", strings.NewReader(`{}`))
+	authorizeTestAdmin(api, request)
+	response := httptest.NewRecorder()
+	api.ServeHTTP(response, request)
+	if response.Code != 400 {
+		t.Fatalf("unselected release accepted: %d %s", response.Code, response.Body)
+	}
+}

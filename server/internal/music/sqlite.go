@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
+	"musicserver/internal/version"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -15,7 +16,7 @@ import (
 	"time"
 )
 
-const sqliteSchemaVersion = 7
+const sqliteSchemaVersion = version.Schema
 const sqliteSchema = `
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 INSERT INTO meta VALUES ('revision','0'),('schema_version','7'),('public_revision','0');

@@ -530,6 +530,9 @@ func (m *Manager) download(ctx context.Context, releaseVersion, address, name st
 	defer os.Remove(file.Name())
 	hash := sha256.New()
 	written, copyErr := io.Copy(io.MultiWriter(file, hash), io.LimitReader(response.Body, maxPackageSize+1))
+	if copyErr == nil {
+		copyErr = file.Sync()
+	}
 	closeErr := file.Close()
 	if copyErr != nil {
 		return "", copyErr
