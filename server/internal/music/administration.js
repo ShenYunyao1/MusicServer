@@ -44,8 +44,8 @@ function setupAdministration(){
   $('viewRemoved').onclick=()=>run(loadRemovedTracks);
 
   const users=$('page-users'),detail=$('userResourcesPanel');detail.id='userResourcesPanel';
-  const heading=document.createElement('div');heading.id='userDetailHeader';heading.hidden=true;heading.innerHTML='<p class="status">用户管理 / 账户详情</p><h2 id="managedUserName"></h2><p id="managedUserStatus" class="notice"></p><div id="userDetailActions" class="actions"></div>';
-  const back=routeLink('返回用户列表','admin/users');back.id='backUsers';heading.prepend(back);detail.before(heading);
+  const heading=document.createElement('div');heading.id='userDetailHeader';heading.hidden=true;heading.innerHTML='<p class="status">用户管理 / 账户详情</p><h1 id="managedUserName"></h1><p id="managedUserStatus" class="notice"></p><div id="userDetailActions" class="actions"></div>';
+  const back=routeLink('返回用户管理','admin/users');back.id='backUsers';heading.prepend(back);detail.before(heading);
   const resourceTabs=document.createElement('nav');resourceTabs.id='resourceTabs';resourceTabs.className='page-tabs';
   for(const [kind,label] of [['owned','当前管理曲目'],['uploaded','原始上传曲目'],['playlists','私人歌单'],['keys','API Key']]){
     const button=makeButton(label,()=>{state.resourceOffset=0;location.hash='#/admin/users/'+state.managedUserID+'?kind='+kind});button.dataset.resourceKind=kind;resourceTabs.append(button);
@@ -113,11 +113,13 @@ function renderAuditPage(){
 }
 function renderManagedUserPage(){
   const user=managedUser(),detail=Boolean(user);$('userDetailHeader').hidden=!detail;$('userResourcesPanel').hidden=!detail;
+  const intro=$('page-users').querySelector(':scope > .page-intro');intro.hidden=detail;
+  (detail?$('userDetailActions'):intro.querySelector('.actions')).append($('refreshUsers'));
   $('userList').closest('.panel').hidden=detail;$('createUser').hidden=detail;
-  if(!user)return;
-  if(state.page==='users')$('pageTitle').textContent='用户管理 / '+user.username;$('managedUserName').textContent=user.display_name||user.username;
+  if(!user){if(state.page==='users')document.title='用户管理 · 音乐服务器';return}
+  if(state.page==='users')document.title=(user.display_name||user.username)+' · 用户管理 · 音乐服务器';$('managedUserName').textContent=user.display_name||user.username;
   $('managedUserStatus').textContent='登录名：'+user.username+' · '+(user.enabled?'已启用':'已停用')+(user.must_change_password?' · 首次登录需改密':'');
-  const actions=$('userDetailActions');actions.replaceChildren();
+  const actions=$('userDetailActions');actions.replaceChildren($('refreshUsers'));
   const row=[...$('userList').children].find(el=>el.dataset.userId===user.id);
   for(const action of ['display','reset','enabled']){
     const source=row?.querySelector('[data-user-action="'+action+'"]');if(!source)continue;

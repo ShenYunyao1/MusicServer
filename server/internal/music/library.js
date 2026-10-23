@@ -73,9 +73,11 @@ async function deleteSelectedTracks(){
 function renderPlaylists(){
   const detail=state.playlists.find(p=>p.id===state.playlistDetailId&&!p.system);
   $('playlistBrowse').hidden=Boolean(detail);$('playlistDetail').hidden=!detail;
+  $('page-playlists').querySelector(':scope > .page-intro').hidden=Boolean(detail);
   $('newPlaylist').hidden=Boolean(detail);
   if(detail){renderPlaylistDetail(detail);return}
   state.playlistDetailId=null;
+  if(state.page==='playlists')document.title='我的歌单 · 音乐服务器';
   const query=$('playlistSearch').value.trim().toLowerCase(),playlists=state.playlists.filter(p=>!p.system&&(p.name+' '+(p.description||'')).toLowerCase().includes(query));
   $('playlistCount').textContent=playlists.length+' 个私人歌单';$('playlistList').replaceChildren();
   if(!playlists.length)$('playlistList').innerHTML='<div class="panel empty">'+(query?'没有匹配的歌单。':'还没有私人歌单，点击“新建歌单”开始。')+'</div>';
@@ -94,7 +96,8 @@ function renderPlaylists(){
 }
 function renderPlaylistDetail(p){
   const detail=$('playlistDetail');detail.replaceChildren();
-  const intro=document.createElement('div');intro.className='page-intro';intro.innerHTML='<div><p>我的歌单 / 私人歌单</p><h2>'+txt(p.name)+'</h2><p>'+txt(p.description||'')+'</p></div><div class="actions"></div>';
+  if(state.page==='playlists')document.title=p.name+' · 我的歌单 · 音乐服务器';
+  const intro=document.createElement('div');intro.className='page-intro';intro.innerHTML='<div><p>我的歌单 / 私人歌单</p><h1>'+txt(p.name)+'</h1><p>'+txt(p.description||'')+'</p></div><div class="actions"></div>';
   const actions=intro.querySelector('.actions');const back=makeButton('返回歌单',()=>showPage('playlists'));back.dataset.backPlaylists='';
   const edit=makeButton('编辑信息',()=>editPlaylist(p));edit.dataset.editPlaylist='';const add=makeButton('添加曲目',()=>openPlaylistTrackPicker(p),'btn primary');add.dataset.addMembers='';actions.append(back,edit,add);detail.append(intro);
   const count=document.createElement('p');count.className='status';count.textContent=members(p).size+' 首曲目 · 个人备注仅属于此歌单';detail.append(count);

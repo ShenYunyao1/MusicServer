@@ -83,18 +83,18 @@ const menuToggle = makeButton('☰',()=>{const open=document.body.classList.togg
 menuToggle.innerHTML=sidebarSVG('<path d="M4 6h16M4 12h16M4 18h16"/>');
 menuToggle.id='menuToggle';menuToggle.setAttribute('aria-label','打开导航');menuToggle.setAttribute('aria-controls','sidebar');menuToggle.setAttribute('aria-expanded','false');
 document.querySelector('.topbar').prepend(menuToggle);
-const collapse=$('collapse');collapse.className='btn sidebar-toggle';document.querySelector('.topbar').prepend(collapse);collapse.setAttribute('aria-controls','sidebar');
+const brandToggle=$('brandToggle');brandToggle.setAttribute('aria-controls','sidebar');
 const sidebarBreakpoint=matchMedia('(max-width: 900px)');
 let sidebarCollapsed=false;
 try{sidebarCollapsed=localStorage.getItem('musicserver.sidebarCollapsed')==='true'}catch(_){}
 function syncSidebarControls(){
   const collapsed=sidebarCollapsed&&!sidebarBreakpoint.matches;
   document.body.classList.toggle('nav-collapsed',sidebarCollapsed);
-  collapse.title=collapsed?'展开导航':'收起导航';collapse.setAttribute('aria-label',collapse.title);collapse.setAttribute('aria-expanded',String(!collapsed));
-  collapse.innerHTML=sidebarSVG('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16'+(collapsed?'m4-12 4 4-4 4':'m8-12-4 4 4 4')+'"/>');
+  brandToggle.title=sidebarBreakpoint.matches?'关闭导航':collapsed?'展开导航':'收起导航';brandToggle.setAttribute('aria-label',brandToggle.title);
+  if(sidebarBreakpoint.matches)brandToggle.removeAttribute('aria-expanded');else brandToggle.setAttribute('aria-expanded',String(!collapsed));
   hideNavTooltip();
 }
-collapse.onclick=()=>{sidebarCollapsed=!sidebarCollapsed;try{localStorage.setItem('musicserver.sidebarCollapsed',String(sidebarCollapsed))}catch(_){}syncSidebarControls()};
+brandToggle.onclick=()=>{if(sidebarBreakpoint.matches){closeMobileNav();menuToggle.focus();return}sidebarCollapsed=!sidebarCollapsed;try{localStorage.setItem('musicserver.sidebarCollapsed',String(sidebarCollapsed))}catch(_){}syncSidebarControls()};
 sidebarBreakpoint.addEventListener('change',()=>{closeMobileNav();syncSidebarControls()});
 const navTooltip=document.createElement('div');navTooltip.id='navTooltip';navTooltip.className='nav-tooltip';navTooltip.setAttribute('role','tooltip');navTooltip.hidden=true;document.body.append(navTooltip);
 let tooltipOwner=null;
@@ -121,14 +121,14 @@ const closePreview=makeButton('×',()=>{memberPlayer.pause();memberPlayer.remove
 previewBar.append(previewTitle,memberPlayer,closePreview);document.querySelector('.app').append(previewBar);
 
 const maintenancePage=document.createElement('section');maintenancePage.id='page-maintenance';maintenancePage.className='page';
-maintenancePage.innerHTML='<div class="page-intro"><h2>曲库维护</h2></div>';
+maintenancePage.innerHTML='<div class="page-intro"><h1>曲库维护</h1></div>';
 maintenancePage.append(maintenancePanel);document.querySelector('.content').append(maintenancePage);
 maintenancePanel.querySelector('.actions').prepend($('scan'));
 const adminStatsLink=routeLink('全站调用统计','admin/stats');adminStatsLink.id='adminStatsLink';$('page-overview').querySelector('.actions').append(adminStatsLink);
 const statsScopeLabel=document.createElement('p');statsScopeLabel.id='statsScopeLabel';statsScopeLabel.className='notice';$('page-stats').querySelector('.page-intro').after(statsScopeLabel);
 
 const routeError = document.createElement('section');routeError.id='routeError';routeError.className='panel';routeError.hidden=true;
-routeError.innerHTML='<h2>无法打开此页面</h2><p id="routeErrorMessage"></p>';routeError.append(routeLink('返回全局曲库','library'));
+routeError.innerHTML='<h1>无法打开此页面</h1><p id="routeErrorMessage"></p>';routeError.append(routeLink('返回全局曲库','library'));
 document.querySelector('.content').append(routeError);
 
 function navigatePage(page) {
@@ -145,14 +145,13 @@ function displayWorkspacePage(page) {
   document.querySelectorAll('.nav [data-page]').forEach(el=>el.classList.toggle('active',el.dataset.page===page || page==='stats'&&el.dataset.page==='keys'));
   document.querySelectorAll('.nav-group[data-admin]').forEach(el=>el.hidden=!isAdministrator());
   $('accountRole').textContent=isAdministrator()?'管理员':'普通用户';
-  $('pageTitle').textContent=titles[page];document.title=titles[page]+' · 音乐服务器';
+  document.title=(page==='stats'?'调用统计':titles[page])+' · 音乐服务器';
   playerTabs.hidden=!['keys','stats'].includes(page)||page==='stats'&&state.statsScope==='admin'; keyTab.classList.toggle('active',page==='keys');statsNav.classList.toggle('active',page==='stats');
   if(page==='stats'){
-    const adminScope=state.statsScope==='admin';$('pageTitle').textContent=adminScope?'管理 / 调用统计':'播放器接入 / 调用统计';
+    const adminScope=state.statsScope==='admin';document.title=(adminScope?'全站调用统计':'我的调用统计')+' · 音乐服务器';
     statsScopeLabel.textContent=adminScope?'统计范围：'+(state.statsUserID?(state.users||[]).find(u=>u.id===state.statsUserID)?.username||'指定账户':'全部账户'):'统计范围：仅当前账户的播放器 Key';
   }
-  document.querySelectorAll('.page-intro h2').forEach(el=>{const section=el.closest('.page');if(section&&titles[section.id.slice(5)])el.textContent=titles[section.id.slice(5)]});
-  $('page-stats').querySelector('h2').textContent='调用统计';
+  document.querySelectorAll('.page > .page-intro h1').forEach(el=>{const section=el.closest('.page');if(section&&titles[section.id.slice(5)])el.textContent=section.id==='page-stats'?'调用统计':titles[section.id.slice(5)]});
 }
 let routeGeneration=0;
 async function restoreWorkspaceRoute() {
@@ -197,7 +196,7 @@ async function restoreWorkspaceRoute() {
   } catch(error) {
     if(generation!==routeGeneration||!state.user)return;
     state.page='unavailable';document.querySelectorAll('.page').forEach(el=>el.classList.remove('active'));
-    playerTabs.hidden=true;routeError.hidden=false;$('routeErrorMessage').textContent=error.message;
+    playerTabs.hidden=true;routeError.hidden=false;$('routeErrorMessage').textContent=error.message;document.title='无法打开此页面 · 音乐服务器';
   }
 }
 window.addEventListener('hashchange',()=>restoreWorkspaceRoute());

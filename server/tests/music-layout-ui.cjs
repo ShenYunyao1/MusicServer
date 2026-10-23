@@ -11,13 +11,18 @@ module.exports=async function({page,directory}){
  await page.fill('#trackSearch','');
  await page.setViewportSize({width:390,height:844});await page.waitForFunction(()=>document.querySelector('.main').getBoundingClientRect().left<=1&&document.querySelector('#sidebar').getBoundingClientRect().right<=1);await page.screenshot({path:path.join(directory,'library-mobile.png'),fullPage:true});
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+ await require('./page-headings-ui.cjs').assertHeading(page,'全局曲库');
  await page.locator('#trackRows .row-actions button').filter({hasText:'更多'}).first().click();await page.locator('#contextMenu').waitFor({state:'visible'});await page.keyboard.press('ArrowDown');assert.equal(await page.evaluate(()=>document.activeElement.closest('#contextMenu')!==null),true);await page.keyboard.press('Escape');
  await page.setViewportSize({width:1440,height:1100});await page.waitForFunction(()=>document.querySelector('.main').getBoundingClientRect().left>=231);
  await page.click('[data-page="playlists"]');await page.waitForFunction(()=>state.page==='playlists');
  assert.equal(await page.locator('.playlist-card[data-id="library"]').count(),0);
  await page.locator('.playlist-card button').filter({hasText:'打开'}).first().click();await page.locator('#playlistDetail').waitFor({state:'visible'});
  assert.ok((await page.locator('#playlistDetail').textContent()).includes('Browser cue'));
+ await require('./page-headings-ui.cjs').assertHeading(page,'Browser playlist');
+ assert.equal(await page.locator('#page-playlists > .page-intro').isVisible(),false);
  await page.reload();await page.waitForFunction(()=>state.playlistDetailId&&document.querySelector('#status').textContent==='已登录');
  assert.ok((await page.locator('#playlistDetail').textContent()).includes('Browser cue'));await page.click('[data-back-playlists]');
+ await page.locator('#newPlaylist').waitFor({state:'visible'});
+ await require('./page-headings-ui.cjs').assertHeading(page,'我的歌单');
  console.log('Music layout UI passed: track drawer, visible row/menu actions, selection scope, mobile layout, search restore and private playlist detail.');
 };

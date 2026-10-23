@@ -5,10 +5,17 @@ module.exports=async function({page,directory,accounts}){
  await page.click('[data-page="users"]');await page.locator('[data-user-id="'+user.id+'"] [data-user-action="resources"]').click();
  await page.waitForFunction(id=>state.managedUserID===id&&!document.querySelector('#userDetailHeader').hidden,user.id);
  assert.equal(await page.locator('#userList').isVisible(),false);
+ await require('./page-headings-ui.cjs').assertHeading(page,user.display_name||user.username);
+ assert.equal(await page.locator('#page-users > .page-intro').isVisible(),false);
+ await page.click('#refreshUsers');await page.waitForFunction(()=>document.querySelector('#refreshUsers').closest('#userDetailActions'));
  await page.click('[data-resource-kind="playlists"]');await page.waitForFunction(()=>location.hash.includes('kind=playlists')&&document.querySelector('#userResourceKind').value==='playlists');
  await page.reload();await page.waitForFunction(()=>state.managedUserID&&document.querySelector('#status').textContent==='已登录');
  assert.equal(await page.locator('#userResourceKind').inputValue(),'playlists');assert.ok((await page.locator('#userResourcesTitle').textContent()).includes('browser-bob'));
  await page.screenshot({path:path.join(directory,'user-detail.png'),fullPage:true});
+ await page.click('#backUsers');await page.locator('#createUser').waitFor({state:'visible'});
+ await require('./page-headings-ui.cjs').assertHeading(page,'用户管理');
+ assert.equal(await page.locator('#refreshUsers').isVisible(),true);
+ await page.locator('[data-user-id="'+user.id+'"] [data-user-action="resources"]').click();await page.locator('#userStatsLink').waitFor({state:'visible'});
  await page.click('#userStatsLink');await page.waitForFunction(id=>state.statsScope==='admin'&&state.statsUserID===id&&state.stats.keys.every(k=>k.user_id===id),user.id);
  assert.ok((await page.locator('#statsScopeLabel').textContent()).includes('browser-bob'));
  await page.click('[data-page="maintenance"]');await page.locator('#maintenanceTabs a[href="#/admin/library/missing"]').click();await page.locator('#missingResults').waitFor({state:'visible'});
@@ -27,6 +34,7 @@ module.exports=async function({page,directory,accounts}){
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'System tabs must fit a mobile viewport');
  await page.screenshot({path:path.join(directory,'settings-mobile.png'),fullPage:true});
  await page.evaluate(()=>location.hash='#/player/keys');await page.waitForFunction(()=>state.page==='keys');assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'Key cards must fit mobile width');
+ await require('./page-headings-ui.cjs').assertHeading(page,'播放器接入');
  await page.evaluate(()=>location.hash='#/admin/users/'+state.users.find(u=>u.username==='browser-bob').id);await page.waitForFunction(()=>state.managedUserID&&!document.querySelector('#userDetailHeader').hidden);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'User details must fit mobile width');
  await page.setViewportSize({width:1440,height:1100});await page.waitForFunction(()=>document.querySelector('.main').getBoundingClientRect().left>=231);
  await page.click('[data-page="overview"]');await page.waitForFunction(()=>state.page==='overview');assert.equal(await page.locator('#metricPlaylists').textContent(),String((await page.evaluate(()=>state.users)).length));

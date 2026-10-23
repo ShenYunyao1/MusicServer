@@ -75,6 +75,7 @@ async function main() {
     await page.waitForFunction(() => document.querySelector('#status').textContent === '已登录');
     await require('./navigation-ui.cjs')({page});
     await require('./sidebar-ui.cjs')({page,directory});
+    await require('./page-headings-ui.cjs')({page});
     await page.screenshot({ path: path.join(directory, 'management.png'), fullPage: true });
     await page.evaluate(() => editTrack(state.tracks[0]));
     await page.fill('[data-field="title"]', 'Edited in browser');
