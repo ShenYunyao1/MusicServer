@@ -10,7 +10,7 @@ import (
 func TestMultiuserSchemaOwnership(t *testing.T) {
 	api, _ := testAPI(t)
 	var schema int
-	if err := api.store.db.QueryRow("PRAGMA user_version").Scan(&schema); err != nil || schema != 6 {
+	if err := api.store.db.QueryRow("PRAGMA user_version").Scan(&schema); err != nil || schema != 7 {
 		t.Fatalf("schema: %d %v", schema, err)
 	}
 	var owner, uploader string
@@ -31,7 +31,7 @@ func TestMultiuserSchemaOwnership(t *testing.T) {
 }
 
 func TestMultiuserSchemaRefusesOldFourAndFiveUntouched(t *testing.T) {
-	for _, oldVersion := range []int{4, 5} {
+	for _, oldVersion := range []int{4, 5, 6} {
 		path := filepath.Join(t.TempDir(), "old.sqlite")
 		db, err := openSQLite(path)
 		if err != nil {

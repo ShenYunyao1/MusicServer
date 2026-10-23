@@ -83,8 +83,8 @@ func setPlaylistVisibility(p *Playlist, visibility string) error {
 	if p.System || p.ID == "library" {
 		return errLibraryMembers
 	}
-	if visibility != "private" && visibility != "public" {
-		return errors.New("visibility must be private or public")
+	if visibility != "private" && visibility != "public" && visibility != "shared" {
+		return errors.New("visibility must be private, public or shared")
 	}
 	if p.Visibility != visibility {
 		p.Visibility = visibility

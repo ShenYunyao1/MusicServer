@@ -15,10 +15,10 @@ import (
 	"time"
 )
 
-const sqliteSchemaVersion = 6
+const sqliteSchemaVersion = 7
 const sqliteSchema = `
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-INSERT INTO meta VALUES ('revision','0'),('schema_version','6'),('public_revision','0');
+INSERT INTO meta VALUES ('revision','0'),('schema_version','7'),('public_revision','0');
 CREATE TABLE users (id TEXT PRIMARY KEY,username TEXT NOT NULL UNIQUE,display_name TEXT NOT NULL,password_hash TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN ('admin','member')),enabled INTEGER NOT NULL,auth_version INTEGER NOT NULL,version INTEGER NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,must_change_password INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE sessions (id TEXT PRIMARY KEY,token_hash TEXT NOT NULL UNIQUE,user_id TEXT NOT NULL REFERENCES users(id),auth_version INTEGER NOT NULL,created_at TEXT NOT NULL,last_active_at TEXT NOT NULL,expires_at TEXT NOT NULL,revoked_at TEXT NOT NULL DEFAULT '');
 CREATE INDEX sessions_user ON sessions(user_id);
@@ -29,12 +29,14 @@ CREATE INDEX tracks_owner ON tracks(owner_id,id);
 CREATE INDEX tracks_uploader ON tracks(uploaded_by,id);
 CREATE TABLE scan_stamps (track_id TEXT PRIMARY KEY REFERENCES tracks(id), stamp TEXT NOT NULL);
 CREATE TABLE metadata_overrides (track_id TEXT NOT NULL REFERENCES tracks(id),field TEXT NOT NULL,value TEXT NOT NULL,PRIMARY KEY(track_id,field));
-CREATE TABLE playlists (id TEXT PRIMARY KEY,payload TEXT NOT NULL,version INTEGER NOT NULL,owner_id TEXT REFERENCES users(id),system INTEGER NOT NULL DEFAULT 0,sort_order INTEGER NOT NULL DEFAULT 0,visibility TEXT NOT NULL DEFAULT 'private' CHECK(visibility IN ('private','public')),published_at TEXT NOT NULL DEFAULT '',CHECK((system=1 AND owner_id IS NULL AND id='library') OR (system=0 AND owner_id IS NOT NULL AND id!='library')));
+CREATE TABLE playlists (id TEXT PRIMARY KEY,payload TEXT NOT NULL,version INTEGER NOT NULL,owner_id TEXT REFERENCES users(id),system INTEGER NOT NULL DEFAULT 0,sort_order INTEGER NOT NULL DEFAULT 0,visibility TEXT NOT NULL DEFAULT 'private' CHECK(visibility IN ('private','public','shared')),published_at TEXT NOT NULL DEFAULT '',CHECK((system=1 AND owner_id IS NULL AND id='library') OR (system=0 AND owner_id IS NOT NULL AND id!='library')));
 CREATE INDEX playlists_owner_order ON playlists(owner_id,sort_order,id);
 CREATE INDEX playlists_public ON playlists(visibility,published_at,id);
 CREATE TABLE playlist_tombstones (id TEXT PRIMARY KEY);
 CREATE TABLE subscriptions (user_id TEXT NOT NULL REFERENCES users(id),playlist_id TEXT NOT NULL,last_name TEXT NOT NULL,version INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL,PRIMARY KEY(user_id,playlist_id));
 CREATE INDEX subscriptions_source ON subscriptions(playlist_id,user_id);
+CREATE TABLE playlist_invitations (id TEXT PRIMARY KEY,playlist_id TEXT NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,inviter_id TEXT NOT NULL REFERENCES users(id),recipient_id TEXT NOT NULL REFERENCES users(id),state TEXT NOT NULL CHECK(state IN ('pending','accepted','declined','revoked')),version INTEGER NOT NULL,last_name TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(playlist_id,recipient_id),CHECK(inviter_id!=recipient_id));
+CREATE INDEX invitations_recipient ON playlist_invitations(recipient_id,updated_at DESC,id);
 CREATE TABLE subscription_notes (user_id TEXT NOT NULL,playlist_id TEXT NOT NULL,track_id TEXT NOT NULL REFERENCES tracks(id),note TEXT NOT NULL,PRIMARY KEY(user_id,playlist_id,track_id),FOREIGN KEY(user_id,playlist_id) REFERENCES subscriptions(user_id,playlist_id) ON DELETE CASCADE);
 CREATE TABLE playlist_tracks (playlist_id TEXT NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,track_id TEXT NOT NULL REFERENCES tracks(id),position INTEGER NOT NULL,note TEXT NOT NULL DEFAULT '',PRIMARY KEY(playlist_id,track_id),UNIQUE(playlist_id,position));
 CREATE INDEX playlist_member ON playlist_tracks(track_id);
@@ -47,7 +49,7 @@ CREATE TABLE upload_staging (id TEXT PRIMARY KEY,original_name TEXT NOT NULL,siz
 CREATE TABLE api_call_stats (key_id TEXT PRIMARY KEY,total_requests INTEGER NOT NULL DEFAULT 0,success_requests INTEGER NOT NULL DEFAULT 0,failure_requests INTEGER NOT NULL DEFAULT 0,total_bytes INTEGER NOT NULL DEFAULT 0,total_duration_ms INTEGER NOT NULL DEFAULT 0,last_called_at TEXT NOT NULL DEFAULT '',last_status INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE changes (revision INTEGER PRIMARY KEY,kind TEXT NOT NULL,entity_id TEXT NOT NULL,deleted INTEGER NOT NULL);
 CREATE TABLE audit (id INTEGER PRIMARY KEY AUTOINCREMENT,actor TEXT NOT NULL,action TEXT NOT NULL,entity_id TEXT NOT NULL,changes TEXT NOT NULL,created_at TEXT NOT NULL,actor_type TEXT NOT NULL,user_id TEXT NOT NULL DEFAULT '',credential_id TEXT NOT NULL DEFAULT '');
-PRAGMA user_version=6;
+PRAGMA user_version=7;
 `
 
 type sqlReader interface {

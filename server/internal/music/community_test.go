@@ -148,7 +148,7 @@ func TestCommunityEditorVisibilityIsAtomic(t *testing.T) {
 	if saved.Visibility != "public" || saved.Name != "Published title" || saved.CoverID == "" || saved.Version != p.Version+1 {
 		t.Fatal("editor did not publish atomically")
 	}
-	invalid := "shared"
+	invalid := "unlisted"
 	if _, err := api.store.SavePlaylistEditor(p.ID, "Must not apply", "", nil, false, MutationOptions{UserID: a.ID, ExpectedVersion: saved.Version, PlaylistVisibility: &invalid}); err == nil {
 		t.Fatal("unimplemented visibility accepted")
 	}
