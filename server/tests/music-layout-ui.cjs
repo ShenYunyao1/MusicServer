@@ -16,7 +16,7 @@ module.exports=async function({page,directory}){
  await page.setViewportSize({width:1440,height:1100});await page.waitForFunction(()=>document.querySelector('.main').getBoundingClientRect().left>=231);
  await page.click('[data-page="playlists"]');await page.waitForFunction(()=>state.page==='playlists');
  assert.equal(await page.locator('.playlist-card[data-id="library"]').count(),0);
- await page.locator('.playlist-card button').filter({hasText:'打开'}).first().click();await page.locator('#playlistDetail').waitFor({state:'visible'});
+ await page.locator('.playlist-card').first().click();await page.locator('#playlistDetail').waitFor({state:'visible'});
  assert.ok((await page.locator('#playlistDetail').textContent()).includes('Browser cue'));
  await require('./page-headings-ui.cjs').assertHeading(page,'Browser playlist');
  assert.equal(await page.locator('#page-playlists > .page-intro').isVisible(),false);

@@ -82,24 +82,22 @@ function renderPlaylists(){
   $('playlistCount').textContent=playlists.length+' 个私人歌单';$('playlistList').replaceChildren();
   if(!playlists.length)$('playlistList').innerHTML='<div class="panel empty">'+(query?'没有匹配的歌单。':'还没有私人歌单，点击“新建歌单”开始。')+'</div>';
   for(const p of playlists){
-    const card=document.createElement('article');card.className='playlist-card';card.draggable=true;card.dataset.id=p.id;
+    const card=document.createElement('article');card.className='playlist-card';card.tabIndex=0;card.setAttribute('role','link');card.setAttribute('aria-label','打开歌单：'+p.name);card.dataset.id=p.id;card.dataset.sortId=p.id;
     card.innerHTML='<span class="cover">'+txt((p.name||'♪').slice(0,1))+'</span><div class="playlist-info"><div class="playlist-title">'+txt(p.name)+'</div><div class="playlist-desc">'+txt(p.description||'暂无描述')+'</div><div class="playlist-meta">'+members(p).size+' 首曲目 · 私人歌单</div></div><div class="playlist-actions"></div>';
-    const actions=card.querySelector('.playlist-actions');actions.append(makeButton('打开',()=>location.hash='#/playlists/'+p.id,'btn small primary'));
-    actions.append(makeButton('更多',e=>{e.stopPropagation();showPlaylistMenu(e,p)},'btn small'));
-    const order=document.createElement('select');order.className='playlist-order';order.setAttribute('aria-label','调整歌单顺序：'+p.name);
-    const all=state.playlists.filter(p=>!p.system);all.forEach((target,index)=>{const option=document.createElement('option');option.value=target.id;option.textContent='第 '+(index+1)+' 位';option.selected=target.id===p.id;order.append(option)});order.onchange=()=>reorder(p.id,order.value);actions.append(order);
-    card.oncontextmenu=e=>{e.preventDefault();showPlaylistMenu(e,p)};
-    card.ondragstart=()=>{state.dragId=p.id;card.classList.add('dragging')};card.ondragend=()=>{state.dragId=null;card.classList.remove('dragging')};
-    card.ondragover=e=>{if(state.dragId&&state.dragId!==p.id)e.preventDefault()};card.ondrop=e=>{e.preventDefault();if(state.dragId&&state.dragId!==p.id)reorder(state.dragId,p.id)};
+    card.querySelector('.playlist-actions').remove();
+    card.onclick=()=>location.hash='#/playlists/'+p.id;
+    card.oncontextmenu=e=>playlistItemMenu(e,p,card);
+    card.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();card.click()}if(e.key==='ContextMenu'||e.shiftKey&&e.key==='F10')playlistItemMenu(e,p,card)};
     $('playlistList').append(card);
   }
+  bindPlaylistSorting($('playlistList'),'.playlist-card',savePlaylistOrder,{disabled:()=>Boolean($('playlistSearch').value.trim())||state.playlistSortBusy});
 }
 function renderPlaylistDetail(p){
   const detail=$('playlistDetail');detail.replaceChildren();
   if(state.page==='playlists')document.title=p.name+' · 我的歌单 · 音乐服务器';
   const intro=document.createElement('div');intro.className='page-intro';intro.innerHTML='<div><p>我的歌单 / 私人歌单</p><h1>'+txt(p.name)+'</h1><p>'+txt(p.description||'')+'</p></div><div class="actions"></div>';
-  const actions=intro.querySelector('.actions');const back=makeButton('返回歌单',()=>showPage('playlists'));back.dataset.backPlaylists='';
-  const edit=makeButton('编辑信息',()=>editPlaylist(p));edit.dataset.editPlaylist='';const add=makeButton('添加曲目',()=>openPlaylistTrackPicker(p),'btn primary');add.dataset.addMembers='';actions.append(back,edit,add);detail.append(intro);
+  const actions=intro.querySelector('.actions');const back=makeButton('← 我的歌单',()=>showPage('playlists'));back.dataset.backPlaylists='';back.classList.add('page-back');
+  const edit=makeButton('编辑歌单',()=>editPlaylist(p));edit.dataset.editPlaylist='';const add=makeButton('添加曲目',()=>openPlaylistTrackPicker(p),'btn primary');add.dataset.addMembers='';actions.append(edit,add);detail.append(back,intro);
   const count=document.createElement('p');count.className='status';count.textContent=members(p).size+' 首曲目 · 个人备注仅属于此歌单';detail.append(count);
   const list=document.createElement('div');list.className='playlist-tracks';
   const tracks=[...members(p)].map(id=>state.tracks.find(t=>t.id===id)||{id,title:'不可用曲目',removed:true});

@@ -106,6 +106,7 @@ async function main() {
     await page.click('#saveModal');
     await page.waitForFunction(() => state.playlists.find(playlist => playlist.name === 'Browser playlist').track_notes?.[state.tracks[0].id] === 'Browser cue');
     await require('./music-layout-ui.cjs')({page,directory});
+    await require('./playlist-ui.cjs')({page,directory,browser});
     await page.evaluate(() => editTrack(state.tracks[0]));
     await page.evaluate(async () => { await api('tracks/' + state.tracks[0].id, 'PATCH', { comment: 'Concurrent edit' }, undefined, state.tracks[0].version); });
     await page.fill('[data-field="title"]', 'Stale edit');
