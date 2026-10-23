@@ -411,6 +411,11 @@ func ExtractRelease(archive, dest string, expected Manifest) error {
 		}
 		_, e = io.Copy(out, tr)
 		if e == nil {
+			// The root worker uses UMask=0027. Explicit permissions are needed
+			// so the unprivileged service can read and execute this release.
+			e = out.Chmod(mode)
+		}
+		if e == nil {
 			e = out.Sync()
 		}
 		ce := out.Close()

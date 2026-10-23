@@ -104,11 +104,10 @@ func TestSystemdInstallAndRollback(t *testing.T) {
 		if e != nil {
 			return Manifest{}, "", e
 		}
-		if e = os.WriteFile(filepath.Join(dir, "musicserver"), data, 0755); e != nil {
-			return Manifest{}, "", e
-		}
-		e = atomicJSON(filepath.Join(dir, "build.json"), manifest, 0644)
-		return manifest, dir, e
+		// Exercise the real extraction path under the production worker's
+		// umask, then actually start it as the non-root fixture account.
+		extractRestricted(t, testReleaseArchive(t, data, manifest), dir, manifest)
+		return manifest, dir, nil
 	}
 	_, previous, err := prepare(context.Background(), old.Version)
 	if err != nil {

@@ -56,6 +56,8 @@ cat /var/lib/musicserver-update/job.json
 
 更新器仅替换主程序和对应 `build.json`；不自动改 root 配置、systemd 模板或独立更新器本身。后续若更新协议、信任公钥或服务模板变化，发行说明会要求管理员更新这些组件。发行私钥保存在 GitHub Actions 的 `UPDATE_SIGNING_KEY` Secret 中，不进入仓库、发行包或云服务器；本地打包默认不签名，不能被自动安装器接受。
 
+0.14.0/0.15.0 的旧更新器受 UMask=0027 影响，可能使新程序仅 root 可执行，健康检查失败后自动回退。升级到 0.15.1 前，先从已验证的正式包通过 SSH 替换 `/usr/local/lib/musicserver/musicserver-updater`（root 所有、0755），再从网页发起升级。不能仅升级主程序而继续使用旧 root 更新器。
+
 数据库备份不包含媒体、暂存文件和配置，应独立备份。下载、已解包程序及备份暂不自动删除；按容量手工归档，至少保留 current、上一个成功版本和最近备份。安装器在下载前检查可用空间，但其他进程同时占用磁盘仍可能导致失败。
 
 Windows 用于本地开发，支持检查发行版本；自动停机安装限 Linux systemd。Windows 手工更新须停止服务、备份 `build/data` 和媒体，再替换固定 `build/musicserver.exe`，不能覆盖运行数据。
