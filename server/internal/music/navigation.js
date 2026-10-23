@@ -156,11 +156,13 @@ function displayWorkspacePage(page) {
 let routeGeneration=0;
 async function restoreWorkspaceRoute() {
   if(!state.user || state.user.must_change_password)return;
+  if(!permitPlaylistNavigation(location.hash))return;
   const generation=++routeGeneration;
   if(!location.hash || location.hash==='#/') {history.replaceState(null,'','#/'+pageRoutes[isAdministrator()?'overview':'tracks']);}
   const path=location.hash.slice(2).split('?')[0].split('/');
   let page=Object.keys(pageRoutes).find(key=>pageRoutes[key]===path.join('/'));
   if(path[0]==='playlists'&&path.length===2)page='playlists';
+  if(path[0]==='playlists'&&path.length===3&&path[2]==='edit')page='playlists';
   if(path[0]==='admin'&&path[1]==='users'&&path.length===3)page='users';
   if(path[0]==='admin'&&path[1]==='library'&&path.length===3&&['scan','missing','removed'].includes(path[2]))page='maintenance';
   if(path[0]==='admin'&&path[1]==='settings'&&path.length===3&&['general','backup','update','audit'].includes(path[2]))page='settings';
@@ -172,8 +174,12 @@ async function restoreWorkspaceRoute() {
     renderStatsUsers();
     displayWorkspacePage(page);
     if(page==='playlists') {
+      state.playlistEditing=path[2]==='edit';
       state.playlistDetailId=path[1]||null;
-      if(state.playlistDetailId&&!state.playlists.some(p=>p.id===state.playlistDetailId&&!p.system))throw new Error('歌单不存在或当前账户无权访问。');
+      if(state.playlistDetailId&&!state.playlists.some(p=>p.id===state.playlistDetailId&&!p.system)){
+        if(state.playlistEditing&&isAdministrator()){const detail=await api('playlists/'+state.playlistDetailId);if(generation!==routeGeneration)return;state.managedPlaylistEdit=detail.playlist}
+        else throw new Error('歌单不存在或当前账户无权访问。');
+      }
       renderPlaylists();
     }
     if(page==='tracks'){
@@ -193,6 +199,7 @@ async function restoreWorkspaceRoute() {
       state.managedUserID=path[2]||null;await loadUsers();
       if(path[2]&&!managedUser())throw new Error('用户不存在或无法读取。');
     }
+    restorePlaylistScroll();
   } catch(error) {
     if(generation!==routeGeneration||!state.user)return;
     state.page='unavailable';document.querySelectorAll('.page').forEach(el=>el.classList.remove('active'));

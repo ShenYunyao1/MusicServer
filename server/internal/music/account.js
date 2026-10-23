@@ -33,6 +33,7 @@ const memberPlayer=document.createElement('audio');memberPlayer.id='memberPlayer
 function playTrack(track){if(track.missing || track.removed)return;memberPlayer.src='/api/v2/media/'+encodeURIComponent(track.id);memberPlayer.hidden=false;$('previewBar').hidden=false;$('previewTitle').textContent=track.title||'未命名曲目';memberPlayer.play().catch(error=>setStatus(error.message,'error'))}
 
 function setLoggedOut() {
+  if(typeof disposePlaylistDraft==='function')disposePlaylistDraft();
   if(typeof hideNavTooltip==='function')hideNavTooltip();
   for (const upload of state.uploads) {
     invalidateLocalParse(upload);

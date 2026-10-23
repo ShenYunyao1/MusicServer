@@ -71,7 +71,9 @@ async function deleteSelectedTracks(){
   await run(async()=>{let completed=0;try{for(const t of tracks){await api('tracks/'+t.id,'DELETE',undefined,undefined,t.version);completed++}}catch(error){throw new Error('已处理 '+completed+' / '+tracks.length+' 首；'+error.message)}finally{state.selectedTrackIds.clear();await refreshCore()}});
 }
 function renderPlaylists(){
-  const detail=state.playlists.find(p=>p.id===state.playlistDetailId&&!p.system);
+  const detail=state.playlists.find(p=>p.id===state.playlistDetailId&&!p.system)||(state.playlistEditing?state.managedPlaylistEdit:null);
+  if(state.playlistEditing&&detail){$('playlistBrowse').hidden=true;$('playlistDetail').hidden=true;$('page-playlists').querySelector(':scope > .page-intro').hidden=true;renderPlaylistEditor(detail);return}
+  playlistEditor.hidden=true;
   $('playlistBrowse').hidden=Boolean(detail);$('playlistDetail').hidden=!detail;
   $('page-playlists').querySelector(':scope > .page-intro').hidden=Boolean(detail);
   $('newPlaylist').hidden=Boolean(detail);
@@ -85,10 +87,11 @@ function renderPlaylists(){
     const card=document.createElement('article');card.className='playlist-card';card.tabIndex=0;card.setAttribute('role','link');card.setAttribute('aria-label','打开歌单：'+p.name);card.dataset.id=p.id;card.dataset.sortId=p.id;
     card.innerHTML='<span class="cover">'+txt((p.name||'♪').slice(0,1))+'</span><div class="playlist-info"><div class="playlist-title">'+txt(p.name)+'</div><div class="playlist-desc">'+txt(p.description||'暂无描述')+'</div><div class="playlist-meta">'+members(p).size+' 首曲目 · 私人歌单</div></div><div class="playlist-actions"></div>';
     card.querySelector('.playlist-actions').remove();
-    card.onclick=()=>location.hash='#/playlists/'+p.id;
+    card.onclick=()=>{state.playlistListScrollY=scrollY;location.hash='#/playlists/'+p.id;scrollTo(0,0)};
     card.oncontextmenu=e=>playlistItemMenu(e,p,card);
     card.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();card.click()}if(e.key==='ContextMenu'||e.shiftKey&&e.key==='F10')playlistItemMenu(e,p,card)};
     $('playlistList').append(card);
+    if(p.cover_id)loadCover(card.querySelector('.cover'),'covers/'+encodeURIComponent(p.cover_id));
   }
   bindPlaylistSorting($('playlistList'),'.playlist-card',savePlaylistOrder,{disabled:()=>Boolean($('playlistSearch').value.trim())||state.playlistSortBusy});
 }
@@ -96,7 +99,7 @@ function renderPlaylistDetail(p){
   const detail=$('playlistDetail');detail.replaceChildren();
   if(state.page==='playlists')document.title=p.name+' · 我的歌单 · 音乐服务器';
   const intro=document.createElement('div');intro.className='page-intro';intro.innerHTML='<div><p>我的歌单 / 私人歌单</p><h1>'+txt(p.name)+'</h1><p>'+txt(p.description||'')+'</p></div><div class="actions"></div>';
-  const actions=intro.querySelector('.actions');const back=makeButton('← 我的歌单',()=>showPage('playlists'));back.dataset.backPlaylists='';back.classList.add('page-back');
+  const actions=intro.querySelector('.actions');const back=makeButton('← 我的歌单',returnPlaylistList);back.dataset.backPlaylists='';back.classList.add('page-back');
   const edit=makeButton('编辑歌单',()=>editPlaylist(p));edit.dataset.editPlaylist='';const add=makeButton('添加曲目',()=>openPlaylistTrackPicker(p),'btn primary');add.dataset.addMembers='';actions.append(edit,add);detail.append(back,intro);
   const count=document.createElement('p');count.className='status';count.textContent=members(p).size+' 首曲目 · 个人备注仅属于此歌单';detail.append(count);
   const list=document.createElement('div');list.className='playlist-tracks';

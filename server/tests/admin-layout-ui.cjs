@@ -11,6 +11,9 @@ module.exports=async function({page,directory,accounts}){
  await page.click('[data-resource-kind="playlists"]');await page.waitForFunction(()=>location.hash.includes('kind=playlists')&&document.querySelector('#userResourceKind').value==='playlists');
  await page.reload();await page.waitForFunction(()=>state.managedUserID&&document.querySelector('#status').textContent==='已登录');
  assert.equal(await page.locator('#userResourceKind').inputValue(),'playlists');assert.ok((await page.locator('#userResourcesTitle').textContent()).includes('browser-bob'));
+ await page.locator('#userResources button').filter({hasText:'查看 / 编辑'}).first().click();await page.locator('#playlistEditName').waitFor();await require('./page-headings-ui.cjs').assertHeading(page,'编辑歌单');
+ assert.ok((await page.locator('#playlistEditor').textContent()).includes('管理查看'));
+ await page.click('#playlistEditBack');await page.waitForFunction(()=>state.page==='users'&&state.managedUserID);
  await page.screenshot({path:path.join(directory,'user-detail.png'),fullPage:true});
  await page.click('#backUsers');await page.locator('#createUser').waitFor({state:'visible'});
  await require('./page-headings-ui.cjs').assertHeading(page,'用户管理');
