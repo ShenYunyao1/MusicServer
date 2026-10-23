@@ -4,6 +4,7 @@ package main
 import (
 	"crypto/ed25519"
 	"crypto/sha256"
+	"debug/buildinfo"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -73,6 +74,22 @@ func run() error {
 			names = append(names, "musicserver-updater")
 		}
 		for _, name := range names {
+			info, e := buildinfo.ReadFile(filepath.Join(*input, name))
+			if e != nil {
+				return e
+			}
+			revision, dirty := "", ""
+			for _, setting := range info.Settings {
+				if setting.Key == "vcs.revision" {
+					revision = setting.Value
+				}
+				if setting.Key == "vcs.modified" {
+					dirty = setting.Value
+				}
+			}
+			if revision != commit || dirty != "false" {
+				return fmt.Errorf("%s is stale or built from uncommitted changes; rebuild from this clean commit", name)
+			}
 			data, e := os.ReadFile(filepath.Join(*input, name))
 			if e != nil {
 				return e

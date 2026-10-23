@@ -10,7 +10,9 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +27,18 @@ func TestSystemdInstallAndRollback(t *testing.T) {
 	}
 	root := t.TempDir()
 	os.Chmod(root, 0755)
+	os.Chmod(filepath.Dir(root), 0755)
+	account := fmt.Sprintf("musicserver-test-%d", os.Getpid())
+	if out, err := exec.Command("useradd", "--system", "--no-create-home", account).CombinedOutput(); err != nil {
+		t.Fatalf("create fixture user: %v %s", err, out)
+	}
+	defer exec.Command("userdel", account).Run()
+	identity, err := user.Lookup(account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uid, _ := strconv.Atoi(identity.Uid)
+	gid, _ := strconv.Atoi(identity.Gid)
 	releases := filepath.Join(root, "releases")
 	os.Mkdir(releases, 0755)
 	unit := fmt.Sprintf("musicserver-update-test-%d.service", os.Getpid())
@@ -54,7 +68,10 @@ func TestSystemdInstallAndRollback(t *testing.T) {
 	}
 	address := listener.Addr().String()
 	listener.Close()
-	database := filepath.Join(root, "library.sqlite")
+	dataDir := filepath.Join(root, "data")
+	os.Mkdir(dataDir, 0700)
+	os.Chown(dataDir, uid, gid)
+	database := filepath.Join(dataDir, "library.sqlite")
 	db, err := sql.Open("sqlite", database)
 	if err != nil {
 		t.Fatal(err)
@@ -64,6 +81,7 @@ func TestSystemdInstallAndRollback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	os.Chown(database, uid, gid)
 	old := Manifest{Version: "0.13.0", Commit: strings.Repeat("1", 40), Schema: 7}
 	prepare := func(_ context.Context, v string) (Manifest, string, error) {
 		manifest := Manifest{Version: v, Commit: strings.Repeat("2", 40), Schema: 7}
@@ -87,14 +105,14 @@ func TestSystemdInstallAndRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	os.Symlink(previous, filepath.Join(root, "current"))
-	body := fmt.Sprintf("[Service]\nExecStart=%s/current/musicserver\nEnvironment=TEST_DATABASE=%s\nEnvironment=TEST_ADDRESS=%s\n", root, database, address)
+	body := fmt.Sprintf("[Service]\nUser=%s\nExecStart=%s/current/musicserver\nEnvironment=TEST_DATABASE=%s\nEnvironment=TEST_ADDRESS=%s\nProtectSystem=strict\nNoNewPrivileges=true\nReadWritePaths=%s\n", account, root, database, address, dataDir)
 	if err = os.WriteFile(unitPath, []byte(body), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if out, err := exec.Command("systemctl", "daemon-reload").CombinedOutput(); err != nil {
 		t.Fatalf("daemon reload: %v %s", err, out)
 	}
-	i := Installer{Config: InstallConfig{Root: root, State: filepath.Join(root, "state"), Database: database}, Stop: command("stop"), Start: command("start"), Prepare: prepare, Backup: func(p string) error { return backupDatabase(database, p) }, Restore: func(p string) error { return copyRegular(p, database) }}
+	i := Installer{Config: InstallConfig{Root: root, State: filepath.Join(root, "state"), Database: database}, Stop: command("stop"), Start: command("start"), Prepare: prepare, Backup: func(p string) error { return backupDatabase(database, p) }, Restore: func(p string) error { return restoreDatabase(p, database) }}
 	i.Healthy = func(ctx context.Context, m Manifest) error {
 		ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		defer cancel()

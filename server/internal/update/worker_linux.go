@@ -62,26 +62,7 @@ func LoadInstaller(configPath string) (*Installer, error) {
 	i := &Installer{Config: config, Stop: run("stop"), Start: run("start"), Healthy: func(ctx context.Context, m Manifest) error { return HealthCheck(ctx, config.HealthURL, m) }}
 	i.Backup = func(target string) error { return backupDatabase(config.Database, target) }
 	i.Restore = func(source string) error {
-		info, err := os.Lstat(source)
-		if err != nil {
-			return err
-		}
-		stat, ok := info.Sys().(*syscall.Stat_t)
-		if !ok || !info.Mode().IsRegular() {
-			return errors.New("invalid database file")
-		}
-		if err = verifyDatabase(source); err != nil {
-			return err
-		}
-		for _, suffix := range []string{"-wal", "-shm", "-journal"} {
-			if err = os.Remove(config.Database + suffix); err != nil && !os.IsNotExist(err) {
-				return err
-			}
-		}
-		if err = copyRegular(source, config.Database); err != nil {
-			return err
-		}
-		return os.Chown(config.Database, int(stat.Uid), int(stat.Gid))
+		return restoreDatabase(source, config.Database)
 	}
 	i.Prepare = func(ctx context.Context, v string) (Manifest, string, error) {
 		m := NewManager(filepath.Join(config.State, "downloads"), func() string { return Repository })
@@ -146,6 +127,29 @@ func rootOwned(path string, directory bool) error {
 		return fmt.Errorf("%s must be root-owned, with no group/world write or symlink", path)
 	}
 	return nil
+}
+
+func restoreDatabase(source, target string) error {
+	info, err := os.Lstat(source)
+	if err != nil {
+		return err
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || !info.Mode().IsRegular() {
+		return errors.New("invalid database backup")
+	}
+	if err = verifyDatabase(source); err != nil {
+		return err
+	}
+	for _, suffix := range []string{"-wal", "-shm", "-journal"} {
+		if err = os.Remove(target + suffix); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	if err = copyRegular(source, target); err != nil {
+		return err
+	}
+	return os.Chown(target, int(stat.Uid), int(stat.Gid))
 }
 
 func backupDatabase(source, target string) error {
