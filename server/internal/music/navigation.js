@@ -101,14 +101,16 @@ let tooltipOwner=null;
 function hideNavTooltip(){navTooltip.hidden=true;if(tooltipOwner)tooltipOwner.removeAttribute('aria-describedby');tooltipOwner=null}
 function showNavTooltip(button){
   if(!sidebarCollapsed||sidebarBreakpoint.matches)return;
+  const rect=button.getBoundingClientRect(),bounds=nav.getBoundingClientRect();
+  if(rect.bottom<=bounds.top||rect.top>=bounds.bottom){hideNavTooltip();return}
   hideNavTooltip();tooltipOwner=button;navTooltip.textContent=button.getAttribute('aria-label');button.setAttribute('aria-describedby','navTooltip');navTooltip.hidden=false;
-  const rect=button.getBoundingClientRect();navTooltip.style.left=Math.min(rect.right+12,innerWidth-navTooltip.offsetWidth-8)+'px';navTooltip.style.top=Math.max(8,Math.min(rect.top+(rect.height-navTooltip.offsetHeight)/2,innerHeight-navTooltip.offsetHeight-8))+'px';
+  navTooltip.style.left=Math.min(rect.right+12,innerWidth-navTooltip.offsetWidth-8)+'px';navTooltip.style.top=Math.max(8,Math.min(rect.top+(rect.height-navTooltip.offsetHeight)/2,innerHeight-navTooltip.offsetHeight-8))+'px';
 }
 for(const button of nav.querySelectorAll('[data-page]')){
   button.addEventListener('pointerenter',()=>showNavTooltip(button));button.addEventListener('pointerleave',()=>{if(document.activeElement!==button)hideNavTooltip()});
   button.addEventListener('focus',()=>showNavTooltip(button));button.addEventListener('blur',hideNavTooltip);
 }
-nav.addEventListener('scroll',hideNavTooltip);syncSidebarControls();
+nav.addEventListener('scroll',()=>{const focused=document.activeElement;if(nav.contains(focused)&&focused.matches('button[data-page]'))showNavTooltip(focused);else hideNavTooltip()});syncSidebarControls();
 const navBackdrop = makeButton('',()=>closeMobileNav());navBackdrop.id='navBackdrop';navBackdrop.setAttribute('aria-label','关闭导航');document.querySelector('.app').append(navBackdrop);
 function closeMobileNav(){document.body.classList.remove('mobile-nav-open');menuToggle.setAttribute('aria-expanded','false');hideNavTooltip()}
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeMobileNav();accountMenu.open=false}});

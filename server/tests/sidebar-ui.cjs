@@ -40,7 +40,12 @@ module.exports=async function({page,directory}){
  assert.equal(await page.locator('.brand').evaluate(el=>el.getBoundingClientRect().top>=0),true);
  assert.equal(await page.locator('.sidebar-foot').evaluate(el=>el.getBoundingClientRect().bottom<=innerHeight+1),true);
  await page.locator('.nav').hover();await page.screenshot({path:path.join(directory,'sidebar-short.png')});
- await page.click('#collapse');await page.setViewportSize({width:390,height:844});
+ await page.click('#collapse');await page.waitForFunction(()=>document.querySelector('#sidebar').getBoundingClientRect().width<=73);
+ await page.locator('.nav').evaluate(el=>el.scrollTop=0);await page.locator('.nav [data-page="settings"]').focus();
+ await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+ assert.equal(await page.locator('#navTooltip').isVisible(),true,'Keyboard focus must retain its label after scrolling to the last item');
+ assert.equal(await page.locator('#navTooltip').textContent(),'系统设置');
+ await page.setViewportSize({width:390,height:844});
  await page.click('#menuToggle');await page.waitForFunction(()=>document.querySelector('#sidebar').getBoundingClientRect().left>=-1);
  assert.equal(Math.round((await page.locator('#sidebar').boundingBox()).width),232,'Mobile drawer must ignore desktop collapsed width');
  assert.equal(await page.locator('.brand-text').isVisible(),true);assert.equal(await page.locator('#collapse').isVisible(),false);
