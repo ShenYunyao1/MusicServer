@@ -372,7 +372,18 @@ func (s *Store) PutPlaylist(playlist Playlist, options ...MutationOptions) error
 			playlist.SortOrder = before.SortOrder
 			playlist.CoverID = before.CoverID
 			playlist.CoverMIME = before.CoverMIME
+			playlist.Visibility = before.Visibility
+			playlist.PublishedAt = before.PublishedAt
 		} else {
+			var retired bool
+			if err := tx.QueryRow("SELECT EXISTS(SELECT 1 FROM playlist_tombstones WHERE id=?)", playlist.ID).Scan(&retired); err != nil {
+				return err
+			}
+			if retired {
+				return errors.New("deleted playlist ID cannot be reused")
+			}
+			playlist.Visibility = "private"
+			playlist.PublishedAt = time.Time{}
 			playlist.CoverID, playlist.CoverMIME = "", ""
 			owner, err := internalOwner(tx, options)
 			if err != nil {
@@ -401,6 +412,9 @@ func (s *Store) PutPlaylist(playlist Playlist, options ...MutationOptions) error
 	})
 }
 func (s *Store) mutatePlaylist(id string, members bool, edit func(*Playlist) error, options ...MutationOptions) (Playlist, error) {
+	return s.mutatePlaylistAction(id, members, "playlist.update", edit, options...)
+}
+func (s *Store) mutatePlaylistAction(id string, members bool, action string, edit func(*Playlist) error, options ...MutationOptions) (Playlist, error) {
 	var result Playlist
 	err := s.transaction(func(tx *sql.Tx) error {
 		before, err := readPlaylistFrom(tx, id)
@@ -442,7 +456,7 @@ func (s *Store) mutatePlaylist(id string, members bool, edit func(*Playlist) err
 		if err := recordChange(tx, "playlist", id, false); err != nil {
 			return err
 		}
-		return auditMutation(tx, "playlist.update", id, before, result, options)
+		return auditMutation(tx, action, id, before, result, options)
 	})
 	return result, err
 }
@@ -615,7 +629,7 @@ func (s *Store) DeletePlaylist(id string, options ...MutationOptions) error {
 		}
 		for _, key := range keys {
 			index := slices.Index(key.AllowedPlaylistIDs, id)
-			if index >= 0 {
+			if index >= 0 && !hasSubscription(tx, key.UserID, id) {
 				key.AllowedPlaylistIDs = slices.Delete(key.AllowedPlaylistIDs, index, index+1)
 				if err := saveKey(tx, key); err != nil {
 					return err
@@ -624,6 +638,14 @@ func (s *Store) DeletePlaylist(id string, options ...MutationOptions) error {
 		}
 		if _, err := tx.Exec("DELETE FROM playlists WHERE id=?", id); err != nil {
 			return err
+		}
+		if _, err := tx.Exec("INSERT INTO playlist_tombstones(id) VALUES(?)", id); err != nil {
+			return err
+		}
+		if before.Visibility == "public" {
+			if err := bumpPublicCatalog(tx); err != nil {
+				return err
+			}
 		}
 		if err := recordChange(tx, "playlist", id, true); err != nil {
 			return err

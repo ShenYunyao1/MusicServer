@@ -1,6 +1,7 @@
 package music
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,7 +10,7 @@ import (
 func TestMultiuserSchemaOwnership(t *testing.T) {
 	api, _ := testAPI(t)
 	var schema int
-	if err := api.store.db.QueryRow("PRAGMA user_version").Scan(&schema); err != nil || schema != 5 {
+	if err := api.store.db.QueryRow("PRAGMA user_version").Scan(&schema); err != nil || schema != 6 {
 		t.Fatalf("schema: %d %v", schema, err)
 	}
 	var owner, uploader string
@@ -29,28 +30,30 @@ func TestMultiuserSchemaOwnership(t *testing.T) {
 	}
 }
 
-func TestMultiuserSchemaRefusesOldFourUntouched(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "old.sqlite")
-	db, err := openSQLite(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = db.Exec("PRAGMA user_version=4; CREATE TABLE preserved(value TEXT); INSERT INTO preserved VALUES('keep')"); err != nil {
-		t.Fatal(err)
-	}
-	if err = db.Close(); err != nil {
-		t.Fatal(err)
-	}
-	before, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if store, err := NewStore(path, t.TempDir()); err == nil {
-		store.Close()
-		t.Fatal("old schema accepted")
-	}
-	after, err := os.ReadFile(path)
-	if err != nil || string(before) != string(after) {
-		t.Fatal("old database was modified")
+func TestMultiuserSchemaRefusesOldFourAndFiveUntouched(t *testing.T) {
+	for _, oldVersion := range []int{4, 5} {
+		path := filepath.Join(t.TempDir(), "old.sqlite")
+		db, err := openSQLite(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = db.Exec(fmt.Sprintf("PRAGMA user_version=%d; CREATE TABLE preserved(value TEXT); INSERT INTO preserved VALUES('keep')", oldVersion)); err != nil {
+			t.Fatal(err)
+		}
+		if err = db.Close(); err != nil {
+			t.Fatal(err)
+		}
+		before, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if store, err := NewStore(path, t.TempDir()); err == nil {
+			store.Close()
+			t.Fatal("old schema accepted")
+		}
+		after, err := os.ReadFile(path)
+		if err != nil || string(before) != string(after) {
+			t.Fatal("old database was modified")
+		}
 	}
 }

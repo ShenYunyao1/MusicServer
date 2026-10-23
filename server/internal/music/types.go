@@ -33,6 +33,13 @@ type Track struct {
 }
 
 type Playlist struct {
+	Visibility          string            `json:"visibility"`
+	PublishedAt         time.Time         `json:"published_at,omitzero"`
+	ReadOnly            bool              `json:"read_only,omitempty"`
+	SubscriptionStatus  string            `json:"subscription_status,omitempty"`
+	SubscriptionReason  string            `json:"subscription_reason,omitempty"`
+	SubscriptionVersion int64             `json:"subscription_version,omitempty"`
+	SourceOwnerName     string            `json:"source_owner_name,omitempty"`
 	CoverID             string            `json:"cover_id,omitempty"`
 	CoverMIME           string            `json:"cover_mime,omitempty"`
 	UnavailableTrackIDs []string          `json:"unavailable_track_ids,omitempty"`
