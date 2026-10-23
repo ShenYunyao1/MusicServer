@@ -194,6 +194,10 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		a.accountAuth(response, request)
 		return
 	}
+	if strings.HasPrefix(request.URL.Path, "/api/v2/public/") || request.URL.Path == "/api/v2/subscriptions" || strings.HasPrefix(request.URL.Path, "/api/v2/subscriptions/") {
+		a.community(response, request)
+		return
+	}
 	if !a.authorizeResource(response, request) {
 		return
 	}
@@ -629,6 +633,29 @@ func (a *API) playlists(response http.ResponseWriter, request *http.Request) {
 
 func (a *API) playlist(response http.ResponseWriter, request *http.Request) {
 	id := strings.TrimPrefix(request.URL.Path, "/api/v2/playlists/")
+	if strings.HasSuffix(id, "/visibility") {
+		if request.Method != "PUT" {
+			writeError(response, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+			return
+		}
+		if !a.requireAccount(response, request) {
+			return
+		}
+		var body struct {
+			Visibility string `json:"visibility"`
+		}
+		if decodeStrict(request, &body) != nil {
+			writeError(response, 400, "INVALID_VISIBILITY", "invalid visibility request")
+			return
+		}
+		stored, err := a.store.SetPlaylistVisibility(strings.TrimSuffix(id, "/visibility"), body.Visibility, mutationOptions(request))
+		if err != nil {
+			writePlaylistMutationError(response, err)
+			return
+		}
+		writeJSON(response, 200, stored)
+		return
+	}
 	if strings.HasSuffix(id, "/editor") {
 		a.playlistEditor(response, request, strings.TrimSuffix(id, "/editor"))
 		return
