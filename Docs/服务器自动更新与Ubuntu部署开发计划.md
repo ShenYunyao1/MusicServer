@@ -24,9 +24,9 @@
 - [x] 核对仓库公开状态、HTTPS 读写权限与 GitHub CLI 登录；检查本地 Linux 测试环境。
 - [ ] 发布流水线：新增 `.github/workflows/server-release.yml`，测试 Go、构建 Windows/Linux 固定名称包、生成元数据、发布 Release；支持标签发布和手动触发。
 - [x] 更新协议：重构 `server/internal/update/update.go`，将检查、下载准备和安装任务分开；覆盖签名、坏校验、只检查不下载、任务持久化与关闭取消。完整安装故障用例继续验收。
-- [ ] 安装引擎：新增独立命令与 `server/internal/update/` 安装模块，安全解包、持久状态、停机备份、原子切换、重启健康检查和失败回退；用故障注入测试验证。
+- [x] 安装引擎：新增独立命令与 `server/internal/update/` 安装模块，安全解包、持久状态、停机备份、原子切换、重启健康检查和失败回退；用故障注入测试验证。
 - [ ] Ubuntu 接入：扩展 `server/deploy/` 中的 systemd 单元、配置示例与安装脚本；验证权限边界、并发锁和重启后的任务恢复。
-- [ ] 管理后台：调整 `server/internal/music/` 更新 API 和页面，显示版本、发布说明、兼容性、安装进度及失败原因；只有管理员可安装，安装前明确确认。
+- [x] 管理后台：调整 `server/internal/music/` 更新 API 和页面，显示版本、发布说明、兼容性、安装进度及失败原因；只有管理员可安装，安装前明确确认。
 - [ ] 构建文档：更新 `server/package-release.ps1`、README、更新日志和部署说明，固定产物路径与名称；说明 Windows 和 Ubuntu 支持范围。
 - [ ] 本地回归：相关单测、完整 Go 测试、vet、Windows/Linux 构建、前端交互及安装失败回退验证；逐项记录真实结果。
 - [ ] 本地提交并推送本次已验收改动，触发 Actions，核对构建日志、发行资产、版本及校验信息。
@@ -60,3 +60,6 @@
 - 已确认仓库公开且凭据有推送权限；Git remote 切换为 HTTPS。GitHub CLI 使用系统已有凭据，发行私钥已存入 Actions Secret，源码仅保存公钥。
 - 本机 WSL 仅有未运行的 docker-desktop，Docker 引擎未启动；Linux 实际 systemd 验证安排到 Ubuntu CI。
 - 首轮 Windows 完整 Go 测试与 vet 通过，Windows 主程序和 Linux 主程序／独立更新器交叉构建通过。Linux 安装、回退、中断恢复仍等待 CI，暂不勾选。
+- Ubuntu CI（运行 39934550548）已通过完整 Go 测试、race 和真实 systemd 隔离集成测试：普通服务账户运行、成功切换、错误提交健康检查拒绝、数据库恢复及更新器中断后恢复。没有连接或改动用户云服务器。
+- 完整 Playwright 管理后台回归通过（含原多用户／公开订阅／分享功能），新增更新确认、取消不安装、绑定版本、安全显示发布说明及回退结果测试；本地预览 41 项测试通过。
+- 本地 Git HTTPS 推送后续出现连接重置，改用 GitHub Git 数据 API 上传既有对象；逐项断言 blob、tree、commit SHA 与本地一致，仅快进 main，未改写提交历史。

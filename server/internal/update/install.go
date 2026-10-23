@@ -118,6 +118,9 @@ func (i *Installer) Install(ctx context.Context, r Request) (err error) {
 		if err == nil {
 			return
 		}
+		if j.Phase == "completed" {
+			return
+		} // Recovery only needs to remove the maintenance flag.
 		if stopped {
 			rollbackCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()

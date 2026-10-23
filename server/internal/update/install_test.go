@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -51,5 +52,33 @@ func TestInstallFailureRollsBackProgramAndDatabase(t *testing.T) {
 	job, err := i.loadJob()
 	if err != nil || job.Phase != "rolled_back" {
 		t.Fatalf("job=%+v err=%v", job, err)
+	}
+}
+
+func TestVerifiedInstallRetainsSuccessWhenMaintenanceCleanupFails(t *testing.T) {
+	if os.Getenv("OS") == "Windows_NT" {
+		t.Skip("Unix installation test")
+	}
+	root := t.TempDir()
+	old := filepath.Join(root, "releases", "old")
+	next := filepath.Join(root, "releases", "next")
+	os.MkdirAll(old, 0755)
+	os.MkdirAll(next, 0755)
+	os.Symlink(old, filepath.Join(root, "current"))
+	atomicJSON(filepath.Join(old, "build.json"), Manifest{Version: "0.13.0", Schema: 7}, 0644)
+	i := Installer{Config: InstallConfig{Root: root, State: filepath.Join(root, "state")}, Stop: func(context.Context) error { return nil }, Start: func(context.Context) error { return nil }, Backup: func(string) error { return nil }, Restore: func(string) error { t.Fatal("verified install must not roll back for cleanup failure"); return nil }, Prepare: func(context.Context, string) (Manifest, string, error) {
+		return Manifest{Version: "9.0.0", Schema: 7}, next, nil
+	}}
+	i.Healthy = func(context.Context, Manifest) error {
+		os.Remove(i.maintenance())
+		os.Mkdir(i.maintenance(), 0755)
+		return os.WriteFile(filepath.Join(i.maintenance(), "block-removal"), []byte("x"), 0600)
+	}
+	if err := i.Install(context.Background(), Request{ID: strings.Repeat("a", 32), Version: "9.0.0"}); err == nil {
+		t.Fatal("expected maintenance cleanup error")
+	}
+	job, err := i.loadJob()
+	if err != nil || job.Phase != "completed" {
+		t.Fatalf("verified result lost: %+v %v", job, err)
 	}
 }
