@@ -3,7 +3,7 @@
 function setupAdministration(){
   const overview=$('page-overview');
   overview.querySelector('.page-intro p').textContent='管理账户和曲库，查看需要处理的状态。';
-  const labels=['全局曲库可见曲目','用户账户','文件缺失','我的私人歌单'];
+  const labels=['全局曲库可见曲目','用户账户','文件缺失','我创建的歌单'];
   overview.querySelectorAll('.metric-label').forEach((label,index)=>label.textContent=labels[index]);
   const links=document.createElement('div');links.className='overview-links';
   for(const [label,path,description] of [
@@ -56,7 +56,7 @@ function renderOverview(){
   $('metricTracks').textContent=state.tracks.length;
   $('metricPlaylists').textContent=(state.users||[]).length;
   $('metricKeys').textContent=state.tracks.filter(t=>t.missing).length;
-  $('metricRevision').textContent=state.playlists.filter(p=>!p.system).length;
+  $('metricRevision').textContent=state.playlists.filter(p=>!p.system&&!p.read_only).length;
   $('overviewNotice').textContent='曲库统计包含当前可见曲目；私人歌单计数仅属于本人。账户 '+(state.users||[]).filter(u=>u.enabled).length+' 个已启用。服务修订版本 '+(state.revision??'—')+'。';
 }
 async function loadOverviewSummary(){

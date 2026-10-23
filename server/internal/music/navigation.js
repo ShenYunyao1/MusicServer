@@ -1,8 +1,9 @@
 'use strict';
 
-const pageRoutes = {tracks:'library', playlists:'playlists', upload:'uploads', keys:'player/keys', stats:'player/stats', overview:'admin/overview', users:'admin/users', maintenance:'admin/library/scan', settings:'admin/settings/general'};
+const pageRoutes = {tracks:'library', public:'public/playlists', playlists:'playlists', upload:'uploads', keys:'player/keys', stats:'player/stats', overview:'admin/overview', users:'admin/users', maintenance:'admin/library/scan', settings:'admin/settings/general'};
 const adminPages = new Set(['overview', 'users', 'maintenance', 'settings']);
 Object.assign(titles, {overview:'管理概览', tracks:'全局曲库', playlists:'我的歌单', upload:'上传任务', keys:'播放器接入', stats:'播放器接入', users:'用户管理', settings:'系统设置', maintenance:'曲库维护'});
+titles.public='公开歌单';
 
 function makeButton(label, action, className = 'btn') {
   const button = document.createElement('button');
@@ -16,6 +17,7 @@ function routeLink(label, path) {
 const nav = document.querySelector('.nav');
 nav.setAttribute('aria-label','主导航');
 const navIcons={
+  public:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18"/>',
   tracks:'<path d="M9 18V5l11-2v13M9 8l11-2"/><ellipse cx="6" cy="18" rx="3" ry="2"/><ellipse cx="17" cy="16" rx="3" ry="2"/>',
   playlists:'<path d="M4 5h16M4 10h16M4 15h8M17 14v6"/><ellipse cx="14.5" cy="20" rx="2.5" ry="1.8"/>',
   upload:'<path d="M12 16V3m-5 5 5-5 5 5M4 15v5h16v-5"/>',
@@ -42,7 +44,7 @@ trackDetails.addEventListener('close',()=>{$('trackDetailsBody').replaceChildren
 const clearCompleted=makeButton('清理已完成',()=>run(async()=>{for(const upload of [...state.uploads].filter(x=>['完成','已去重'].includes(x.status)))await removeUpload(upload)}));
 clearCompleted.id='clearCompleted';$('page-upload').querySelector('.queue-actions').prepend(clearCompleted);
 window.addEventListener('beforeunload',event=>{if(state.user&&state.uploads.some(x=>!['完成','已去重'].includes(x.status))){event.preventDefault();event.returnValue=''}});
-const groups = [['音乐', ['tracks','playlists','upload']], ['播放器',['keys']], ['管理',['overview','users','maintenance','settings']]];
+const groups = [['音乐', ['tracks','public','playlists','upload']], ['播放器',['keys']], ['管理',['overview','users','maintenance','settings']]];
 const maintenanceNav = makeButton('', () => showPage('maintenance'));
 maintenanceNav.dataset.page = 'maintenance';
 maintenanceNav.className='';
@@ -145,6 +147,7 @@ function displayWorkspacePage(page) {
   document.querySelectorAll('.nav [data-page]').forEach(el=>el.classList.toggle('active',el.dataset.page===page || page==='stats'&&el.dataset.page==='keys'));
   document.querySelectorAll('.nav-group[data-admin]').forEach(el=>el.hidden=!isAdministrator());
   $('accountRole').textContent=isAdministrator()?'管理员':'普通用户';
+  scheduleCommunityRefresh();
   document.title=(page==='stats'?'调用统计':titles[page])+' · 音乐服务器';
   playerTabs.hidden=!['keys','stats'].includes(page)||page==='stats'&&state.statsScope==='admin'; keyTab.classList.toggle('active',page==='keys');statsNav.classList.toggle('active',page==='stats');
   if(page==='stats'){
@@ -163,6 +166,8 @@ async function restoreWorkspaceRoute() {
   let page=Object.keys(pageRoutes).find(key=>pageRoutes[key]===path.join('/'));
   if(path[0]==='playlists'&&path.length===2)page='playlists';
   if(path[0]==='playlists'&&path.length===3&&path[2]==='edit')page='playlists';
+  if(path[0]==='subscriptions'&&(path.length===1||path.length===2))page='playlists';
+  if(path[0]==='public'&&path[1]==='playlists'&&path.length===3)page='public';
   if(path[0]==='admin'&&path[1]==='users'&&path.length===3)page='users';
   if(path[0]==='admin'&&path[1]==='library'&&path.length===3&&['scan','missing','removed'].includes(path[2]))page='maintenance';
   if(path[0]==='admin'&&path[1]==='settings'&&path.length===3&&['general','backup','update','audit'].includes(path[2]))page='settings';
@@ -173,9 +178,17 @@ async function restoreWorkspaceRoute() {
     state.statsUserID=page==='stats'&&state.statsScope==='admin'?new URLSearchParams(location.hash.split('?')[1]||'').get('user')||'':'';
     renderStatsUsers();
     displayWorkspacePage(page);
+    if(page==='public'){
+      state.publicDetailId=path[2]||null;const query=new URLSearchParams(location.hash.split('?')[1]||'');state.publicQuery=query.get('q')||'';state.publicOffset=Math.max(0,parseInt(query.get('offset'),10)||0);
+      if(state.publicDetailId)await loadPublicDetail(state.publicDetailId);else await loadPublicCatalog();
+    }
     if(page==='playlists') {
+      state.subscriptionsTab=path[0]==='subscriptions';
       state.playlistEditing=path[2]==='edit';
       state.playlistDetailId=path[1]||null;
+      if(state.subscriptionsTab){await loadMySubscriptions();if(generation!==routeGeneration)return}
+      const target=state.playlists.find(p=>p.id===state.playlistDetailId&&!p.system);
+      if(state.playlistEditing&&target?.read_only||!state.subscriptionsTab&&target?.read_only)throw new Error('请从“我订阅的”打开此歌单。');
       if(state.playlistDetailId&&!state.playlists.some(p=>p.id===state.playlistDetailId&&!p.system)){
         if(state.playlistEditing&&isAdministrator()){const detail=await api('playlists/'+state.playlistDetailId);if(generation!==routeGeneration)return;state.managedPlaylistEdit=detail.playlist}
         else throw new Error('歌单不存在或当前账户无权访问。');
@@ -200,6 +213,7 @@ async function restoreWorkspaceRoute() {
       if(path[2]&&!managedUser())throw new Error('用户不存在或无法读取。');
     }
     restorePlaylistScroll();
+    scheduleCommunityRefresh();
   } catch(error) {
     if(generation!==routeGeneration||!state.user)return;
     state.page='unavailable';document.querySelectorAll('.page').forEach(el=>el.classList.remove('active'));

@@ -137,13 +137,14 @@ type SyncResponse struct {
 }
 
 type MutationOptions struct {
-	UserID          string
-	CredentialID    string
-	ActorType       string
-	Actor           string
-	ExpectedVersion int64
-	ExpectedOrder   []string
-	CreateOnly      bool
+	PlaylistVisibility *string
+	UserID             string
+	CredentialID       string
+	ActorType          string
+	Actor              string
+	ExpectedVersion    int64
+	ExpectedOrder      []string
+	CreateOnly         bool
 }
 
 type ScanStatus struct {

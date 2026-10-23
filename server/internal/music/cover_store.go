@@ -64,6 +64,11 @@ func (s *Store) SavePlaylistEditor(id, name, description string, cover []byte, r
 		result = clonePlaylist(before)
 		result.Name = name
 		result.Description = description
+		if len(options) > 0 && options[0].PlaylistVisibility != nil {
+			if err := setPlaylistVisibility(&result, *options[0].PlaylistVisibility); err != nil {
+				return err
+			}
+		}
 		if remove {
 			result.CoverID = ""
 			result.CoverMIME = ""
@@ -127,7 +132,11 @@ func (a *API) playlistEditor(response http.ResponseWriter, request *http.Request
 			return
 		}
 	}
-	stored, err := a.store.SavePlaylistEditor(id, request.FormValue("name"), request.FormValue("description"), data, request.FormValue("remove_cover") == "true", mutationOptions(request))
+	options := mutationOptions(request)
+	if values := request.MultipartForm.Value["visibility"]; len(values) > 0 {
+		options.PlaylistVisibility = &values[0]
+	}
+	stored, err := a.store.SavePlaylistEditor(id, request.FormValue("name"), request.FormValue("description"), data, request.FormValue("remove_cover") == "true", options)
 	if err != nil {
 		writePlaylistMutationError(response, err)
 		return

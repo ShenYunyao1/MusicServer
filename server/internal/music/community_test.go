@@ -137,3 +137,23 @@ func TestCommunityTransactionAndVisibilityProtection(t *testing.T) {
 		t.Fatalf("partial subscription: %s", raw)
 	}
 }
+
+func TestCommunityEditorVisibilityIsAtomic(t *testing.T) {
+	api, a, _, p := communityFixture(t)
+	public := "public"
+	saved, err := api.store.SavePlaylistEditor(p.ID, "Published title", "Public description", tinyPNG(), false, MutationOptions{UserID: a.ID, ExpectedVersion: p.Version, PlaylistVisibility: &public})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.Visibility != "public" || saved.Name != "Published title" || saved.CoverID == "" || saved.Version != p.Version+1 {
+		t.Fatal("editor did not publish atomically")
+	}
+	invalid := "shared"
+	if _, err := api.store.SavePlaylistEditor(p.ID, "Must not apply", "", nil, false, MutationOptions{UserID: a.ID, ExpectedVersion: saved.Version, PlaylistVisibility: &invalid}); err == nil {
+		t.Fatal("unimplemented visibility accepted")
+	}
+	after, _ := api.store.Playlist(p.ID)
+	if after.Name != saved.Name || after.Version != saved.Version {
+		t.Fatal("invalid visibility partially applied")
+	}
+}
