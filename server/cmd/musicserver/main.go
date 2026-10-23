@@ -96,7 +96,8 @@ func main() {
 			}
 		}
 	}()
-	if !*noScan && !maintenance() {
+	deferredScan := !*noScan && maintenance()
+	if !*noScan && !deferredScan {
 		if _, err := store.StartScan(false); err != nil {
 			log.Printf("initial scan skipped: %v", err)
 		}
@@ -116,6 +117,20 @@ func main() {
 	handler.SetUpdater(updater)
 	updateContext, stopUpdates := context.WithCancel(context.Background())
 	defer stopUpdates()
+	deferredScanDone := make(chan struct{})
+	if deferredScan {
+		go func() {
+			defer close(deferredScanDone)
+			if waitForMaintenance(updateContext, maintenance) {
+				if _, err := store.StartScan(false); err != nil {
+					log.Printf("deferred startup scan: %v", err)
+				}
+			}
+		}()
+	} else {
+		close(deferredScanDone)
+	}
+	defer func() { stopUpdates(); <-deferredScanDone }()
 	updater.Start(updateContext)
 	server := &http.Server{Addr: *address, Handler: handler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	signalContext, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -151,4 +166,24 @@ func main() {
 	}
 	close(listenDone)
 	<-serverDone
+}
+
+func waitForMaintenance(ctx context.Context, blocked func() bool) bool {
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		default:
+		}
+		if !blocked() {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-ticker.C:
+		}
+	}
 }
