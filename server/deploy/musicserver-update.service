@@ -1,0 +1,15 @@
+[Unit]
+Description=MusicServer verified release installer
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/musicserver/musicserver-updater -config /etc/musicserver/updater.json
+TimeoutStartSec=16min
+UMask=0027
+PrivateTmp=true
+ProtectHome=true
+NoNewPrivileges=true
+# This independent service needs systemctl and ownership-preserving database restore.
+# It accepts version-only requests; all paths and executable commands are root configured.

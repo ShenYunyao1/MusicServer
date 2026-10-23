@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch MusicServer update requests
+
+[Path]
+PathExistsGlob=/var/lib/musicserver-update/queue/*.json
+Unit=musicserver-update.service
+
+[Install]
+WantedBy=multi-user.target

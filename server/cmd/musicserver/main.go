@@ -59,7 +59,20 @@ func main() {
 	if err := store.BeginServer(); err != nil {
 		log.Fatal(err)
 	}
-	if err := store.CleanupUploadStages(); err != nil {
+	maintenance := func() bool {
+		path := os.Getenv("MUSIC_SERVER_UPDATE_MAINTENANCE")
+		if path == "" {
+			return false
+		}
+		_, err := os.Stat(path)
+		return !os.IsNotExist(err)
+	}
+	if err := func() error {
+		if maintenance() {
+			return nil
+		}
+		return store.CleanupUploadStages()
+	}(); err != nil {
 		log.Printf("clean expired uploads: %v", err)
 	}
 	stopCleanup := make(chan struct{})
@@ -72,6 +85,9 @@ func main() {
 		for {
 			select {
 			case <-ticker.C:
+				if maintenance() {
+					continue
+				}
 				if err := store.CleanupUploadStages(); err != nil {
 					log.Printf("clean expired uploads: %v", err)
 				}
@@ -80,16 +96,22 @@ func main() {
 			}
 		}
 	}()
-	if !*noScan {
+	if !*noScan && !maintenance() {
 		if _, err := store.StartScan(false); err != nil {
 			log.Printf("initial scan skipped: %v", err)
 		}
 	}
 	handler := music.NewAPI(store)
 	handler.SetAuthConfig(authConfig)
+	handler.SetMaintenance(maintenance)
 	updater := update.NewManager(filepath.Join(filepath.Dir(store.DataPath()), "updates"), func() string {
-		return store.Settings().UpdateRepository
-	}, store.Backup)
+		repo := store.Settings().UpdateRepository
+		if repo == "" {
+			return update.Repository
+		}
+		return repo
+	})
+	updater.ConfigureInstaller(os.Getenv("MUSIC_SERVER_UPDATE_QUEUE"), os.Getenv("MUSIC_SERVER_UPDATE_STATE"))
 	defer updater.Close()
 	handler.SetUpdater(updater)
 	updateContext, stopUpdates := context.WithCancel(context.Background())

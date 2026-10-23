@@ -1,4 +1,4 @@
-# 音乐服务器 0.13.0
+# 音乐服务器 0.14.0
 
 Go 1.26+，SQLite schema 7，HTTP API `/api/v2`，内置中文管理页。支持 Windows 和 Linux。
 
@@ -269,7 +269,8 @@ Content-Type: application/json
 | POST | `/admin/backups` | 创建并校验 SQLite 备份，返回本机路径 |
 | GET / PATCH | `/admin/settings` | ffprobe、上传限制、扫描开关、更新仓库 |
 | GET | `/admin/stats`、`/admin/update` | 调用统计、更新状态 |
-| POST | `/admin/update/check` | 异步检查正式发布并准备更新包 |
+| POST | `/admin/update/check` | 只检查正式发布的签名元数据，不下载程序 |
+| POST | `/admin/update/apply` | 管理员确认已检查的 version，提交 Ubuntu 安装任务 |
 | GET / POST / DELETE | `/auth/keys` | 本人列出/创建 Key，撤销本人全部 Key |
 | GET | `/auth/keys/stats` | 本人 Key 统计；管理员使用 `/admin/stats?user_id=...` 筛选 |
 | GET / POST | `/admin/users` | 账户列表、创建普通成员，成功响应一次性临时密码 |
@@ -283,13 +284,13 @@ Content-Type: application/json
 
 ## 备份、恢复和更新
 
-可选 `package-release.ps1` 复用统一构建入口，生成 `build/musicserver.exe`、`build/musicserver` 和 `build/packages/musicserver-windows-amd64.zip`、`build/packages/musicserver-linux-amd64.tar.gz`，文件名不随版本变化。Windows 包仅包含程序和 README；Linux 包另含部署模板；均不包含数据库、媒体、密码或运行配置。解压后可直接运行包内程序，默认数据目录仍跟随程序位置。
+可选 `package-release.ps1` 复用统一构建入口，生成 `build/musicserver.exe`、`build/musicserver`、独立 `build/musicserver-updater` 和 `build/packages/` 的固定名称包。Windows 包包含程序、build.json 与说明；Linux 包另含独立更新器及部署模板，均不包含数据库、媒体、密码或实际运行配置。包名不随版本变化。本地打包不签名，正式签名包由 GitHub Actions 生成。
 
 管理页概览或备份接口使用 `VACUUM INTO` 生成一致的 SQLite 快照，运行 `integrity_check` 成功后才返回路径。文件位于数据库旁 `backups/`，包括曲目元数据、歌单、Key 哈希、覆盖、封面、审计等数据库内容；**不包含媒体和暂存文件**，这些目录须另外备份。未设置备份自动清理策略，应按实际容量归档或删除旧备份。
 
 恢复步骤：停止服务，保留当前数据库及媒体副本，将已校验的 schema 7 备份复制为启动 `-data` 指定的数据库，恢复匹配的媒体目录，再启动。启动会撤销旧会话；备份仍可能恢复旧密码和旧 Key，需核对并轮换。不要对运行中的数据库直接覆盖。schema 1–6 不能用于本版恢复，需配合原版本程序使用。
 
-配置 `update_repository` 为 GitHub 仓库后，启动、修改配置及每 6 小时检查正式 Release；仅准备当前平台包，验证大小和 Release SHA-256。发现可用新包时先创建数据库备份，备份失败则停止准备；状态返回 `backup_path`、`package_path`。下载完成不会安装、替换程序或自动重启。准备备份到实际安装之间的数据修改需在停服前另做备份。私有仓库使用 `MUSIC_SERVER_GITHUB_TOKEN`。
+默认检查公开仓库 `ShenYunyao1/MusicServer`；`update_repository` 可指定检查来源。启动及每 6 小时只检查正式 Release 的签名元数据，不下载、不安装。Windows 支持检查与手工替换。Ubuntu 配置独立 systemd 更新器后，管理员可以显式选择兼容版本，自动完成验证签名与包哈希、停止服务、最终数据库备份、切换程序和重新启动；健康检查失败会恢复旧程序及数据库。跨 schema 更新拒绝自动安装。自动安装固定信任官方仓库与内置公钥，不能通过网页改为任意程序源。详细目录、权限、恢复和发布流程见 [Ubuntu 部署说明](deploy/README.md)。
 
 ## 验证
 

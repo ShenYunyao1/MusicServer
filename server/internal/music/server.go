@@ -32,7 +32,7 @@ var accountPageScript []byte
 //go:embed users.js
 var usersPageScript []byte
 
-//go:embed management.css management.js navigation.js feedback.js library.js administration.js playlist-ui.js community.js sharing.js
+//go:embed management.css management.js navigation.js feedback.js library.js administration.js playlist-ui.js community.js sharing.js updater-ui.js
 var workspaceAssets embed.FS
 
 type API struct {
@@ -42,6 +42,7 @@ type API struct {
 	active        map[string]int
 	authConfig    AuthConfig
 	hashSlots     chan struct{}
+	updating      func() bool
 }
 
 type authContext struct {
@@ -66,8 +67,15 @@ func NewAPI(store *Store) *API {
 }
 
 func (a *API) SetUpdater(manager *update.Manager) { a.updater = manager }
+func (a *API) SetMaintenance(check func() bool)   { a.updating = check }
 
 func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
+	if a.updating != nil && a.updating() && request.URL.Path != "/api/v2/health" {
+		response.Header().Set("Cache-Control","no-store")
+		response.Header().Set("Retry-After", "5")
+		writeError(response, 503, "UPDATE_MAINTENANCE", "server update in progress; retry shortly")
+		return
+	}
 	isAPIRequest := strings.HasPrefix(request.URL.Path, "/api/v2/")
 	trackCall := isAPIRequest && request.URL.Path != "/api/v2/health"
 	started := time.Now()
@@ -109,6 +117,13 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if request.Method == http.MethodGet {
+		if request.URL.Path == "/assets/updater-ui.js" {
+			data, _ := workspaceAssets.ReadFile("updater-ui.js")
+			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			response.Header().Set("Cache-Control", "no-cache")
+			_, _ = response.Write(data)
+			return
+		}
 		assets := map[string]string{"/assets/management.css": "text/css; charset=utf-8", "/assets/management.js": "text/javascript; charset=utf-8", "/assets/navigation.js": "text/javascript; charset=utf-8", "/assets/feedback.js": "text/javascript; charset=utf-8", "/assets/library.js": "text/javascript; charset=utf-8", "/assets/administration.js": "text/javascript; charset=utf-8", "/assets/playlist-ui.js": "text/javascript; charset=utf-8", "/assets/community.js": "text/javascript; charset=utf-8", "/assets/sharing.js": "text/javascript; charset=utf-8"}
 		if contentType, ok := assets[request.URL.Path]; ok {
 			data, err := workspaceAssets.ReadFile(strings.TrimPrefix(request.URL.Path, "/assets/"))
@@ -227,7 +242,7 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 			return
 		}
 		commit, modified := version.Source()
-		writeJSON(response, http.StatusOK, map[string]any{"status": "ok", "version": version.Version, "revision": a.store.Revision(), "commit": commit, "modified": modified})
+		writeJSON(response, http.StatusOK, map[string]any{"status": "ok", "version": version.Version, "schema": version.Schema, "revision": a.store.Revision(), "commit": commit, "modified": modified})
 	case request.URL.Path == "/api/v2/sync":
 		a.sync(response, request)
 	case request.URL.Path == "/api/v2/playlists":
@@ -282,7 +297,7 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		a.adminStats(response, request)
 	case request.URL.Path == "/api/v2/admin/settings":
 		a.adminSettings(response, request)
-	case request.URL.Path == "/api/v2/admin/update" || request.URL.Path == "/api/v2/admin/update/check":
+	case request.URL.Path == "/api/v2/admin/update" || request.URL.Path == "/api/v2/admin/update/check" || request.URL.Path == "/api/v2/admin/update/apply":
 		a.adminUpdate(response, request)
 	default:
 		writeErrorWithID(response, http.StatusNotFound, "NOT_FOUND", "endpoint not found", requestID)
@@ -368,6 +383,21 @@ func (a *API) adminUpdate(response http.ResponseWriter, request *http.Request) {
 			return
 		}
 		writeJSON(response, http.StatusAccepted, a.updater.Status())
+		return
+	}
+	if request.URL.Path == "/api/v2/admin/update/apply" && request.Method == http.MethodPost {
+		var input struct {
+			Version string `json:"version"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&input); err != nil || input.Version == "" {
+			writeError(response, 400, "UPDATE_VERSION_REQUIRED", "select a checked release version")
+			return
+		}
+		if err := a.updater.Apply(input.Version); err != nil {
+			writeError(response, 409, "UPDATE_NOT_READY", err.Error())
+			return
+		}
+		writeJSON(response, 202, a.updater.Status())
 		return
 	}
 	writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")

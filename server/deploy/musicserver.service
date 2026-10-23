@@ -8,6 +8,9 @@ Type=simple
 User=musicserver
 Group=musicserver
 EnvironmentFile=/etc/musicserver/musicserver.env
+Environment=MUSIC_SERVER_UPDATE_QUEUE=/var/lib/musicserver-update/queue
+Environment=MUSIC_SERVER_UPDATE_STATE=/var/lib/musicserver-update/job.json
+Environment=MUSIC_SERVER_UPDATE_MAINTENANCE=/var/lib/musicserver-update/maintenance
 ExecStart=/opt/musicserver/current/musicserver -addr 127.0.0.1:8080 -media-root /srv/musicserver/media -data /var/lib/musicserver/library.sqlite
 Restart=on-failure
 RestartSec=5s
@@ -19,7 +22,7 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 NoNewPrivileges=true
-ReadWritePaths=/var/lib/musicserver /srv/musicserver/media
+ReadWritePaths=/var/lib/musicserver /srv/musicserver/media /var/lib/musicserver-update/queue
 
 [Install]
 WantedBy=multi-user.target

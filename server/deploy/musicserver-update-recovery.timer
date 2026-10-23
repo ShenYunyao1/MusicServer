@@ -1,0 +1,10 @@
+[Unit]
+Description=Recover interrupted MusicServer upgrades
+
+[Timer]
+OnBootSec=30s
+OnUnitInactiveSec=1min
+Unit=musicserver-update.service
+
+[Install]
+WantedBy=timers.target

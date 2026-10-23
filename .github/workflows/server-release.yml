@@ -1,0 +1,98 @@
+name: Server tests and release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths: ['server/**', '.github/workflows/server-release.yml']
+  pull_request:
+    paths: ['server/**', '.github/workflows/server-release.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - name: Install ffprobe (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install ffprobe (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y --no-progress
+      - name: Tests and vet
+        run: |
+          go test ./... -count=1 -timeout 180s
+          go vet ./...
+        env:
+          CGO_ENABLED: '0'
+      - name: Linux race tests
+        if: runner.os == 'Linux'
+        run: go test -race ./internal/update -count=1 -timeout 120s
+      - name: Linux installation integration
+        if: runner.os == 'Linux'
+        run: sudo -E env PATH="$PATH" bash tests/update-systemd.sh
+
+  package:
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - name: Build fixed-name binaries
+        run: |
+          mkdir -p build
+          GOOS=windows GOARCH=amd64 go build -trimpath -buildvcs=true -o build/musicserver.exe ./cmd/musicserver
+          GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=true -o build/musicserver ./cmd/musicserver
+          GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=true -o build/musicserver-updater ./cmd/musicserver-updater
+        env:
+          CGO_ENABLED: '0'
+      - name: Package and sign
+        run: |
+          VERSION=$(go run ./cmd/release -version)
+          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "v$VERSION" ]]; then echo 'Tag differs from code version'; exit 1; fi
+          go run ./cmd/release -sign
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: musicserver-packages
+          path: server/build/packages/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish complete Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          gh release create "$GITHUB_REF_NAME" build/packages/* --verify-tag --draft --title "MusicServer $GITHUB_REF_NAME" --notes-file deploy/release-notes.md
+          gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -49,8 +49,10 @@ func TestUpdateStatusRequiresAdministrator(t *testing.T) {
 	}{
 		{http.MethodGet, "/api/v2/admin/update", "", http.StatusUnauthorized},
 		{http.MethodPost, "/api/v2/admin/update/check", "", http.StatusUnauthorized},
+		{http.MethodPost, "/api/v2/admin/update/apply", "", http.StatusUnauthorized},
 		{http.MethodGet, "/api/v2/admin/update", playerSecret, http.StatusForbidden},
 		{http.MethodPost, "/api/v2/admin/update/check", playerSecret, http.StatusForbidden},
+		{http.MethodPost, "/api/v2/admin/update/apply", playerSecret, http.StatusForbidden},
 		{http.MethodGet, "/api/v2/admin/update", "secret", http.StatusOK},
 		{http.MethodPost, "/api/v2/admin/update/check", "secret", http.StatusAccepted},
 	} {

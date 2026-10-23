@@ -2,10 +2,14 @@ package update
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
-	"errors"
+	"encoding/json"
 	"fmt"
+	"musicserver/internal/version"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -27,6 +31,9 @@ func testPackageName() string {
 func testManager(t *testing.T, tag, digest string, payload []byte) (*Manager, *httptest.Server) {
 	t.Helper()
 	name := testPackageName()
+	pub, key, _ := ed25519.GenerateKey(rand.Reader)
+	manifest, _ := json.Marshal(Manifest{Format: 1, Version: strings.TrimPrefix(tag, "v"), Commit: strings.Repeat("a", 40), Schema: version.Schema, Packages: []Package{{Name: name, OS: runtime.GOOS, Arch: runtime.GOARCH, Size: int64(len(payload)), SHA256: strings.TrimPrefix(digest, "sha256:")}}})
+	signature := []byte(base64.StdEncoding.EncodeToString(ed25519.Sign(key, manifest)))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if os.Getenv("MUSIC_SERVER_GITHUB_TOKEN") != "" && r.Header.Get("Authorization") != "Bearer fixture-token" {
 			http.Error(w, "missing token", http.StatusUnauthorized)
@@ -35,7 +42,11 @@ func testManager(t *testing.T, tag, digest string, payload []byte) (*Manager, *h
 		switch r.URL.Path {
 		case "/repos/example/musicserver/releases/latest":
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprintf(w, `{"tag_name":%q,"html_url":"https://github.com/example/musicserver/releases/tag/%s","assets":[{"name":%q,"url":"http://%s/asset","browser_download_url":"http://%s/browser","size":%d,"digest":%q}]}`, tag, tag, name, r.Host, r.Host, len(payload), digest)
+			fmt.Fprintf(w, `{"tag_name":%q,"html_url":"https://github.com/example/musicserver/releases/tag/%s","assets":[{"name":%q,"url":"http://%s/asset","browser_download_url":"http://%s/browser","size":%d,"digest":%q},{"name":"release-manifest.json","browser_download_url":"http://%s/manifest","size":%d},{"name":"release-manifest.json.sig","browser_download_url":"http://%s/signature","size":%d}]}`, tag, tag, name, r.Host, r.Host, len(payload), digest, r.Host, len(manifest), r.Host, len(signature))
+		case "/manifest":
+			w.Write(manifest)
+		case "/signature":
+			w.Write(signature)
 		case "/asset":
 			if os.Getenv("MUSIC_SERVER_GITHUB_TOKEN") == "" {
 				http.Error(w, "private asset", http.StatusForbidden)
@@ -56,6 +67,7 @@ func testManager(t *testing.T, tag, digest string, payload []byte) (*Manager, *h
 	manager := NewManager(t.TempDir(), func() string { return "https://github.com/example/musicserver" })
 	manager.apiBase = server.URL
 	manager.allowHTTP = true
+	manager.publicKey = pub
 	return manager, server
 }
 
@@ -64,6 +76,9 @@ func TestCheckDownloadsVerifiedRelease(t *testing.T) {
 	sum := sha256.Sum256(payload)
 	manager, _ := testManager(t, "v9.0.0", "sha256:"+hex.EncodeToString(sum[:]), payload)
 	if err := manager.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Prepare(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	status := manager.Status()
@@ -84,7 +99,10 @@ func TestCheckDownloadsVerifiedRelease(t *testing.T) {
 
 func TestCheckRejectsBadDigest(t *testing.T) {
 	manager, _ := testManager(t, "9.0.0", "sha256:"+strings.Repeat("0", 64), []byte("bad package"))
-	if err := manager.Check(context.Background()); err == nil {
+	if err := manager.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Prepare(context.Background()); err == nil {
 		t.Fatal("expected checksum failure")
 	}
 	if manager.Status().State != "error" || manager.Status().PackagePath != "" {
@@ -98,6 +116,9 @@ func TestPrivateReleaseUsesTokenOnlyForGitHubAPI(t *testing.T) {
 	sum := sha256.Sum256(payload)
 	manager, _ := testManager(t, "9.0.0", "sha256:"+hex.EncodeToString(sum[:]), payload)
 	if err := manager.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Prepare(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if manager.Status().State != "downloaded" {
@@ -126,19 +147,17 @@ func TestRepositoryValidation(t *testing.T) {
 	}
 }
 
-func TestUpdateRequiresBackupBeforePreparingPackage(t *testing.T) {
+func TestDownloadDoesNotClaimFinalBackup(t *testing.T) {
 	payload := []byte("new package")
 	sum := sha256.Sum256(payload)
 	manager, _ := testManager(t, "9.0.0", "sha256:"+hex.EncodeToString(sum[:]), payload)
-	manager.beforeDownload = func() (string, error) { return "", errors.New("backup failed") }
-	if err := manager.Check(context.Background()); err == nil || manager.Status().PackagePath != "" {
-		t.Fatal("prepared update without required backup")
-	}
-	manager.beforeDownload = func() (string, error) { return "verified.sqlite", nil }
 	if err := manager.Check(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if manager.Status().BackupPath != "verified.sqlite" || manager.Status().State != "downloaded" {
+	if err := manager.Prepare(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if manager.Status().BackupPath != "" || manager.Status().State != "downloaded" {
 		t.Fatalf("missing upgrade backup: %+v", manager.Status())
 	}
 }

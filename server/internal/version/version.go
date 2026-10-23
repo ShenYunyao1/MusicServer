@@ -6,7 +6,8 @@ import "runtime/debug"
 
 const (
 	// Version is the current music server API and management UI version.
-	Version = "0.13.0"
+	Version = "0.14.0"
+	Schema  = 7
 )
 
 // Source identifies the source used for this binary without changing its name.

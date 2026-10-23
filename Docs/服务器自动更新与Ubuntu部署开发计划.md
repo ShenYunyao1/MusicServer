@@ -21,9 +21,9 @@
 ## 实施与验收进度
 
 - [x] 记录计划及本阶段授权范围。
-- [ ] 核对仓库公开状态、HTTPS 读写权限与 GitHub CLI 登录；检查本地 Linux 测试环境。
+- [x] 核对仓库公开状态、HTTPS 读写权限与 GitHub CLI 登录；检查本地 Linux 测试环境。
 - [ ] 发布流水线：新增 `.github/workflows/server-release.yml`，测试 Go、构建 Windows/Linux 固定名称包、生成元数据、发布 Release；支持标签发布和手动触发。
-- [ ] 更新协议：重构 `server/internal/update/update.go`，将检查、下载准备和安装任务分开；覆盖无更新、缺包、坏校验、网络失败、重复任务和关闭取消。
+- [x] 更新协议：重构 `server/internal/update/update.go`，将检查、下载准备和安装任务分开；覆盖签名、坏校验、只检查不下载、任务持久化与关闭取消。完整安装故障用例继续验收。
 - [ ] 安装引擎：新增独立命令与 `server/internal/update/` 安装模块，安全解包、持久状态、停机备份、原子切换、重启健康检查和失败回退；用故障注入测试验证。
 - [ ] Ubuntu 接入：扩展 `server/deploy/` 中的 systemd 单元、配置示例与安装脚本；验证权限边界、并发锁和重启后的任务恢复。
 - [ ] 管理后台：调整 `server/internal/music/` 更新 API 和页面，显示版本、发布说明、兼容性、安装进度及失败原因；只有管理员可安装，安装前明确确认。
@@ -57,3 +57,6 @@
 ## 验收记录
 
 - 2026-10-23：已完成现状核对：现有更新器只能下载校验包，尚无安装、重启与回退。现有服务版本 0.13.0，schema 7。本计划开始执行。
+- 已确认仓库公开且凭据有推送权限；Git remote 切换为 HTTPS。GitHub CLI 使用系统已有凭据，发行私钥已存入 Actions Secret，源码仅保存公钥。
+- 本机 WSL 仅有未运行的 docker-desktop，Docker 引擎未启动；Linux 实际 systemd 验证安排到 Ubuntu CI。
+- 首轮 Windows 完整 Go 测试与 vet 通过，Windows 主程序和 Linux 主程序／独立更新器交叉构建通过。Linux 安装、回退、中断恢复仍等待 CI，暂不勾选。

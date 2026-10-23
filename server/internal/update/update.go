@@ -3,7 +3,9 @@ package update
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -38,11 +40,18 @@ type Status struct {
 	BackupPath     string    `json:"backup_path,omitempty"`
 	Message        string    `json:"message,omitempty"`
 	CheckedAt      time.Time `json:"checked_at,omitzero"`
+	Commit         string    `json:"commit,omitempty"`
+	Schema         int       `json:"schema,omitempty"`
+	Notes          string    `json:"notes,omitempty"`
+	Compatible     bool      `json:"compatible"`
+	CanInstall     bool      `json:"can_install"`
+	JobID          string    `json:"job_id,omitempty"`
 }
 
 type release struct {
 	TagName string `json:"tag_name"`
 	HTMLURL string `json:"html_url"`
+	Body    string `json:"body"`
 	Assets  []struct {
 		Name   string `json:"name"`
 		APIURL string `json:"url"`
@@ -53,28 +62,28 @@ type release struct {
 }
 
 type Manager struct {
-	mu             sync.Mutex
-	status         Status
-	dir            string
-	repository     func() string
-	client         *http.Client
-	apiBase        string
-	allowHTTP      bool // Test servers only; production URLs must use HTTPS.
-	beforeDownload func() (string, error)
-	context        context.Context
-	cancel         context.CancelFunc
-	workers        sync.WaitGroup
-	closed         bool
+	mu          sync.Mutex
+	status      Status
+	dir         string
+	repository  func() string
+	client      *http.Client
+	apiBase     string
+	allowHTTP   bool // Test servers only; production URLs must use HTTPS.
+	publicKey   []byte
+	plan        *releasePlan
+	queueDir    string
+	workerState string
+	context     context.Context
+	cancel      context.CancelFunc
+	workers     sync.WaitGroup
+	closed      bool
 }
 
-func NewManager(dir string, repository func() string, beforeDownload ...func() (string, error)) *Manager {
+func NewManager(dir string, repository func() string) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
-	var backup func() (string, error)
-	if len(beforeDownload) > 0 {
-		backup = beforeDownload[0]
-	}
-	return &Manager{
-		context: ctx, cancel: cancel, beforeDownload: backup,
+	key, _ := base64.StdEncoding.DecodeString(ReleasePublicKey)
+	m := &Manager{
+		context: ctx, cancel: cancel, publicKey: key,
 		dir: dir, repository: repository, apiBase: "https://api.github.com",
 		client: &http.Client{CheckRedirect: func(request *http.Request, via []*http.Request) error {
 			if request.URL.Scheme != "https" {
@@ -90,6 +99,29 @@ func NewManager(dir string, repository func() string, beforeDownload ...func() (
 		}},
 		status: Status{State: "disabled", CurrentVersion: version.Version},
 	}
+	if data, err := os.ReadFile(filepath.Join(dir, "status.json")); err == nil {
+		_ = json.Unmarshal(data, &m.status)
+		m.status.CurrentVersion = version.Version
+		if m.status.State == "checking" || m.status.State == "downloading" {
+			m.status.State = "error"
+			m.status.Message = "previous preparation was interrupted; check again"
+		}
+	}
+	return m
+}
+
+type releasePlan struct {
+	Manifest   Manifest
+	Package    Package
+	Address    string
+	Repository string
+}
+
+func (m *Manager) ConfigureInstaller(queue, state string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.queueDir = queue
+	m.workerState = state
 }
 
 func ValidateRepository(raw string) error {
@@ -107,6 +139,15 @@ func (m *Manager) Status() Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	status := m.status
+	status.CanInstall = runtime.GOOS == "linux" && m.queueDir != "" && m.workerState != "" && status.Repository == Repository
+	if status.JobID != "" && m.workerState != "" {
+		var job Job
+		if data, err := os.ReadFile(m.workerState); err == nil && json.Unmarshal(data, &job) == nil && job.ID == status.JobID {
+			status.State = job.Phase
+			status.Message = job.Message
+			status.BackupPath = job.Backup
+		}
+	}
 	repository := m.repository()
 	if status.Repository != repository {
 		status = Status{State: "disabled", Repository: repository, CurrentVersion: version.Version}
@@ -120,7 +161,7 @@ func (m *Manager) Status() Status {
 func (m *Manager) begin() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.closed || m.status.State == "checking" || m.status.State == "downloading" {
+	if m.closed || m.status.State == "checking" || m.status.State == "downloading" || m.jobActiveLocked() {
 		return false
 	}
 	m.status.State = "checking"
@@ -146,6 +187,10 @@ func (m *Manager) finish(status Status, err error) {
 	}
 	status.CheckedAt = time.Now().UTC()
 	m.status = status
+	if saveErr := atomicJSON(filepath.Join(m.dir, "status.json"), status, 0600); saveErr != nil {
+		m.status.State = "error"
+		m.status.Message = "persist update status: " + saveErr.Error()
+	}
 }
 
 func (m *Manager) Check(ctx context.Context) error {
@@ -184,7 +229,12 @@ func (m *Manager) Start(ctx context.Context) {
 	m.mu.Unlock()
 	go func() {
 		defer m.workers.Done()
-		_ = m.Check(ctx)
+		m.mu.Lock()
+		hasJob := m.status.JobID != ""
+		m.mu.Unlock()
+		if !hasJob {
+			_ = m.Check(ctx)
+		}
 		ticker := time.NewTicker(6 * time.Hour)
 		defer ticker.Stop()
 		for {
@@ -201,11 +251,7 @@ func (m *Manager) Start(ctx context.Context) {
 }
 
 func packageName() string {
-	extension := ".tar.gz"
-	if runtime.GOOS == "windows" {
-		extension = ".zip"
-	}
-	return "musicserver-" + runtime.GOOS + "-" + runtime.GOARCH + extension
+	return PackageName(runtime.GOOS, runtime.GOARCH)
 }
 
 func compareVersions(latest, current string) (int, error) {
@@ -275,7 +321,11 @@ func (m *Manager) check(ctx context.Context) (Status, error) {
 		return status, err
 	}
 	path := strings.Trim(strings.TrimPrefix(repo, "https://github.com/"), "/")
-	response, err := m.request(ctx, m.apiBase+"/repos/"+path+"/releases/latest", false)
+	return m.checkRelease(ctx, status, path, "latest", true)
+}
+
+func (m *Manager) checkRelease(ctx context.Context, status Status, path, ref string, compare bool) (Status, error) {
+	response, err := m.request(ctx, m.apiBase+"/repos/"+path+"/releases/"+ref, false)
 	if err != nil {
 		return status, err
 	}
@@ -293,48 +343,161 @@ func (m *Manager) check(ctx context.Context) (Status, error) {
 	}
 	status.LatestVersion = strings.TrimPrefix(latest.TagName, "v")
 	status.ReleaseURL = latest.HTMLURL
-	if order <= 0 {
+	if compare && order <= 0 {
 		status.State = "current"
 		return status, nil
 	}
-	name := packageName()
+	manifest, err := m.manifest(ctx, latest)
+	if err != nil {
+		return status, err
+	}
+	if manifest.Version != status.LatestVersion {
+		return status, errors.New("manifest version differs from release tag")
+	}
+	status.Commit, status.Schema, status.Notes, status.Compatible = manifest.Commit, manifest.Schema, latest.Body, compatible(manifest)
+	pkg, err := manifest.Platform(runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		return status, err
+	}
+	name := pkg.Name
 	for _, asset := range latest.Assets {
 		if asset.Name != name {
 			continue
 		}
-		if asset.Size <= 0 || asset.Size > maxPackageSize {
+		if asset.Size != pkg.Size {
 			return status, errors.New("release package size is invalid")
 		}
-		if !strings.HasPrefix(asset.Digest, "sha256:") || len(asset.Digest) != 71 {
-			return status, errors.New("release package is missing a SHA-256 digest")
+		if asset.Digest != "" && !strings.EqualFold(asset.Digest, "sha256:"+pkg.SHA256) {
+			return status, errors.New("GitHub asset digest differs from signed manifest")
 		}
-		digest, err := hex.DecodeString(strings.TrimPrefix(asset.Digest, "sha256:"))
-		if err != nil {
-			return status, fmt.Errorf("invalid release digest: %w", err)
-		}
-		if m.beforeDownload != nil {
-			status.BackupPath, err = m.beforeDownload()
-			if err != nil {
-				return status, fmt.Errorf("backup before update: %w", err)
-			}
-		}
-		status.State = "downloading"
-		m.mu.Lock()
-		m.status = status
-		m.mu.Unlock()
 		address := asset.URL
 		if os.Getenv("MUSIC_SERVER_GITHUB_TOKEN") != "" && asset.APIURL != "" {
 			address = asset.APIURL
 		}
-		packagePath, err := m.download(ctx, status.LatestVersion, address, name, asset.Size, digest)
-		if err != nil {
-			return status, err
+		m.mu.Lock()
+		m.plan = &releasePlan{manifest, pkg, address, status.Repository}
+		m.mu.Unlock()
+		status.State = "available"
+		if !status.Compatible {
+			status.State = "incompatible"
+			status.Message = "database schema differs; manual upgrade required (data will not be cleared)"
 		}
-		status.State = "downloaded"
-		status.PackagePath = packagePath
 		return status, nil
 	}
 	return status, fmt.Errorf("release has no package named %s", name)
+}
+
+func (m *Manager) manifest(ctx context.Context, latest release) (Manifest, error) {
+	read := func(name string) ([]byte, error) {
+		for _, a := range latest.Assets {
+			if a.Name != name {
+				continue
+			}
+			if a.Size <= 0 || a.Size > 65536 {
+				return nil, errors.New("release metadata size is invalid")
+			}
+			address := a.URL
+			if os.Getenv("MUSIC_SERVER_GITHUB_TOKEN") != "" && a.APIURL != "" {
+				address = a.APIURL
+			}
+			r, e := m.request(ctx, address, true)
+			if e != nil {
+				return nil, e
+			}
+			defer r.Body.Close()
+			if r.StatusCode != 200 {
+				return nil, fmt.Errorf("metadata download HTTP %d", r.StatusCode)
+			}
+			data, e := io.ReadAll(io.LimitReader(r.Body, 65537))
+			if e != nil {
+				return nil, e
+			}
+			if int64(len(data)) != a.Size {
+				return nil, errors.New("metadata size mismatch")
+			}
+			return data, nil
+		}
+		return nil, fmt.Errorf("release has no signed metadata %s", name)
+	}
+	data, err := read(ManifestName)
+	if err != nil {
+		return Manifest{}, err
+	}
+	sig, err := read(ManifestName + ".sig")
+	if err != nil {
+		return Manifest{}, err
+	}
+	return VerifyManifest(data, sig, m.publicKey)
+}
+
+// Prepare downloads a verified package without installing it. Checks never call this.
+func (m *Manager) Prepare(ctx context.Context) error {
+	m.mu.Lock()
+	if m.closed || m.status.State != "available" || m.plan == nil || m.plan.Repository != m.repository() {
+		m.mu.Unlock()
+		return errors.New("check a compatible release first")
+	}
+	plan := *m.plan
+	status := m.status
+	m.status.State = "downloading"
+	m.workers.Add(1)
+	m.mu.Unlock()
+	defer m.workers.Done()
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	stop := context.AfterFunc(m.context, cancel)
+	defer stop()
+	digest, _ := hex.DecodeString(plan.Package.SHA256)
+	path, err := m.download(ctx, plan.Manifest.Version, plan.Address, plan.Package.Name, plan.Package.Size, digest)
+	status.State = "downloaded"
+	status.PackagePath = path
+	m.finish(status, err)
+	return err
+}
+
+func (m *Manager) jobActiveLocked() bool {
+	if m.status.JobID == "" {
+		return false
+	}
+	var job Job
+	if data, err := os.ReadFile(m.workerState); err == nil && json.Unmarshal(data, &job) == nil && job.ID == m.status.JobID {
+		return !job.terminal()
+	}
+	if m.status.State == "queued" {
+		_, err := os.Stat(filepath.Join(m.queueDir, m.status.JobID+".json"))
+		return err == nil || !os.IsNotExist(err)
+	}
+	return false
+}
+
+// Apply queues only a version, never a shell command or a caller-supplied path.
+func (m *Manager) Apply(expected string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed || runtime.GOOS != "linux" || m.queueDir == "" || m.workerState == "" || m.repository() != Repository {
+		return errors.New("automatic installation requires the Ubuntu systemd updater; Windows supports release checks and manual installation")
+	}
+	if m.jobActiveLocked() || m.status.State != "available" || !m.status.Compatible || m.status.LatestVersion != expected || m.status.Repository != m.repository() {
+		return errors.New("release changed or update is busy; check again")
+	}
+	token := make([]byte, 16)
+	if _, err := rand.Read(token); err != nil {
+		return err
+	}
+	id := hex.EncodeToString(token)
+	status := m.status
+	status.JobID = id
+	status.State = "queued"
+	// Persist first: an accepted request remains traceable if the service stops immediately.
+	if err := atomicJSON(filepath.Join(m.dir, "status.json"), status, 0600); err != nil {
+		return err
+	}
+	if err := atomicJSON(filepath.Join(m.queueDir, id+".json"), Request{ID: id, Version: expected}, 0640); err != nil {
+		_ = atomicJSON(filepath.Join(m.dir, "status.json"), m.status, 0600)
+		return err
+	}
+	m.status = status
+	return nil
 }
 
 func (m *Manager) download(ctx context.Context, releaseVersion, address, name string, size int64, digest []byte) (string, error) {

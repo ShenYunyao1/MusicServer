@@ -1,0 +1,8 @@
+{
+  "root": "/opt/musicserver",
+  "state": "/var/lib/musicserver-update",
+  "queue": "/var/lib/musicserver-update/queue",
+  "database": "/var/lib/musicserver/library.sqlite",
+  "health_url": "http://127.0.0.1:8080/api/v2/health",
+  "service": "musicserver.service"
+}

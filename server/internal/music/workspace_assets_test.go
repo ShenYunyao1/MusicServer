@@ -9,7 +9,7 @@ import (
 
 func TestWorkspaceAssetsAvailableBeforeLogin(t *testing.T) {
 	api, _ := testAPI(t)
-	for _, name := range []string{"management.js", "management.css", "library.js", "administration.js", "navigation.js", "feedback.js", "playlist-ui.js", "community.js", "sharing.js"} {
+	for _, name := range []string{"management.js", "management.css", "library.js", "administration.js", "navigation.js", "feedback.js", "playlist-ui.js", "community.js", "sharing.js", "updater-ui.js"} {
 		t.Run(name, func(t *testing.T) {
 			response := httptest.NewRecorder()
 			api.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/assets/"+name, nil))
