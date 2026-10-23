@@ -82,9 +82,9 @@ jobs:
           CGO_ENABLED: '0'
       - name: Package and sign
         run: |
-          VERSION=$(go run ./cmd/release -version)
+          VERSION=$(go run -buildvcs=true ./cmd/release -version)
           if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "v$VERSION" ]]; then echo 'Tag differs from code version'; exit 1; fi
-          go run ./cmd/release -sign
+          go run -buildvcs=true ./cmd/release -sign
         env:
           UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
       - uses: actions/upload-artifact@v4
