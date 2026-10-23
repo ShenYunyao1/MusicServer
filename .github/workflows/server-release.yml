@@ -87,6 +87,10 @@ jobs:
           go run -buildvcs=true ./cmd/release -sign
         env:
           UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+      - name: Verify signed packages and installer extraction
+        run: |
+          go run ./cmd/verify-release -dir build/packages
+          MUSIC_SERVER_RELEASE_ARCHIVE="$PWD/build/packages/musicserver-linux-amd64.tar.gz" go test ./internal/update -run '^TestPublishedLinuxArchive$' -count=1
       - uses: actions/upload-artifact@v4
         with:
           name: musicserver-packages

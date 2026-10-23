@@ -52,10 +52,6 @@ func testManager(t *testing.T, tag, digest string, payload []byte, schemas ...in
 		case "/signature":
 			w.Write(signature)
 		case "/asset":
-			if os.Getenv("MUSIC_SERVER_GITHUB_TOKEN") == "" {
-				http.Error(w, "private asset", http.StatusForbidden)
-				return
-			}
 			_, _ = w.Write(payload)
 		case "/browser":
 			if os.Getenv("MUSIC_SERVER_GITHUB_TOKEN") != "" {

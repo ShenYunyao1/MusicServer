@@ -202,7 +202,7 @@ func (m *Manager) Check(ctx context.Context) error {
 
 func (m *Manager) run(ctx context.Context) error {
 	defer m.workers.Done()
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	stop := context.AfterFunc(m.context, cancel)
 	defer stop()
@@ -371,7 +371,7 @@ func (m *Manager) checkRelease(ctx context.Context, status Status, path, ref str
 			return status, errors.New("GitHub asset digest differs from signed manifest")
 		}
 		address := asset.URL
-		if os.Getenv("MUSIC_SERVER_GITHUB_TOKEN") != "" && asset.APIURL != "" {
+		if asset.APIURL != "" {
 			address = asset.APIURL
 		}
 		m.mu.Lock()
@@ -397,7 +397,7 @@ func (m *Manager) manifest(ctx context.Context, latest release) (Manifest, error
 				return nil, errors.New("release metadata size is invalid")
 			}
 			address := a.URL
-			if os.Getenv("MUSIC_SERVER_GITHUB_TOKEN") != "" && a.APIURL != "" {
+			if a.APIURL != "" {
 				address = a.APIURL
 			}
 			r, e := m.request(ctx, address, true)
