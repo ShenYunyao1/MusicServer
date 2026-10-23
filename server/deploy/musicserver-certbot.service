@@ -1,0 +1,16 @@
+[Unit]
+Description=Renew MusicServer HTTPS certificates
+Wants=network-online.target
+After=network-online.target nginx.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/musicserver/musicserver.env
+# The systemd timer already randomizes scheduling; avoid Certbot's extra
+# random sleep exceeding this unit's bounded runtime.
+ExecStart=/opt/musicserver-certbot/bin/certbot renew --quiet --no-random-sleep-on-renew
+TimeoutStartSec=5min
+UMask=0077
+PrivateTmp=true
+ProtectHome=true
+NoNewPrivileges=true

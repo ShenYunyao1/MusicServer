@@ -43,7 +43,7 @@ func run() error {
 	m := update.Manifest{Format: 1, Version: version.Version, Commit: commit, Schema: version.Schema}
 	identity, _ := json.MarshalIndent(m, "", "  ")
 	files := map[string][]byte{"build.json": identity}
-	for _, path := range []string{"README.md", "deploy/README.md", "deploy/install.sh", "deploy/musicserver.service", "deploy/musicserver.env.example", "deploy/musicserver-update.service", "deploy/musicserver-update.path", "deploy/musicserver-update-recovery.timer", "deploy/updater.json.example", "deploy/release-notes.md"} {
+	for _, path := range []string{"README.md", "deploy/README.md", "deploy/install.sh", "deploy/musicserver.service", "deploy/musicserver.env.example", "deploy/musicserver-update.service", "deploy/musicserver-update.path", "deploy/musicserver-update-recovery.timer", "deploy/updater.json.example", "deploy/release-notes.md", "deploy/nginx.conf.example", "deploy/musicserver-certbot.service", "deploy/musicserver-certbot.timer", "deploy/renew-nginx.sh"} {
 		info, e := os.Stat(path)
 		if e != nil {
 			return e

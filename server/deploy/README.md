@@ -22,6 +22,40 @@
 go run ./cmd/verify-release -dir /下载资产所在目录
 ```
 
+## 公网 IP 直接访问 HTTPS
+
+没有域名也可以使用受信任的公网 IP 证书。官方方式见 [Let's Encrypt IP 证书说明](https://letsencrypt.org/2026/03/11/shorter-certs-certbot.html)：Certbot 5.4+ 支持 IP webroot 验证，使用 shortlived profile，证书约六天有效，必须启用自动续期。公网 TCP 80 用于验证及 HTTP 跳转，443 提供 HTTPS；后端继续监听 127.0.0.1:8080。
+
+1. 安装 Nginx、python3-venv；按 [Certbot 官方 pip 安装方式](https://certbot.eff.org/instructions?ws=nginx&os=pip)，在 `/opt/musicserver-certbot` 的独立 venv 安装兼容版本，不改系统 Python 包。检查 `certbot --version` 至少 5.4。
+2. 准备 `/var/www/musicserver-acme`，先仅配置 HTTP 的 `/.well-known/acme-challenge/` 静态目录，其他请求返回 404。确认公网可读取测试文件，再申请证书；不要在证书就绪前开放明文登录。
+3. 先在独立 staging 配置目录验证，再申请正式证书（`PUBLIC_IP` 替换为实际公网 IP；默认证书名固定为 musicserver）：
+
+```sh
+/opt/musicserver-certbot/bin/certbot certonly --non-interactive --agree-tos \
+  --register-unsafely-without-email --preferred-profile shortlived \
+  --webroot --webroot-path /var/www/musicserver-acme \
+  --ip-address PUBLIC_IP --cert-name musicserver
+```
+
+该示例不登记个人邮件；如需要邮件登记，改用 `--email`。测试签发增加 `--staging`，并使用独立 config/work/log 目录和证书名，不能将测试证书用于正式 HTTPS。网络需要代理时通过进程环境配置。
+
+4. 将 `nginx.conf.example` 中的 `music.example.com` 替换为实际公网 IP，安装为 Nginx 站点并运行 `nginx -t`。示例支持默认 512 MiB 上传及附件，关闭代理请求／响应缓冲，保留流式音频；若提高应用上传限制，应同步提高代理限制。
+5. 在 `musicserver.env` 设置 `MUSIC_SERVER_PUBLIC_URL=https://PUBLIC_IP`，重启主服务并平滑重载 Nginx。网页会话因重启失效，使用原密码重新登录；账户、Key 和媒体不重建。此后浏览器访问 `https://PUBLIC_IP/`，HTTP 自动跳转。
+6. 安装 `renew-nginx.sh` 为 `/etc/letsencrypt/renewal-hooks/deploy/musicserver-nginx`（root 所有，0755），安装 `musicserver-certbot.service` 和 `.timer` 到 systemd，执行 `daemon-reload` 并启用 timer。
+
+```sh
+systemctl enable --now musicserver-certbot.timer
+/opt/musicserver-certbot/bin/certbot renew --cert-name musicserver \
+  --dry-run --run-deploy-hooks --no-random-sleep-on-renew
+systemctl start musicserver-certbot.service
+systemctl show musicserver-certbot.service -p Result -p ExecMainStatus
+systemctl list-timers musicserver-certbot.timer
+```
+
+定时器每六小时检查并增加随机偏移；服务关闭 Certbot 自身的第二层随机等待，避免超过运行时限。续期成功后先校验 Nginx 配置再平滑重载，不中断后端服务。代理环境仍来自 `musicserver.env`。证书、私钥和 ACME 账户不进入 Git；主程序自动更新不会改这些 root 配置。公网 IP 变更时需重新签发证书并同步 Nginx 和 public origin。
+
+从外部浏览器和命令行验证受信任 HTTPS、HTTP 跳转、登录及资源后，再关闭原 SSH 转发；确认本地转发端口已释放且公网地址仍能访问。单纯停止 SSH 隧道不会自动开放公网服务，入口监听和安全组须实际可达。
+
 固定目录：
 
 | 位置 | 用途与权限 |
