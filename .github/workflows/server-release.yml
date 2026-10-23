@@ -18,6 +18,7 @@ concurrency:
 
 jobs:
   test:
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -33,9 +34,11 @@ jobs:
           go-version-file: server/go.mod
           cache-dependency-path: server/go.sum
       - name: Install ffprobe (Ubuntu)
+        timeout-minutes: 3
         if: runner.os == 'Linux'
         run: command -v ffprobe || (sudo apt-get update && sudo apt-get install -y ffmpeg)
       - name: Install ffprobe (Windows)
+        timeout-minutes: 3
         if: runner.os == 'Windows'
         run: if (!(Get-Command ffprobe -ErrorAction SilentlyContinue)) { choco install ffmpeg -y --no-progress }
       - name: Tests and vet
@@ -52,6 +55,7 @@ jobs:
         run: sudo -E env PATH="$PATH" bash tests/update-systemd.sh
 
   package:
+    timeout-minutes: 15
     needs: test
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04

@@ -42,12 +42,8 @@ func run() error {
 	}
 	m := update.Manifest{Format: 1, Version: version.Version, Commit: commit, Schema: version.Schema}
 	identity, _ := json.MarshalIndent(m, "", "  ")
-	deploy, err := filepath.Glob("deploy/*")
-	if err != nil {
-		return err
-	}
 	files := map[string][]byte{"build.json": identity}
-	for _, path := range append([]string{"README.md"}, deploy...) {
+	for _, path := range []string{"README.md", "deploy/README.md", "deploy/install.sh", "deploy/musicserver.service", "deploy/musicserver.env.example", "deploy/musicserver-update.service", "deploy/musicserver-update.path", "deploy/musicserver-update-recovery.timer", "deploy/updater.json.example", "deploy/release-notes.md"} {
 		info, e := os.Stat(path)
 		if e != nil {
 			return e
@@ -98,7 +94,7 @@ func run() error {
 		}
 		name := update.PackageName(platform, "amd64")
 		path := filepath.Join(*output, name)
-		if err = archive(path, platform, entries); err != nil {
+		if err := archive(path, platform, entries); err != nil {
 			return err
 		}
 		data, e := os.ReadFile(path)
