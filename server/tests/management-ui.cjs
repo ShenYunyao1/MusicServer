@@ -178,6 +178,7 @@ async function main() {
     await page.waitForFunction(() => state.uploads[0].stageId);
     await page.locator('[data-confirm-upload]').click();
     await page.waitForFunction(() => state.tracks.length === 2);
+    await require('./playlist-ui.cjs').tracks({page,browser,directory});
     await page.click('[data-page="tracks"]');await page.waitForFunction(()=>state.page==='tracks');await page.locator('#selectAll').check();
     const batchIDs=await page.evaluate(()=>[...state.selectedTrackIds]);assert.equal(batchIDs.length,2);
     let batchConfirmations=0;const batchConfirm=dialog=>{batchConfirmations++;dialog.accept()};page.on('dialog',batchConfirm);
@@ -222,6 +223,8 @@ async function main() {
     assert.equal(await page.evaluate(()=>state.auditEntries.length),0);
     assert.equal(await page.locator('#secretValue').textContent(),'');
     assert.equal(await page.locator('#trackDetailsBody').textContent(),'');
+    assert.equal(await page.evaluate(()=>playlistDraft),null);
+    assert.equal(await page.locator('#playlistDetail').textContent(),'');
     assert.equal(await page.evaluate(async () => (await fetch('/api/v2/auth/me')).status), 401);
     assert.deepEqual(pageErrors, []);
     console.log('Management UI passed: hidden console bootstrap, account login/reload/logout, session revocation, password change, key isolation, editing, playlists, restore, backup, audit, scanning and upload.');

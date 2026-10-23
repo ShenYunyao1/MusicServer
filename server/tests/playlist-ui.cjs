@@ -70,4 +70,44 @@ module.exports=async function({page,browser,directory}){
   assert.equal(await page.evaluate(async id=>(await api('playlists/'+id)).playlist.name,original.id),original.name);
   await page.click('[data-back-playlists]');await page.locator('.playlist-card .cover img').waitFor();
   console.log('Playlist editor passed: independent route, PNG/JPEG/WebP, limits, manual square crop, preview without persistence, atomic save, reload, conflict/draft retention and discard.');
+  await page.locator('.playlist-card').first().click();
+  assert.equal(await page.locator('.playlist-track .track-cover').count(),1,'Playlist tracks should share the catalogue cover/information layout');
+};
+
+module.exports.tracks=async function({page,browser,directory}){
+  const fixture=await page.evaluate(async()=>{
+    const p=state.playlists.find(p=>p.name==='Browser playlist'),extra=state.tracks.find(t=>!p.track_ids.includes(t.id));
+    await api('playlists/'+p.id+'/tracks','POST',{track_ids:[extra.id]},undefined,p.version);
+    const c=document.createElement('canvas');c.width=c.height=16;c.getContext('2d').fillRect(0,0,16,16);const blob=await new Promise(resolve=>c.toBlob(resolve));const f=new FormData();f.append('cover',blob,'track.png');const track=state.tracks.find(t=>t.id===p.track_ids[0]);await api('tracks/'+track.id+'/cover','PUT',f,undefined,track.version);await refreshCore();location.hash='#/playlists/'+p.id;return {id:p.id,extra:extra.id,first:track.id};
+  });
+  await page.waitForFunction(()=>document.querySelectorAll('.playlist-track').length===2);await page.locator('.playlist-track .track-cover img').waitFor();
+  assert.deepEqual(await page.locator('.playlist-sequence').allTextContents(),['1','2']);
+  await page.locator('[data-playlist-track-details]').first().click();await page.locator('#trackDetails').waitFor({state:'visible'});assert.ok((await page.locator('.playlist-track-personal').textContent()).includes('Browser cue'));
+  await page.locator('.playlist-track-personal button').filter({hasText:'个人备注'}).click();assert.equal(await page.locator('[data-field="comment"]').inputValue(),'Browser cue');await page.click('#saveModal');await page.locator('#editor').waitFor({state:'hidden'});
+  for(const width of [901,960,1440]){await page.setViewportSize({width,height:1100});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'Track columns must fit desktop width '+width)}
+  async function mouseSort(){const first=await page.locator('.playlist-sequence').first().boundingBox(),last=await page.locator('.playlist-track').last().boundingBox();await page.mouse.move(first.x+first.width/2,first.y+first.height/2);await page.mouse.down();await page.waitForTimeout(400);await page.locator('.drag-ghost').waitFor({state:'visible'});await page.mouse.move(last.x+20,last.y+last.height-3,{steps:12});await page.mouse.up()}
+  await mouseSort();await page.waitForFunction(({id,extra})=>state.playlists.find(p=>p.id===id).track_ids[0]===extra&&!state.playlistTrackSortBusy,fixture);
+  assert.equal(await page.evaluate(id=>state.playlists.find(p=>p.id===id).track_ids[0],fixture.id),fixture.extra);
+  await page.locator('.playlist-track').first().focus();await page.keyboard.press('Shift+F10');await page.locator('#contextMenu').getByText('下移曲目',{exact:true}).click();
+  await page.waitForFunction(({id,first})=>state.playlists.find(p=>p.id===id).track_ids[0]===first&&!state.playlistTrackSortBusy,fixture);
+  await page.evaluate(async id=>{const p=state.playlists.find(p=>p.id===id);await api('playlists/'+id,'PATCH',{description:'Concurrent order fixture'},undefined,p.version)},fixture.id);
+  const conflict=page.waitForResponse(r=>r.url().endsWith('/tracks/order')&&r.status()===409);await mouseSort();await conflict;await page.waitForFunction(()=>!state.playlistTrackSortBusy);assert.equal(await page.evaluate(id=>state.playlists.find(p=>p.id===id).track_ids[0],fixture.id),fixture.first);
+  await page.screenshot({path:require('node:path').join(directory,'playlist-tracks-desktop.png'),fullPage:true,animations:'disabled'});
+  const context=await browser.newContext({viewport:{width:390,height:500},isMobile:true,hasTouch:true,storageState:await page.context().storageState()});
+  try{
+    const mobile=await context.newPage();await mobile.goto(page.url());await mobile.waitForFunction(()=>state.user&&document.querySelectorAll('.playlist-track').length===2);const cdp=await context.newCDPSession(mobile);
+    assert.equal(await mobile.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'Playlist rows must fit mobile width');
+    const start=await mobile.locator('.playlist-sequence').first().boundingBox(),point={x:Math.round(start.x+10),y:Math.round(start.y+5)};
+    await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[point]});for(let i=1;i<=6;i++){await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:point.x,y:point.y-i*18}]});await mobile.waitForTimeout(20)}await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+    assert.equal(await mobile.locator('.drag-ghost').count(),0,'Ordinary swiping must not start sorting');assert.ok(await mobile.evaluate(()=>scrollY>0),'Ordinary touch motion should scroll the page');
+    await mobile.evaluate(()=>scrollTo(0,0));const first=await mobile.locator('.playlist-sequence').first().boundingBox(),last=await mobile.locator('.playlist-track').last().boundingBox();
+    await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:Math.round(first.x+10),y:Math.round(first.y+5)}]});await mobile.waitForTimeout(400);await mobile.locator('.drag-ghost').waitFor({state:'visible'});
+    await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:Math.round(last.x+20),y:490}]});await mobile.waitForTimeout(150);await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+    await mobile.waitForFunction(({id,extra})=>state.playlists.find(p=>p.id===id).track_ids[0]===extra&&!state.playlistTrackSortBusy,fixture);
+    assert.ok(await mobile.evaluate(()=>scrollY>0),'Dragging near the viewport edge should scroll');
+    await mobile.evaluate(()=>scrollTo(0,0));await mobile.screenshot({path:require('node:path').join(directory,'playlist-tracks-mobile.png'),fullPage:true,animations:'disabled'});
+  }finally{await context.close()}
+  await page.evaluate(()=>refreshCore());await page.locator('.playlist-track[data-track-id="'+fixture.extra+'"] [data-playlist-track-details]').click();page.once('dialog',dialog=>dialog.accept());await page.locator('.playlist-track-personal button').filter({hasText:'移出歌单'}).click();await page.waitForFunction(()=>document.querySelectorAll('.playlist-track').length===1);
+  assert.ok((await page.locator('#playlistDetail').textContent()).includes('Browser cue'));
+  console.log('Playlist tracks passed: artwork/info/notes, mouse long press, keyboard sorting, stale-order rejection, real touch scrolling/sorting, mobile layout and remove via details.');
 };
