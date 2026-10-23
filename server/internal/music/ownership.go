@@ -168,10 +168,15 @@ func (s *Store) TransferResources(source string, request TransferRequest, option
 			after := clonePlaylist(before)
 			order++
 			after.OwnerID = to.ID
+			after.Visibility = "private"
+			after.PublishedAt = time.Time{}
 			after.SortOrder = order
 			after.Version++
 			after.UpdatedAt = time.Now().UTC()
 			if err := writePlaylist(tx, after); err != nil {
+				return err
+			}
+			if _, err := tx.Exec("DELETE FROM subscriptions WHERE user_id=? AND playlist_id=?", to.ID, item.ID); err != nil {
 				return err
 			}
 			keys, err := queryJSON[APIKey](tx, "SELECT payload FROM api_keys WHERE id IN (SELECT key_id FROM key_playlist_grants WHERE playlist_id=?)", item.ID)
@@ -179,6 +184,9 @@ func (s *Store) TransferResources(source string, request TransferRequest, option
 				return err
 			}
 			for _, key := range keys {
+				if key.UserID != source {
+					continue
+				}
 				key.AllowedPlaylistIDs = slices.DeleteFunc(key.AllowedPlaylistIDs, func(id string) bool { return id == item.ID })
 				if err := saveKey(tx, key); err != nil {
 					return err

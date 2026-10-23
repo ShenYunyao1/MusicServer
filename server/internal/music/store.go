@@ -93,12 +93,25 @@ func validateKeyGrants(tx *sql.Tx, key APIKey) error {
 	}
 	for _, id := range key.AllowedPlaylistIDs {
 		playlist, err := readPlaylistFrom(tx, id)
-		if err != nil {
+		if err == nil && (playlist.System || playlist.OwnerID == user.ID) {
+			continue
+		}
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		if !playlist.System && playlist.OwnerID != user.ID {
-			return errors.New("key owner cannot access requested playlist")
+		if hasSubscription(tx, user.ID, id) {
+			if err == nil && publishedPlaylist(tx, playlist) {
+				continue
+			}
+			var configured bool
+			if e := tx.QueryRow("SELECT EXISTS(SELECT 1 FROM key_playlist_grants WHERE key_id=? AND playlist_id=?)", key.ID, id).Scan(&configured); e != nil {
+				return e
+			}
+			if configured {
+				continue
+			}
 		}
+		return errors.New("key owner cannot access requested playlist; subscribe first")
 	}
 	return nil
 }

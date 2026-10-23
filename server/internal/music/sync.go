@@ -26,6 +26,9 @@ type syncCursor struct {
 var errSyncRestart = errors.New("library changed during pagination; restart snapshot")
 
 func canSyncPlaylist(auth authContext, p Playlist) bool {
+	if p.ReadOnly && p.SubscriptionStatus != "" {
+		return auth.session || auth.allowedPlaylists[p.ID]
+	}
 	if auth.session {
 		return p.System || p.OwnerID == auth.userID
 	}
@@ -47,7 +50,7 @@ func syncBinding(auth authContext, playlists []Playlist) string {
 	{
 		for _, playlist := range playlists {
 			if canSyncPlaylist(auth, playlist) {
-				visiblePlaylists = append(visiblePlaylists, playlist.ID)
+				visiblePlaylists = append(visiblePlaylists, playlist.ID+":"+playlist.SubscriptionStatus+":"+playlist.SubscriptionReason+":"+playlist.OwnerID)
 				for _, id := range playlist.TrackIDs {
 					visible[id] = true
 				}
@@ -137,7 +140,7 @@ func (s *Store) SyncPage(auth authContext, token string, limit int) (SyncRespons
 	if err := tx.QueryRow("SELECT value FROM meta WHERE key='revision'").Scan(&result.Revision); err != nil {
 		return result, err
 	}
-	playlists, err := queryJSON[Playlist](tx, "SELECT payload FROM playlists")
+	playlists, err := playlistViews(tx, auth)
 	if err != nil {
 		return result, err
 	}
@@ -285,7 +288,7 @@ func (s *Store) SyncPage(auth authContext, token string, limit int) (SyncRespons
 					result.Changed = append(result.Changed, publicTrack(track, auth))
 				}
 			} else if item.kind == "playlist" {
-				if playlist, ok := allowedPlaylists[item.id]; ok && !item.deleted {
+				if playlist, ok := allowedPlaylists[item.id]; ok && (!item.deleted || playlist.SubscriptionStatus == "invalid") {
 					result.Playlists = append(result.Playlists, visiblePlaylist(playlist, auth, available))
 				}
 			}

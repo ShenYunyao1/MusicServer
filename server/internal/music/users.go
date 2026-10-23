@@ -68,6 +68,34 @@ func (s *Store) UpdateUser(id string, patch AccountPatch, options MutationOption
 				return err
 			}
 		}
+		rows, err := tx.Query("SELECT id FROM playlists WHERE owner_id=? AND visibility='public'", id)
+		if err != nil {
+			return err
+		}
+		published := []string{}
+		for rows.Next() {
+			var pid string
+			if err := rows.Scan(&pid); err != nil {
+				rows.Close()
+				return err
+			}
+			published = append(published, pid)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		if len(published) > 0 {
+			if err := bumpPublicCatalog(tx); err != nil {
+				return err
+			}
+			for _, pid := range published {
+				if err := recordChange(tx, "playlist", pid, false); err != nil {
+					return err
+				}
+			}
+		}
 		return auditMutation(tx, "account.update", id, before, user, []MutationOptions{options})
 	})
 	return user, err

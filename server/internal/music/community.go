@@ -23,11 +23,61 @@ func publishedPlaylist(reader sqlReader, p Playlist) bool {
 		return false
 	}
 	var enabled bool
-	return reader.QueryRow("SELECT enabled=1 AND must_change_password=0 FROM users WHERE id=?", p.OwnerID).Scan(&enabled) == nil && enabled
+	return reader.QueryRow("SELECT enabled=1 FROM users WHERE id=?", p.OwnerID).Scan(&enabled) == nil && enabled
 }
 func hasSubscription(reader sqlReader, userID, playlistID string) bool {
 	var exists bool
 	return reader.QueryRow("SELECT EXISTS(SELECT 1 FROM subscriptions WHERE user_id=? AND playlist_id=?)", userID, playlistID).Scan(&exists) == nil && exists
+}
+
+func playlistReadAccess(reader sqlReader, auth authContext, p Playlist) bool {
+	if auth.session {
+		return auth.role == "admin" || p.System || p.OwnerID == auth.userID || publishedPlaylist(reader, p)
+	}
+	return auth.allowedPlaylists[p.ID] && (p.System || p.OwnerID == auth.userID || hasSubscription(reader, auth.userID, p.ID) && publishedPlaylist(reader, p))
+}
+func publicPlaylistView(reader sqlReader, p Playlist, userID string) (Playlist, error) {
+	if hasSubscription(reader, userID, p.ID) {
+		return subscriptionView(reader, userID, p.ID)
+	}
+	p = clonePlaylist(p)
+	p.ReadOnly = true
+	p.TrackNotes = map[string]string{}
+	if err := reader.QueryRow("SELECT display_name FROM users WHERE id=?", p.OwnerID).Scan(&p.SourceOwnerName); err != nil {
+		return Playlist{}, err
+	}
+	return p, nil
+}
+func readablePlaylistView(reader sqlReader, auth authContext, p Playlist) (Playlist, error) {
+	if p.System || p.OwnerID == auth.userID || auth.session && auth.role == "admin" {
+		return clonePlaylist(p), nil
+	}
+	return publicPlaylistView(reader, p, auth.userID)
+}
+func playlistViews(reader sqlReader, auth authContext) ([]Playlist, error) {
+	all, err := queryJSON[Playlist](reader, "SELECT payload FROM playlists ORDER BY sort_order,id")
+	if err != nil {
+		return nil, err
+	}
+	result := []Playlist{}
+	for _, p := range all {
+		if (p.System || p.OwnerID == auth.userID) && (auth.session || auth.allowedPlaylists[p.ID]) {
+			result = append(result, p)
+		}
+	}
+	subscribed, err := subscriptionViews(reader, auth.userID)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range subscribed {
+		if p.OwnerID == auth.userID {
+			continue
+		}
+		if auth.session || auth.allowedPlaylists[p.ID] {
+			result = append(result, p)
+		}
+	}
+	return result, nil
 }
 func setPlaylistVisibility(p *Playlist, visibility string) error {
 	if p.System || p.ID == "library" {
@@ -133,7 +183,7 @@ func subscriptionView(reader sqlReader, userID, id string) (Playlist, error) {
 		return Playlist{}, err
 	} else {
 		var enabled bool
-		if err := reader.QueryRow("SELECT enabled=1 AND must_change_password=0 FROM users WHERE id=?", p.OwnerID).Scan(&enabled); err != nil {
+		if err := reader.QueryRow("SELECT enabled=1 FROM users WHERE id=?", p.OwnerID).Scan(&enabled); err != nil {
 			return Playlist{}, err
 		}
 		if !enabled {
