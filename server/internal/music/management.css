@@ -17,14 +17,34 @@
 /* Shared workspace layout and responsive components. */
 :root{--blue:#3465d9;--soft:#f4f6fa;--line:#e5eaf1}
 body{font-size:14px}button,a,input,select,textarea{font:inherit}button{cursor:pointer}a.btn{text-decoration:none}button:focus-visible,a:focus-visible,summary:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #99b8ff;outline-offset:2px}
-.sidebar{width:232px;background:#152139}.main{margin-left:232px}.brand{height:80px}.nav{padding:8px 12px;overflow-y:auto}.nav-heading{margin:20px 13px 7px;font-size:11px;color:#8294b2;letter-spacing:.08em}.nav button{font-size:14px}.nav button.active{background:#315cd0}.nav-icon{font-size:17px}.sidebar-foot{line-height:1.7}
+:root{--sidebar-width:232px}
+.nav-collapsed{--sidebar-width:72px}
+.sidebar{width:var(--sidebar-width);height:100dvh;background:#152139;overflow:hidden;transition:width .18s ease}
+.main{margin-left:var(--sidebar-width);transition:margin-left .18s ease}
+.brand{height:72px;min-height:72px;flex:0 0 72px;padding:0 20px;gap:12px}
+.brand-mark{flex:0 0 32px;width:32px;height:32px;aspect-ratio:1}
+.brand-text{min-width:0;overflow:hidden}
+.nav{flex:1 1 0%;min-height:0;padding:4px 10px;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:transparent transparent}
+.nav:hover,.nav:focus-within{scrollbar-color:#60708b transparent}
+.nav::-webkit-scrollbar{width:6px}.nav::-webkit-scrollbar-track{background:transparent}.nav::-webkit-scrollbar-thumb{border-radius:8px;background:transparent}.nav:hover::-webkit-scrollbar-thumb,.nav:focus-within::-webkit-scrollbar-thumb{background:#60708b}.nav::-webkit-scrollbar-button{display:none}
+.nav-group+.nav-group{padding-top:6px}
+.nav-heading{margin:10px 12px 6px;font-size:11px;line-height:16px;color:#8294b2;letter-spacing:.08em}
+.nav button{height:42px;min-height:42px;gap:12px;padding:0 12px;margin-bottom:2px;white-space:nowrap;font-size:14px;border-radius:8px}
+.nav button.active{background:#315cd0}.nav button:focus-visible{outline-offset:-3px}
+.nav-icon{width:20px;height:20px;flex:0 0 20px;display:grid;place-items:center}.nav-icon svg{display:block}
+.sidebar-foot{height:44px;min-height:44px;flex:0 0 44px;padding:0 18px;display:flex;align-items:center;font-size:11px;line-height:18px;white-space:nowrap;overflow:hidden}
+.sidebar-toggle{width:34px;height:34px;flex:0 0 34px;padding:0;color:var(--muted);border-color:transparent;background:transparent}.sidebar-toggle:hover{background:var(--blue-soft);color:var(--blue)}
+.nav-tooltip{position:fixed;z-index:40;pointer-events:none;padding:7px 11px;border:1px solid #354461;border-radius:6px;background:#1b2941;color:#fff;font-size:12px;line-height:18px;box-shadow:0 4px 14px #101a2c26;white-space:nowrap}
+@media(min-width:901px){.nav-collapsed .brand{justify-content:center;padding:0}.nav-collapsed .brand-text,.nav-collapsed .nav-label,.nav-collapsed .nav-heading,.nav-collapsed .sidebar-foot{display:none}.nav-collapsed .nav{padding:8px 10px}.nav-collapsed .nav button{justify-content:center;padding:0;height:44px;margin-bottom:4px}.nav-collapsed .nav-group+.nav-group{margin-top:8px;padding-top:8px;border-top:1px solid #2c3a53}}
+@media(prefers-reduced-motion:reduce){.sidebar,.main,.preview-bar{transition:none!important}}
+@media(max-width:900px){.sidebar .sidebar-foot{display:flex!important}}
 .topbar{position:sticky;top:0;z-index:4;min-height:74px;background:rgba(255,255,255,.97)}.topbar h1{font-size:20px}.top-actions{margin-left:auto}.content{max-width:1600px;padding:28px clamp(20px,3vw,44px) 110px}.page-intro h2{font-size:24px}.page-intro p{display:block;margin-top:7px;white-space:normal}.page.active{animation:page-in .12s ease-out}@keyframes page-in{from{opacity:.5}to{opacity:1}}
 .page-tabs{display:flex;gap:7px;margin-bottom:22px;border-bottom:1px solid var(--line);padding-bottom:12px}.page-tabs .active{background:var(--blue-soft);border-color:#bfd0f7;color:var(--blue)}
 .account-menu{position:relative}.account-menu summary{cursor:pointer;display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;list-style:none}.account-menu summary::after{content:'⌄';color:var(--muted)}.account-actions{position:absolute;right:0;top:100%;width:170px;display:grid;gap:5px;padding:8px;background:#fff;border:1px solid var(--line);box-shadow:var(--shadow);border-radius:9px;z-index:15}.account-actions button{justify-content:flex-start;border:0}.top-actions>.status{font-size:11px;max-width:170px}.account-menu summary .badge{font-size:11px}
 #menuToggle,#navBackdrop{display:none}.panel{box-shadow:0 4px 20px rgba(21,35,57,.035)}.data-table th{font-weight:500}.data-table td{padding:14px 12px}.data-table tr:hover td{background:#fafcff}.modal{max-height:90dvh;overflow:auto}.modal-head{position:sticky;top:0;background:#fff;z-index:1}.modal-foot{position:sticky;bottom:0;background:#fff}.form-error{margin:0 22px 14px;padding:12px;background:#fff0f1;color:var(--red);border-radius:7px;overflow-wrap:anywhere}
 #notifications{position:fixed;right:24px;bottom:24px;z-index:50;display:grid;gap:10px;max-width:min(440px,calc(100vw - 32px))}.notification{display:flex;align-items:flex-start;gap:16px;padding:14px 16px;border-radius:9px;background:white;box-shadow:0 5px 30px #17202e24;border:1px solid var(--line);overflow-wrap:anywhere}.notification.error{border-left:4px solid var(--red)}.notification.ok{border-left:4px solid var(--green)}.notification button{border:0;background:transparent;color:var(--muted);margin-left:auto}
 #memberPlayer{width:min(650px,100%)}.preview-bar{position:fixed;bottom:0;left:232px;right:0;z-index:6;background:white;border-top:1px solid var(--line);padding:10px 24px;display:flex;gap:16px;align-items:center}.preview-bar strong{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.preview-bar audio{flex:1;min-width:0;height:38px}
-.status{white-space:normal}.page-intro .actions{align-items:center}.nav-collapsed .nav-heading{font-size:0}.nav-collapsed .preview-bar{left:72px}
+.status{white-space:normal}.page-intro .actions{align-items:center}.preview-bar{left:var(--sidebar-width);transition:left .18s ease}
 .track-filter-row,.filter-tabs{flex-wrap:wrap}.table-wrap{max-width:100%}.page-intro>*{min-width:0}.toolbar{min-width:0}
 .track-search-row .search{width:100%;min-width:0}
 .filter-tabs button{border:0}.filter-tabs{row-gap:7px}

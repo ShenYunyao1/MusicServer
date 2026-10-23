@@ -14,6 +14,18 @@ function routeLink(label, path) {
 }
 
 const nav = document.querySelector('.nav');
+nav.setAttribute('aria-label','主导航');
+const navIcons={
+  tracks:'<path d="M9 18V5l11-2v13M9 8l11-2"/><ellipse cx="6" cy="18" rx="3" ry="2"/><ellipse cx="17" cy="16" rx="3" ry="2"/>',
+  playlists:'<path d="M4 5h16M4 10h16M4 15h8M17 14v6"/><ellipse cx="14.5" cy="20" rx="2.5" ry="1.8"/>',
+  upload:'<path d="M12 16V3m-5 5 5-5 5 5M4 15v5h16v-5"/>',
+  keys:'<circle cx="8" cy="9" r="5"/><path d="m12 12 8 8m-3-3 3-3m-6 0 3-3"/>',
+  overview:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+  users:'<circle cx="9" cy="7" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3m2-17a3 3 0 0 1 0 6m2 4a5 5 0 0 1 2 4v3"/>',
+  maintenance:'<path d="M3 6h7m4 0h7M3 12h12m4 0h2M3 18h3m4 0h11"/><circle cx="12" cy="6" r="2"/><circle cx="17" cy="12" r="2"/><circle cx="8" cy="18" r="2"/>',
+  settings:'<circle cx="12" cy="12" r="3"/><path d="m9 3-1 3-3 1 1 3-3 2 3 2-1 3 3 1 1 3 3-1 3 1 1-3 3-1-1-3 3-2-3-2 1-3-3-1-1-3-3 1Z"/>'
+};
+function sidebarSVG(shapes){return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">'+shapes+'</svg>'}
 $('trackFilterButton').hidden=true;
 const trackFilters=$('page-tracks').querySelector('.filter-tabs');for(const name of ['all','mine','managed','orphan'])trackFilters.append(document.querySelector('[data-filter="'+name+'"]'));
 const trackIntro=$('page-tracks').querySelector('.page-intro');trackIntro.append(routeLink('上传曲目','uploads'));
@@ -42,7 +54,8 @@ for (const [label,pages] of groups) {
   const heading = document.createElement('p'); heading.className = 'nav-heading'; heading.textContent = label; group.append(heading);
   for (const page of pages) {
     const button = nav.querySelector('[data-page="'+page+'"]');
-    button.querySelector('.nav-label').textContent = titles[page]; button.title = titles[page];
+    button.querySelector('.nav-label').textContent = titles[page];button.removeAttribute('title');button.setAttribute('aria-label',titles[page]);
+    button.querySelector('.nav-icon').innerHTML=sidebarSVG(navIcons[page]);
     button.onclick = () => showPage(page); group.append(button);
   }
   nav.append(group);
@@ -67,10 +80,37 @@ for (const id of ['changePassword','manageSessions','logout']) {
 }
 accountMenu.append(accountSummary,accountActions); document.querySelector('.top-actions').prepend(accountMenu);
 const menuToggle = makeButton('☰',()=>{const open=document.body.classList.toggle('mobile-nav-open');menuToggle.setAttribute('aria-expanded',String(open))});
+menuToggle.innerHTML=sidebarSVG('<path d="M4 6h16M4 12h16M4 18h16"/>');
 menuToggle.id='menuToggle';menuToggle.setAttribute('aria-label','打开导航');menuToggle.setAttribute('aria-controls','sidebar');menuToggle.setAttribute('aria-expanded','false');
 document.querySelector('.topbar').prepend(menuToggle);
+const collapse=$('collapse');collapse.className='btn sidebar-toggle';document.querySelector('.topbar').prepend(collapse);collapse.setAttribute('aria-controls','sidebar');
+const sidebarBreakpoint=matchMedia('(max-width: 900px)');
+let sidebarCollapsed=false;
+try{sidebarCollapsed=localStorage.getItem('musicserver.sidebarCollapsed')==='true'}catch(_){}
+function syncSidebarControls(){
+  const collapsed=sidebarCollapsed&&!sidebarBreakpoint.matches;
+  document.body.classList.toggle('nav-collapsed',sidebarCollapsed);
+  collapse.title=collapsed?'展开导航':'收起导航';collapse.setAttribute('aria-label',collapse.title);collapse.setAttribute('aria-expanded',String(!collapsed));
+  collapse.innerHTML=sidebarSVG('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16'+(collapsed?'m4-12 4 4-4 4':'m8-12-4 4 4 4')+'"/>');
+  hideNavTooltip();
+}
+collapse.onclick=()=>{sidebarCollapsed=!sidebarCollapsed;try{localStorage.setItem('musicserver.sidebarCollapsed',String(sidebarCollapsed))}catch(_){}syncSidebarControls()};
+sidebarBreakpoint.addEventListener('change',()=>{closeMobileNav();syncSidebarControls()});
+const navTooltip=document.createElement('div');navTooltip.id='navTooltip';navTooltip.className='nav-tooltip';navTooltip.setAttribute('role','tooltip');navTooltip.hidden=true;document.body.append(navTooltip);
+let tooltipOwner=null;
+function hideNavTooltip(){navTooltip.hidden=true;if(tooltipOwner)tooltipOwner.removeAttribute('aria-describedby');tooltipOwner=null}
+function showNavTooltip(button){
+  if(!sidebarCollapsed||sidebarBreakpoint.matches)return;
+  hideNavTooltip();tooltipOwner=button;navTooltip.textContent=button.getAttribute('aria-label');button.setAttribute('aria-describedby','navTooltip');navTooltip.hidden=false;
+  const rect=button.getBoundingClientRect();navTooltip.style.left=Math.min(rect.right+12,innerWidth-navTooltip.offsetWidth-8)+'px';navTooltip.style.top=Math.max(8,Math.min(rect.top+(rect.height-navTooltip.offsetHeight)/2,innerHeight-navTooltip.offsetHeight-8))+'px';
+}
+for(const button of nav.querySelectorAll('[data-page]')){
+  button.addEventListener('pointerenter',()=>showNavTooltip(button));button.addEventListener('pointerleave',()=>{if(document.activeElement!==button)hideNavTooltip()});
+  button.addEventListener('focus',()=>showNavTooltip(button));button.addEventListener('blur',hideNavTooltip);
+}
+nav.addEventListener('scroll',hideNavTooltip);syncSidebarControls();
 const navBackdrop = makeButton('',()=>closeMobileNav());navBackdrop.id='navBackdrop';navBackdrop.setAttribute('aria-label','关闭导航');document.querySelector('.app').append(navBackdrop);
-function closeMobileNav(){document.body.classList.remove('mobile-nav-open');menuToggle.setAttribute('aria-expanded','false')}
+function closeMobileNav(){document.body.classList.remove('mobile-nav-open');menuToggle.setAttribute('aria-expanded','false');hideNavTooltip()}
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeMobileNav();accountMenu.open=false}});
 
 const previewBar=document.createElement('div');previewBar.id='previewBar';previewBar.className='preview-bar';previewBar.hidden=true;

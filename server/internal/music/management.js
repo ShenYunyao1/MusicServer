@@ -177,7 +177,6 @@ $('refreshSettings').onclick=()=>run(loadSettings);
 $('saveSettings').onclick=()=>run(saveSettings);
 $('checkUpdate').onclick=()=>run(checkUpdate);
 setInterval(()=>{if(state.user&&state.page==='settings'&&location.hash.endsWith('/update'))loadUpdate().catch(()=>{})},5000);
-$('collapse').onclick=()=>{const collapsed=document.body.classList.toggle('nav-collapsed');$('sidebar').style.width=collapsed?'72px':'';$('collapse').textContent=collapsed?'›':'‹';document.querySelector('.main').style.marginLeft=collapsed?'72px':'';document.querySelectorAll('.brand-text,.nav-label,.sidebar-foot').forEach(element=>element.style.display=collapsed?'none':'')};
 document.querySelectorAll('.nav button').forEach(button=>button.onclick=()=>showPage(button.dataset.page));
 
 $('refreshOverview').onclick=()=>run(async()=>{await refreshCore();await loadUsers();renderOverview();await loadOverviewSummary()});
