@@ -95,6 +95,8 @@ async function main() {
     await page.reload();
     await page.waitForFunction(() => state.user?.username === 'admin' && state.tracks.length === 1);
     await page.waitForFunction(() => document.querySelector('#status').textContent === '已登录');
+    await require('./track-actions-ui.cjs')({page});
+    if(process.env.MUSIC_SERVER_TEST_TRACK_ACTIONS_ONLY==='1')return;
     await require('./updater-ui.cjs')({page});
     await require('./navigation-ui.cjs')({page});
     await require('./sidebar-ui.cjs')({page,directory});
@@ -205,7 +207,7 @@ async function main() {
     await page.click('[data-page="tracks"]');await page.waitForFunction(()=>state.page==='tracks');await page.locator('#selectAll').check();
     const batchIDs=await page.evaluate(()=>[...state.selectedTrackIds]);assert.equal(batchIDs.length,2);
     let batchConfirmations=0;const batchConfirm=dialog=>{batchConfirmations++;dialog.accept()};page.on('dialog',batchConfirm);
-    await page.locator('#trackRows .row-actions button').filter({hasText:'更多'}).first().click();await page.locator('#contextMenu').getByText('下架曲目',{exact:true}).click();
+    await page.locator('#trackRows tr').first().click({button:'right'});await page.locator('#contextMenu').getByText('下架曲目',{exact:true}).click();
     await page.waitForFunction(()=>state.tracks.length===0);page.off('dialog',batchConfirm);assert.equal(batchConfirmations,1,'Batch removal should confirm its count once');
     await page.evaluate(async ids=>{for(const track of await api('admin/removed'))if(ids.includes(track.id))await api('admin/removed/'+track.id,'POST',undefined,undefined,track.version);await refreshCore()},batchIDs);
     assert.equal(await page.evaluate(()=>state.tracks.length),2);

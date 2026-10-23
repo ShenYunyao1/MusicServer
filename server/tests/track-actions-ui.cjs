@@ -1,0 +1,21 @@
+const assert=require('node:assert/strict');
+module.exports=async({page})=>{
+ await page.click('[data-page="tracks"]');await page.waitForFunction(()=>state.page==='tracks');
+ assert.equal(await page.locator('#trackBulkActions').count(),0,'Selection actions must remain in the context menu');
+ assert.equal(await page.locator('#trackRows .row-actions').count(),0,'Remove redundant per-row controls');
+ const before=await page.locator('#trackRows').boundingBox();
+ await page.locator('#trackRows tr').first().click({button:'right'});
+ await page.locator('#contextMenu').waitFor({state:'visible'});
+ const after=await page.locator('#trackRows').boundingBox();assert.equal(after.y,before.y,'Right-click must not move the track list');
+ assert.equal(await page.evaluate(()=>state.selectedTrackIds.size),1);
+ assert.ok((await page.locator('#contextMenu').textContent()).includes('添加至'));
+ await page.keyboard.press('Escape');await page.locator('#trackRows tr').first().focus();await page.keyboard.press('Shift+F10');
+ await page.locator('#contextMenu').waitFor({state:'visible'});await page.keyboard.press('Escape');
+ const session=await page.context().newCDPSession(page);const row=await page.locator('#trackRows tr').first().boundingBox();
+ await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:row.x+120,y:row.y+row.height/2}]});
+ await page.waitForTimeout(550);await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+ await page.locator('#contextMenu').waitFor({state:'visible'});assert.equal((await page.locator('#trackRows').boundingBox()).y,before.y);
+ await page.keyboard.press('Escape');await session.detach();
+ await page.click('[data-page="overview"]');await page.waitForFunction(()=>state.page==='overview');
+ console.log('Track actions passed: context-only actions, no list shift, keyboard context menu and real touch long press.');
+};

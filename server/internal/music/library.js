@@ -6,11 +6,7 @@ function visibleTracks() {
     (state.trackFilter==='all'||state.trackFilter==='mine'&&t.uploaded_by===state.user?.id||state.trackFilter==='managed'&&t.owner_id===state.user?.id||state.trackFilter==='orphan'&&!membership.has(t.id)));
 }
 function updateTrackSelection() {
-  $('trackSelectionStatus').textContent=state.selectedTrackIds.size?'已选择 '+state.selectedTrackIds.size+' 首':'';
-  if(!$('trackBulkActions'))return;
-  $('trackBulkActions').hidden=!state.selectedTrackIds.size;
-  $('bulkDelete').hidden=![...state.selectedTrackIds].every(id=>canManageTrack(state.tracks.find(t=>t.id===id)||{}));
-  $('bulkDelete').textContent=isAdministrator()?'下架所选曲目':'删除所选曲目';
+  $('trackSelectionStatus').textContent='';
 }
 function renderTracks() {
   if(state.page==='tracks'&&location.hash.startsWith('#/library')){
@@ -20,17 +16,25 @@ function renderTracks() {
   const rows=visibleTracks(), visible=new Set(rows.map(t=>t.id));
   state.selectedTrackIds=new Set([...state.selectedTrackIds].filter(id=>visible.has(id)));
   $('trackRows').replaceChildren();
-  $('trackRows').closest('table').querySelector('thead').innerHTML='<tr><th><input id="selectAll" type="checkbox" aria-label="选择当前筛选的全部曲目"></th><th>曲目</th><th>歌手</th><th>专辑</th><th>状态</th><th>操作</th></tr>';
+  $('trackRows').closest('table').querySelector('thead').innerHTML='<tr><th><input id="selectAll" type="checkbox" aria-label="选择当前筛选的全部曲目"></th><th>曲目</th><th>歌手</th><th>专辑</th><th>状态</th></tr>';
   $('selectAll').onchange=e=>{for(const t of rows){if(e.target.checked)state.selectedTrackIds.add(t.id);else state.selectedTrackIds.delete(t.id)}renderTracks()};
-  if(!rows.length)$('trackRows').innerHTML='<tr><td colspan="6" class="empty">'+(state.tracks.length?'没有匹配的曲目，请调整搜索或筛选。':'曲库暂无曲目，可以上传音乐。')+'</td></tr>';
+  if(!rows.length)$('trackRows').innerHTML='<tr><td colspan="5" class="empty">'+(state.tracks.length?'没有匹配的曲目，请调整搜索或筛选。':'曲库暂无曲目，可以上传音乐。')+'</td></tr>';
   for(const t of rows){
     const row=document.createElement('tr');row.dataset.libraryTrack=t.id;
     row.innerHTML='<td><input type="checkbox" data-track-id="'+txt(t.id)+'" aria-label="选择 '+txt(t.title)+'" '+(state.selectedTrackIds.has(t.id)?'checked':'')+'></td><td><div class="track-title-cell"><span class="track-cover">♪</span><button class="text-button track-title" data-details>'+txt(t.title||'未命名')+'</button></div></td><td class="track-artist">'+txt(t.artist||'—')+'</td><td class="track-album">'+txt(t.album||'—')+'</td><td><span class="badge '+(t.missing?'warn':'ok')+'">'+(t.missing?'文件缺失':'可播放')+'</span></td><td class="row-actions"></td>';
     row.querySelector('[data-details]').onclick=()=>openTrackDetails(t);
     row.querySelector('[data-track-id]').onchange=e=>{if(e.target.checked)state.selectedTrackIds.add(t.id);else state.selectedTrackIds.delete(t.id);updateTrackSelection();$('selectAll').checked=rows.every(t=>state.selectedTrackIds.has(t.id))};
-    const actions=row.querySelector('.row-actions'), play=makeButton('播放',()=>playTrack(t),'btn small');play.disabled=Boolean(t.missing||t.removed);
-    const more=makeButton('更多',e=>{e.stopPropagation();prepareTrackContext(t);showTrackMenu(e,t)},'btn small');more.setAttribute('aria-label','更多操作：'+t.title);actions.append(play,more);
-    row.oncontextmenu=e=>{e.preventDefault();prepareTrackContext(t);showTrackMenu(e,t)};
+    row.querySelector('.row-actions').remove();
+    row.tabIndex=0;
+    const context=e=>{e.preventDefault();prepareTrackContext(t);const r=row.getBoundingClientRect();showTrackMenu({clientX:e.clientX||r.left+48,clientY:e.clientY||r.top+20},t)};
+    row.oncontextmenu=context;
+    row.onkeydown=e=>{if(e.key==='ContextMenu'||e.shiftKey&&e.key==='F10')context(e)};
+    let pressTimer,pressPoint,longPressed=false;
+    const cancelPress=()=>{clearTimeout(pressTimer);pressTimer=null};
+    row.onpointerdown=e=>{if(e.pointerType!=='touch')return;longPressed=false;pressPoint={x:e.clientX,y:e.clientY};pressTimer=setTimeout(()=>{longPressed=true;context(e)},450)};
+    row.onpointermove=e=>{if(pressPoint&&Math.hypot(e.clientX-pressPoint.x,e.clientY-pressPoint.y)>10)cancelPress()};
+    row.onpointerup=row.onpointercancel=cancelPress;
+    row.addEventListener('click',e=>{if(longPressed){longPressed=false;e.preventDefault();e.stopImmediatePropagation()}},true);
     $('trackRows').append(row);if(t.cover_id&&state.user)loadCover(row.querySelector('.track-cover'),'covers/'+encodeURIComponent(t.cover_id));
   }
   $('selectAll').checked=rows.length>0&&rows.every(t=>state.selectedTrackIds.has(t.id));
