@@ -563,7 +563,7 @@ func canReadTrack(auth authContext, store *Store, id string) bool {
 			continue
 		}
 		var exists bool
-		if store.db.QueryRow("SELECT EXISTS(SELECT 1 FROM playlist_tracks m JOIN playlists p ON p.id=m.playlist_id LEFT JOIN users u ON u.id=p.owner_id WHERE m.playlist_id=? AND m.track_id=? AND (p.system=1 OR p.owner_id=? OR (p.visibility='public' AND u.enabled=1 AND EXISTS(SELECT 1 FROM subscriptions s WHERE s.user_id=? AND s.playlist_id=p.id))))", playlistID, id, current.userID, current.userID).Scan(&exists) == nil && exists {
+		if store.db.QueryRow("SELECT EXISTS(SELECT 1 FROM playlist_tracks m JOIN playlists p ON p.id=m.playlist_id LEFT JOIN users u ON u.id=p.owner_id WHERE m.playlist_id=? AND m.track_id=? AND (p.system=1 OR p.owner_id=? OR (u.enabled=1 AND EXISTS(SELECT 1 FROM subscriptions s WHERE s.user_id=? AND s.playlist_id=p.id) AND (p.visibility='public' OR (p.visibility='shared' AND EXISTS(SELECT 1 FROM playlist_invitations i WHERE i.playlist_id=p.id AND i.inviter_id=p.owner_id AND i.recipient_id=? AND i.state='accepted'))))))", playlistID, id, current.userID, current.userID, current.userID).Scan(&exists) == nil && exists {
 			return true
 		}
 	}

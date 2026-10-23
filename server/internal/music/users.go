@@ -68,18 +68,21 @@ func (s *Store) UpdateUser(id string, patch AccountPatch, options MutationOption
 				return err
 			}
 		}
-		rows, err := tx.Query("SELECT id FROM playlists WHERE owner_id=? AND visibility='public'", id)
+		rows, err := tx.Query("SELECT id,visibility FROM playlists WHERE owner_id=? AND visibility IN ('public','shared')", id)
 		if err != nil {
 			return err
 		}
 		published := []string{}
+		catalogChanged := false
 		for rows.Next() {
 			var pid string
-			if err := rows.Scan(&pid); err != nil {
+			var visibility string
+			if err := rows.Scan(&pid, &visibility); err != nil {
 				rows.Close()
 				return err
 			}
 			published = append(published, pid)
+			catalogChanged = catalogChanged || visibility == "public"
 		}
 		err = rows.Err()
 		rows.Close()
@@ -87,8 +90,10 @@ func (s *Store) UpdateUser(id string, patch AccountPatch, options MutationOption
 			return err
 		}
 		if len(published) > 0 {
-			if err := bumpPublicCatalog(tx); err != nil {
-				return err
+			if catalogChanged {
+				if err := bumpPublicCatalog(tx); err != nil {
+					return err
+				}
 			}
 			for _, pid := range published {
 				if err := recordChange(tx, "playlist", pid, false); err != nil {

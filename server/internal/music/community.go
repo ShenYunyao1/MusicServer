@@ -32,9 +32,9 @@ func hasSubscription(reader sqlReader, userID, playlistID string) bool {
 
 func playlistReadAccess(reader sqlReader, auth authContext, p Playlist) bool {
 	if auth.session {
-		return auth.role == "admin" || p.System || p.OwnerID == auth.userID || publishedPlaylist(reader, p)
+		return auth.role == "admin" || p.System || p.OwnerID == auth.userID || externalPlaylistAccess(reader, auth.userID, p)
 	}
-	return auth.allowedPlaylists[p.ID] && (p.System || p.OwnerID == auth.userID || hasSubscription(reader, auth.userID, p.ID) && publishedPlaylist(reader, p))
+	return auth.allowedPlaylists[p.ID] && (p.System || p.OwnerID == auth.userID || hasSubscription(reader, auth.userID, p.ID) && externalPlaylistAccess(reader, auth.userID, p))
 }
 func publicPlaylistView(reader sqlReader, p Playlist, userID string) (Playlist, error) {
 	if hasSubscription(reader, userID, p.ID) {
@@ -116,7 +116,7 @@ func (s *Store) Subscribe(id string, options MutationOptions) (Playlist, error) 
 			return err
 		}
 		p, err := readPlaylistFrom(tx, id)
-		if err != nil || !publishedPlaylist(tx, p) {
+		if err != nil || !externalPlaylistAccess(tx, options.UserID, p) {
 			return errResourceHidden
 		}
 		if p.OwnerID == options.UserID {
@@ -188,8 +188,10 @@ func subscriptionView(reader sqlReader, userID, id string) (Playlist, error) {
 		}
 		if !enabled {
 			reason = "owner_disabled"
-		} else if p.Visibility != "public" {
+		} else if p.Visibility == "private" {
 			reason = "private"
+		} else if p.Visibility == "shared" && !hasAcceptedInvitation(reader, userID, p) {
+			reason = "share_revoked"
 		}
 	}
 	if reason != "" {

@@ -179,6 +179,19 @@ func (s *Store) TransferResources(source string, request TransferRequest, option
 			if _, err := tx.Exec("DELETE FROM subscriptions WHERE user_id=? AND playlist_id=?", to.ID, item.ID); err != nil {
 				return err
 			}
+			invites, err := tx.Exec("UPDATE playlist_invitations SET state='revoked',version=version+1,updated_at=? WHERE playlist_id=? AND state!='revoked'", persistedTime(time.Now()), item.ID)
+			if err != nil {
+				return err
+			}
+			count, err := invites.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if count > 0 {
+				if err := auditMutation(tx, "invitation.transfer_revoke", item.ID, nil, map[string]int64{"revoked": count}, options); err != nil {
+					return err
+				}
+			}
 			keys, err := queryJSON[APIKey](tx, "SELECT payload FROM api_keys WHERE id IN (SELECT key_id FROM key_playlist_grants WHERE playlist_id=?)", item.ID)
 			if err != nil {
 				return err

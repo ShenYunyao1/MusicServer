@@ -100,7 +100,7 @@ func validateKeyGrants(tx *sql.Tx, key APIKey) error {
 			return err
 		}
 		if hasSubscription(tx, user.ID, id) {
-			if err == nil && publishedPlaylist(tx, playlist) {
+			if err == nil && externalPlaylistAccess(tx, user.ID, playlist) {
 				continue
 			}
 			var configured bool

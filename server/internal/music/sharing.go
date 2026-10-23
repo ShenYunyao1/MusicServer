@@ -12,6 +12,21 @@ var errSharingMode = errors.New("set playlist visibility to shared before inviti
 var errInvitationState = errors.New("invitation state changed; refresh or explicitly invite again")
 var errInvitationTarget = errors.New("this account cannot be invited")
 
+func hasAcceptedInvitation(reader sqlReader, userID string, p Playlist) bool {
+	var accepted bool
+	return reader.QueryRow("SELECT EXISTS(SELECT 1 FROM playlist_invitations WHERE playlist_id=? AND inviter_id=? AND recipient_id=? AND state='accepted')", p.ID, p.OwnerID, userID).Scan(&accepted) == nil && accepted
+}
+func externalPlaylistAccess(reader sqlReader, userID string, p Playlist) bool {
+	if p.System || (p.Visibility != "public" && p.Visibility != "shared") {
+		return false
+	}
+	var enabled bool
+	if reader.QueryRow("SELECT enabled=1 FROM users WHERE id=?", p.OwnerID).Scan(&enabled) != nil || !enabled {
+		return false
+	}
+	return p.Visibility == "public" || hasAcceptedInvitation(reader, userID, p)
+}
+
 type PlaylistInvitation struct {
 	ID                string `json:"id"`
 	PlaylistID        string `json:"playlist_id"`
