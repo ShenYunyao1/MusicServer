@@ -8,23 +8,24 @@ communityPage.innerHTML='<div class="page-intro"><div><h1>公开歌单</h1><p>�
 document.querySelector('.content').append(communityPage);
 const myPlaylistTabs=document.createElement('nav');myPlaylistTabs.id='myPlaylistTabs';myPlaylistTabs.className='page-tabs';myPlaylistTabs.innerHTML='<a class="btn" href="#/playlists">我创建的</a><a class="btn" href="#/subscriptions">我订阅的</a>';$('page-playlists').querySelector('.page-intro').after(myPlaylistTabs);
 const discoverPublic=document.createElement('a');discoverPublic.id='discoverPublic';discoverPublic.href='#/public/playlists';discoverPublic.className='btn primary';discoverPublic.textContent='发现公开歌单';discoverPublic.hidden=true;$('newPlaylist').after(discoverPublic);
-function subscriptionReason(p){return {private:'作者已设为私有',owner_disabled:'作者账户已停用',deleted:'歌单已删除'}[p.subscription_reason]||'暂不可用'}
+function subscriptionReason(p){return {private:'作者已设为私有',owner_disabled:'作者账户已停用',deleted:'歌单已删除',share_revoked:'定向分享尚未接受或已被撤回'}[p.subscription_reason]||'暂不可用'}
 function ownPlaylists(){return state.playlists.filter(p=>!p.system&&!p.read_only&&p.owner_id===state.user?.id)}
+function playlistVisibilityLabel(p){return {public:'公开歌单',shared:'仅分享歌单',private:'私有歌单'}[p.visibility]||'私有歌单'}
 function mySubscription(id){return state.playlists.find(p=>p.id===id&&p.subscription_status)}
 function syncMyPlaylistTabs(detail){
-  myPlaylistTabs.hidden=Boolean(detail)||state.playlistEditing;myPlaylistTabs.querySelectorAll('a').forEach(a=>a.classList.toggle('active',a.hash===(state.subscriptionsTab?'#/subscriptions':'#/playlists')));
+  myPlaylistTabs.hidden=Boolean(detail)||state.playlistEditing;myPlaylistTabs.querySelectorAll('a').forEach(a=>a.classList.toggle('active',a.hash===(state.invitationsTab?'#/invitations':state.subscriptionsTab?'#/subscriptions':'#/playlists')));
   discoverPublic.hidden=!state.subscriptionsTab||Boolean(detail)||state.playlistEditing;
 }
 function publicRoute(offset=0){const query=new URLSearchParams();if($('publicSearch').value.trim())query.set('q',$('publicSearch').value.trim());if(offset)query.set('offset',String(offset));return '#/public/playlists'+(query.size?'?'+query:'')}
 $('publicSearchForm').onsubmit=event=>{event.preventDefault();location.hash=publicRoute()};
 $('publicPrevious').onclick=()=>location.hash=publicRoute(Math.max(0,(state.publicOffset||0)-30));$('publicNext').onclick=()=>location.hash=publicRoute((state.publicOffset||0)+30);
 $('refreshPublic').onclick=()=>loadPublicCatalog(true).catch(error=>setStatus(error.message,'error'));
-function communityRelevant(){return state.user&&(state.page==='public'||state.page==='playlists'&&state.subscriptionsTab)}
+function communityRelevant(){return state.user&&(state.page==='public'||state.page==='playlists'&&(state.subscriptionsTab||state.invitationsTab))}
 function scheduleCommunityRefresh(){clearTimeout(communityTimer);if(!communityRelevant()||document.hidden)return;communityTimer=setTimeout(()=>communityCheck().catch(error=>setStatus(error.message,'error')),Math.max(1000,PUBLIC_REFRESH_MS-(Date.now()-communityLastCheck)))}
 async function communityCheck(){
   if(!communityRelevant()||document.hidden)return;
   if(Date.now()-communityLastCheck<PUBLIC_REFRESH_MS){scheduleCommunityRefresh();return}
-  try{if(state.page==='public'){if(state.publicDetailId)await loadPublicDetail(state.publicDetailId);else await loadPublicCatalog(true)}else await loadMySubscriptions()}
+  try{if(state.page==='public'){if(state.publicDetailId)await loadPublicDetail(state.publicDetailId);else await loadPublicCatalog(true)}else if(state.invitationsTab)await loadReceivedInvitations();else await loadMySubscriptions()}
   finally{communityLastCheck=Date.now();scheduleCommunityRefresh()}
 }
 document.addEventListener('visibilitychange',()=>{if(document.hidden)clearTimeout(communityTimer);else if(communityRelevant())communityCheck().catch(error=>setStatus(error.message,'error'))});
@@ -76,6 +77,7 @@ function subscriptionActions(p){const own=p.owner_id===state.user?.id,sub=mySubs
 function appendCommunityActions(actions,p,publicView){
   const {own,sub}=subscriptionActions(p);
   if(publicView&&own)actions.append(makeButton('管理此歌单',()=>location.hash='#/playlists/'+p.id));
+  if(!publicView)appendSharingAction(actions,p);
   if(!own&&(p.read_only||publicView)){const button=makeButton(sub?'取消订阅':'订阅歌单',()=>changeSubscription(p,!sub),sub?'btn':'btn primary');button.dataset.subscribePlaylist=p.id;if(!sub&&p.subscription_status==='invalid')button.disabled=true;actions.append(button)}
   if(p.visibility==='public'&&p.subscription_status!=='invalid'){const share=makeButton('复制公开链接',()=>copyPublicPlaylist(p));share.dataset.sharePlaylist=p.id;actions.append(share)}
 }

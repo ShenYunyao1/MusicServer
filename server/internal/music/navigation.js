@@ -167,6 +167,7 @@ async function restoreWorkspaceRoute() {
   if(path[0]==='playlists'&&path.length===2)page='playlists';
   if(path[0]==='playlists'&&path.length===3&&path[2]==='edit')page='playlists';
   if(path[0]==='subscriptions'&&(path.length===1||path.length===2))page='playlists';
+  if(path[0]==='invitations'&&(path.length===1||path.length===2))page='playlists';
   if(path[0]==='public'&&path[1]==='playlists'&&path.length===3)page='public';
   if(path[0]==='admin'&&path[1]==='users'&&path.length===3)page='users';
   if(path[0]==='admin'&&path[1]==='library'&&path.length===3&&['scan','missing','removed'].includes(path[2]))page='maintenance';
@@ -183,9 +184,14 @@ async function restoreWorkspaceRoute() {
       if(state.publicDetailId)await loadPublicDetail(state.publicDetailId);else await loadPublicCatalog();
     }
     if(page==='playlists') {
+      state.invitationsTab=path[0]==='invitations';
       state.subscriptionsTab=path[0]==='subscriptions';
       state.playlistEditing=path[2]==='edit';
-      state.playlistDetailId=path[1]||null;
+      state.playlistDetailId=state.invitationsTab?null:path[1]||null;
+      state.invitationDetailID=state.invitationsTab?path[1]||null:null;
+      state.invitationOffset=Math.max(0,parseInt(new URLSearchParams(location.hash.split('?')[1]||'').get('offset'),10)||0);
+      if(state.invitationsTab){renderPlaylists();await loadReceivedInvitations()}
+      else {
       if(state.subscriptionsTab){await loadMySubscriptions();if(generation!==routeGeneration)return}
       const target=state.playlists.find(p=>p.id===state.playlistDetailId&&!p.system);
       if(state.playlistEditing&&target?.read_only||!state.subscriptionsTab&&target?.read_only)throw new Error('请从“我订阅的”打开此歌单。');
@@ -194,6 +200,7 @@ async function restoreWorkspaceRoute() {
         else throw new Error('歌单不存在或当前账户无权访问。');
       }
       renderPlaylists();
+      }
     }
     if(page==='tracks'){
       const query=new URLSearchParams(location.hash.split('?')[1]||'');$('trackSearch').value=query.get('q')||'';

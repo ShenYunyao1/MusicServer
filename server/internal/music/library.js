@@ -74,6 +74,8 @@ function renderPlaylists(){
   $('playlistDetail').querySelector('.playlist-tracks')?.sortCleanup?.();
   const detail=state.playlists.find(p=>p.id===state.playlistDetailId&&!p.system)||(state.playlistEditing?state.managedPlaylistEdit:null);
   syncMyPlaylistTabs(detail);
+  invitationBrowse.hidden=!state.invitationsTab;
+  if(state.invitationsTab){playlistEditor.hidden=true;$('playlistBrowse').hidden=true;$('playlistDetail').hidden=true;$('newPlaylist').hidden=true;$('page-playlists').querySelector(':scope > .page-intro').hidden=false;return}
   if(detail)$('playlistList').sortCleanup?.();
   if(state.playlistEditing&&detail){$('playlistBrowse').hidden=true;$('playlistDetail').hidden=true;$('page-playlists').querySelector(':scope > .page-intro').hidden=true;renderPlaylistEditor(detail);return}
   playlistEditor.hidden=true;
@@ -90,7 +92,7 @@ function renderPlaylists(){
     const card=document.createElement('article');card.className='playlist-card';card.tabIndex=0;card.setAttribute('role','link');card.setAttribute('aria-label','打开歌单：'+p.name);card.dataset.id=p.id;card.dataset.sortId=p.id;
     card.innerHTML='<span class="cover">'+txt((p.name||'♪').slice(0,1))+'</span><div class="playlist-info"><div class="playlist-title">'+txt(p.name)+'</div><div class="playlist-desc">'+txt(p.description||'暂无描述')+'</div><div class="playlist-meta">'+members(p).size+' 首曲目 · 私人歌单</div></div><div class="playlist-actions"></div>';
     card.querySelector('.playlist-actions').remove();
-    card.querySelector('.playlist-meta').textContent=p.subscription_status?(p.subscription_status==='invalid'?'已失效：'+subscriptionReason(p):p.track_ids.length+' 首 · '+(p.source_owner_name||'用户')+' · 只读订阅'):members(p).size+' 首曲目 · '+(p.visibility==='public'?'公开歌单':'私有歌单');
+    card.querySelector('.playlist-meta').textContent=p.subscription_status?(p.subscription_status==='invalid'?'已失效：'+subscriptionReason(p):p.track_ids.length+' 首 · '+(p.source_owner_name||'用户')+' · 只读订阅'):members(p).size+' 首曲目 · '+playlistVisibilityLabel(p);
     card.onclick=()=>{state.playlistListScrollY=scrollY;location.hash=(state.subscriptionsTab?'#/subscriptions/':'#/playlists/')+p.id;scrollTo(0,0)};
     const context=e=>{if(p.read_only){e.preventDefault();const r=card.getBoundingClientRect();renderSubscriptionMenu({clientX:e.clientX||r.left+32,clientY:e.clientY||r.top+20},p)}else playlistItemMenu(e,p,card)};
     card.oncontextmenu=context;
@@ -105,10 +107,10 @@ function renderPlaylistDetail(p,config={}){
   if(state.page==='playlists'||state.page==='public'&&config.publicView)document.title=p.name+' · '+(config.publicView?'公开歌单':'我的歌单')+' · 音乐服务器';
   if(state.playlistTrackSearchID!==p.id){state.playlistTrackSearchID=p.id;state.playlistTrackQuery=''}
   const intro=document.createElement('div');intro.className='page-intro';intro.innerHTML='<div class="playlist-detail-summary"><span class="cover playlist-detail-cover">♪</span><div><p>我的歌单 / 私人歌单</p><h1>'+txt(p.name)+'</h1><p>'+txt(p.description||'')+'</p></div></div><div class="actions"></div>';
-  intro.querySelector('p').textContent=config.publicView?'公开歌单 / 只读查看':readonly?'我的订阅 / 只读歌单':'我的歌单 / '+(p.visibility==='public'?'公开歌单':'私有歌单');
+  intro.querySelector('p').textContent=config.publicView?'公开歌单 / 只读查看':readonly?'我的订阅 / 只读歌单':'我的歌单 / '+playlistVisibilityLabel(p);
   const actions=intro.querySelector('.actions');const back=makeButton(config.publicView?'← 公开歌单':readonly?'← 我的订阅':'← 我的歌单',()=>{if(config.publicView)location.hash='#/public/playlists';else if(readonly)location.hash='#/subscriptions';else returnPlaylistList()});back.dataset.backPlaylists='';back.classList.add('page-back');
   if(!readonly){const edit=makeButton('编辑歌单',()=>editPlaylist(p));edit.dataset.editPlaylist='';const add=makeButton('添加曲目',()=>openPlaylistTrackPicker(p),'btn primary');add.dataset.addMembers='';actions.append(edit,add)}appendCommunityActions(actions,p,config.publicView);detail.append(back,intro);
-  if(p.subscription_status==='invalid'){const notice=document.createElement('p');notice.className='notice';notice.dataset.subscriptionInvalid='';notice.textContent='订阅已失效：'+subscriptionReason(p)+'。恢复公开和可用状态后会自动恢复；也可以取消此订阅。';detail.append(notice);return}
+  if(p.subscription_status==='invalid'){const notice=document.createElement('p');notice.className='notice';notice.dataset.subscriptionInvalid='';notice.textContent='订阅已失效：'+subscriptionReason(p)+'。恢复可见性、分享授权和账户状态后会恢复；也可以取消此订阅。';detail.append(notice);return}
   if(p.cover_id)loadCover(intro.querySelector('.cover'),'covers/'+encodeURIComponent(p.cover_id));
   const all=[...members(p)].map(id=>(config.tracks||state.tracks).find(t=>t.id===id)||{id,title:'不可用曲目',removed:true}),query=(state.playlistTrackQuery||'').trim().toLowerCase(),tracks=all.filter(t=>[t.title,t.artist,t.album,p.track_notes?.[t.id]].join(' ').toLowerCase().includes(query));
   const toolbar=document.createElement('div');toolbar.className='toolbar';const search=document.createElement('input');search.id=config.publicView?'publicPlaylistTrackSearch':'playlistTrackSearch';search.className='search';search.placeholder='搜索歌单曲目';search.setAttribute('aria-label','搜索歌单曲目');search.value=state.playlistTrackQuery||'';

@@ -218,6 +218,7 @@ async function main() {
     await require('./users-ui.cjs')({browser,page,base,directory,...members});
     await require('./admin-layout-ui.cjs')({page,directory,...members});
     await require('./community-ui.cjs')({page,browser,base,directory});
+    await require('./sharing-ui.cjs')({page,browser,base,directory});
     await page.locator('#accountMenu summary').click();
     await page.click('#logout');
     await page.waitForFunction(() => !state.user);
