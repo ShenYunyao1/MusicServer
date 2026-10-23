@@ -36,7 +36,16 @@ jobs:
       - name: Install ffprobe (Ubuntu)
         timeout-minutes: 8
         if: runner.os == 'Linux'
-        run: command -v ffprobe || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+        run: |
+          if ! command -v ffprobe; then
+            # Hosted Azure mirrors have intermittently stalled during release builds.
+            sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/sources.list
+            if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+              sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/sources.list.d/ubuntu.sources
+            fi
+            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 update
+            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 install -y --no-install-recommends ffmpeg
+          fi
       - name: Install ffprobe (Windows)
         timeout-minutes: 3
         if: runner.os == 'Windows'

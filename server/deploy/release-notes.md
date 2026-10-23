@@ -1,10 +1,10 @@
-MusicServer 0.14.1
+MusicServer 0.15.0
 
-- 独立更新服务读取 musicserver.env，支持必须经过代理访问 GitHub 的部署环境。
-- 安装脚本增加 --prepare-only，准备完成后由管理员在终端设置密码。
-- CI 增加 Ubuntu 22.04，与 Ubuntu 24.04、Windows 一同测试；构建使用 Go 1.26 最新补丁。
-- 云端隔离 systemd 回归支持预编译测试程序，目标主机无需安装 Go。
-- 数据库保持 schema 7，兼容 0.14.0 的账户、API Key、媒体和歌单。
+- 首次启动改为网页设置管理员账号和密码，无需交互终端；随机一次性授权防止抢先初始化，完成后关闭入口。
+- 无管理员时延后扫描与暂存清理，完成设置后自动扫描；已有管理员保持原登录方式。
+- 安装脚本启动后使用网页初始化；保留离线 CLI 恢复。独立更新服务继承代理配置。
+- 数据库保持 schema 7，保留 0.14.0 的账户、API Key、媒体和歌单。
+- Ubuntu 22.04/24.04 与 Windows 回归；修正 CI Ubuntu 依赖镜像下载超时。
 
 Windows 支持检查与手工替换程序；网页自动安装需要先在 Ubuntu 配置独立更新服务。
 0.14.0 部署如需代理，须同步更新 musicserver-update.service 并执行 systemctl daemon-reload；主程序自动更新不会修改 root 服务模板。

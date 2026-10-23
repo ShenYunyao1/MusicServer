@@ -32,7 +32,7 @@ var accountPageScript []byte
 //go:embed users.js
 var usersPageScript []byte
 
-//go:embed management.css management.js navigation.js feedback.js library.js administration.js playlist-ui.js community.js sharing.js updater-ui.js
+//go:embed management.css management.js navigation.js feedback.js library.js administration.js playlist-ui.js community.js sharing.js updater-ui.js setup.js
 var workspaceAssets embed.FS
 
 type API struct {
@@ -43,6 +43,8 @@ type API struct {
 	authConfig    AuthConfig
 	hashSlots     chan struct{}
 	updating      func() bool
+	setupMu       sync.Mutex
+	setupToken    string
 }
 
 type authContext struct {
@@ -71,7 +73,7 @@ func (a *API) SetMaintenance(check func() bool)   { a.updating = check }
 
 func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	if a.updating != nil && a.updating() && request.URL.Path != "/api/v2/health" {
-		response.Header().Set("Cache-Control","no-store")
+		response.Header().Set("Cache-Control", "no-store")
 		response.Header().Set("Retry-After", "5")
 		writeError(response, 503, "UPDATE_MAINTENANCE", "server update in progress; retry shortly")
 		return
@@ -117,6 +119,13 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if request.Method == http.MethodGet {
+		if request.URL.Path == "/assets/setup.js" {
+			data, _ := workspaceAssets.ReadFile("setup.js")
+			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			response.Header().Set("Cache-Control", "no-cache")
+			_, _ = response.Write(data)
+			return
+		}
 		if request.URL.Path == "/assets/updater-ui.js" {
 			data, _ := workspaceAssets.ReadFile("updater-ui.js")
 			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
@@ -161,6 +170,10 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		request.Body = http.MaxBytesReader(response, request.Body, 2<<20)
 	}
 	var auth authContext
+	if request.URL.Path == "/api/v2/setup" {
+		a.webSetup(response, request)
+		return
+	}
 	if request.URL.Path == "/api/v2/auth/login" {
 		a.accountAuth(response, request)
 		return

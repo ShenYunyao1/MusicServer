@@ -53,11 +53,17 @@ func main() {
 		log.Fatal(err)
 	}
 	defer store.Close()
-	if err := ensureAdministrator(store); err != nil {
+	handler := music.NewAPI(store)
+	handler.SetAuthConfig(authConfig)
+	if err := handler.ConfigureWebSetup(); err != nil {
 		log.Fatal(err)
 	}
-	if err := store.BeginServer(); err != nil {
-		log.Fatal(err)
+	if !handler.SetupPending() {
+		if err := store.BeginServer(); err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		log.Printf("First startup: open the web page to initialize admin. Authorization file: %s", filepath.Join(filepath.Dir(store.DataPath()), "setup-token"))
 	}
 	maintenance := func() bool {
 		path := os.Getenv("MUSIC_SERVER_UPDATE_MAINTENANCE")
@@ -67,8 +73,9 @@ func main() {
 		_, err := os.Stat(path)
 		return !os.IsNotExist(err)
 	}
+	backgroundBlocked := func() bool { return handler.SetupPending() || maintenance() }
 	if err := func() error {
-		if maintenance() {
+		if backgroundBlocked() {
 			return nil
 		}
 		return store.CleanupUploadStages()
@@ -85,7 +92,7 @@ func main() {
 		for {
 			select {
 			case <-ticker.C:
-				if maintenance() {
+				if backgroundBlocked() {
 					continue
 				}
 				if err := store.CleanupUploadStages(); err != nil {
@@ -96,14 +103,12 @@ func main() {
 			}
 		}
 	}()
-	deferredScan := !*noScan && maintenance()
+	deferredScan := !*noScan && backgroundBlocked()
 	if !*noScan && !deferredScan {
 		if _, err := store.StartScan(false); err != nil {
 			log.Printf("initial scan skipped: %v", err)
 		}
 	}
-	handler := music.NewAPI(store)
-	handler.SetAuthConfig(authConfig)
 	handler.SetMaintenance(maintenance)
 	updater := update.NewManager(filepath.Join(filepath.Dir(store.DataPath()), "updates"), func() string {
 		repo := store.Settings().UpdateRepository
@@ -121,7 +126,7 @@ func main() {
 	if deferredScan {
 		go func() {
 			defer close(deferredScanDone)
-			if waitForMaintenance(updateContext, maintenance) {
+			if waitForMaintenance(updateContext, backgroundBlocked) {
 				if _, err := store.StartScan(false); err != nil {
 					log.Printf("deferred startup scan: %v", err)
 				}

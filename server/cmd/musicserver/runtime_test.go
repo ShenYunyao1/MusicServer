@@ -20,24 +20,27 @@ func TestRuntimeDefaultsFollowExecutable(t *testing.T) {
 	}
 }
 
-func TestFirstStartInitializesOnlyOnce(t *testing.T) {
+func TestFirstStartWaitsForWebInitialization(t *testing.T) {
 	store, err := music.NewStore(filepath.Join(t.TempDir(), "library.sqlite"), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	original := readConsolePassword
-	t.Cleanup(func() { readConsolePassword = original })
-	calls := 0
-	readConsolePassword = func() (string, error) { calls++; return "first startup administrator password", nil }
-	if err := ensureAdministrator(store); err != nil {
+	api := music.NewAPI(store)
+	if err := api.ConfigureWebSetup(); err != nil {
 		t.Fatal(err)
 	}
-	if err := ensureAdministrator(store); err != nil {
+	if !api.SetupPending() {
+		t.Fatal("first start did not wait for web setup")
+	}
+	if _, err := store.InitializeAdmin("admin", "first startup administrator password"); err != nil {
 		t.Fatal(err)
 	}
-	if calls != 1 {
-		t.Fatalf("password prompted %d times", calls)
+	if err := api.ConfigureWebSetup(); err != nil {
+		t.Fatal(err)
+	}
+	if api.SetupPending() {
+		t.Fatal("existing administrator reopened initialization")
 	}
 	if _, _, _, err := store.Login("admin", "first startup administrator password", "test"); err != nil {
 		t.Fatal(err)

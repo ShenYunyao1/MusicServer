@@ -26,12 +26,11 @@ ln -s releases/initial /opt/musicserver/current
 install -m 0644 deploy/musicserver.service deploy/musicserver-update.service deploy/musicserver-update.path deploy/musicserver-update-recovery.timer /etc/systemd/system/
 systemctl daemon-reload
 if [[ $prepare_only == --prepare-only ]]; then
-    echo 'Preparation complete. Initialize the administrator interactively, then start the services:'
-    echo 'runuser -u musicserver -- /opt/musicserver/current/musicserver admin init --data /var/lib/musicserver/library.sqlite --username admin'
+    echo 'Preparation complete. Start the services, then initialize the administrator in your browser:'
     echo 'systemctl enable --now musicserver.service musicserver-update.path musicserver-update-recovery.timer'
     exit 0
 fi
-echo 'Set the administrator password in this terminal (never in a script or chat):'
-runuser -u musicserver -- /opt/musicserver/current/musicserver admin init --data /var/lib/musicserver/library.sqlite --username admin
 systemctl enable --now musicserver.service musicserver-update.path musicserver-update-recovery.timer
-echo 'Installation complete. Configure HTTPS and MUSIC_SERVER_PUBLIC_URL before public access.'
+echo 'Installation complete. Open the web page through SSH forwarding to set the administrator password.'
+echo 'Initialization authorization is stored in /var/lib/musicserver/setup-token. Do not share it.'
+echo 'Configure HTTPS and MUSIC_SERVER_PUBLIC_URL before public access.'

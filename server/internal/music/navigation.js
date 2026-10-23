@@ -230,4 +230,4 @@ async function restoreWorkspaceRoute() {
 window.addEventListener('hashchange',()=>restoreWorkspaceRoute());
 // The layout must be ready before restoring a browser login.
 setupAdministration();
-api('auth/me').then(enterAccount).catch(()=>setLoggedOut());
+initializeAccountScreen();

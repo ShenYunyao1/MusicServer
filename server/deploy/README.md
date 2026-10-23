@@ -6,10 +6,12 @@
 
 1. Ubuntu 安装 `ffmpeg`（提供 `ffprobe`）和 `curl`，运行服务器不需要安装 Go。
 2. 从本项目正式 Release 下载 `musicserver-linux-amd64.tar.gz`、`release-manifest.json` 和 `release-manifest.json.sig`。先验证签名及包 SHA-256，再解压；不要以 root 身份直接解压未经验证的网络文件。
-3. 在普通用户的临时目录解压，执行 `sudo bash deploy/install.sh`。安装脚本拒绝覆盖已有 `/opt/musicserver/current`，管理员密码在终端设置。
+3. 在普通用户的临时目录解压，执行 `sudo bash deploy/install.sh`。安装脚本拒绝覆盖已有 `/opt/musicserver/current`，启动服务后在网页设置管理员密码。
 4. 在 `/etc/musicserver/musicserver.env` 设置 `MUSIC_SERVER_PUBLIC_URL=https://你的域名`，配置 HTTPS 反向代理至 `127.0.0.1:8080`，重启 `musicserver.service`。公网只开放 SSH 与 HTTPS，8080 保持回环监听。
 
-自动化准备可使用 `sudo bash deploy/install.sh --prepare-only`：只准备目录、账户和单元，不创建管理员、不启动服务；随后在交互终端执行脚本打印的初始化及启动命令。没有域名时先使用 SSH 本地端口转发，例如 `ssh -N -L 127.0.0.1:18080:127.0.0.1:8080 <SSH主机>`，浏览器访问 `http://127.0.0.1:18080`，无需开放公网 8080。
+自动化准备可使用 `sudo bash deploy/install.sh --prepare-only`：只准备目录、账户和单元，不创建管理员、不启动服务；随后执行脚本打印的启动命令。没有域名时先使用 SSH 本地端口转发，例如 `ssh -N -L localhost:18080:127.0.0.1:8080 <SSH主机>`，浏览器访问 `http://localhost:18080`，无需开放公网 8080。
+
+无管理员时，网页显示首次设置表单。初始化授权码保存在 `/var/lib/musicserver/setup-token`，仅服务账户和 root 可读；通过 SSH 获取并在表单填写，或使用 `http://localhost:18080/#setup=<授权码>` 打开。该链接不能转发或写入日志，网页读取后立即清除地址栏片段。密码只在网页输入并确认，成功后自动关闭初始化、删除授权文件，再以新密码登录。重启不会改变尚未使用的授权码；已有管理员时不会重新开放初始化，离线恢复仍使用 `admin reset-password` 命令。
 
 主机访问 GitHub 必须走代理时，在上述环境文件配置 `HTTPS_PROXY`、`HTTP_PROXY`，并设置 `NO_PROXY=127.0.0.1,localhost,::1`。主服务和独立更新器共同读取该文件；修改后重启主服务，更新器下次运行读取新配置。不要为了配置代理而修改其他应用的全局网络设置。已有 0.14.0 部署需同时更新独立更新器服务模板并执行 `systemctl daemon-reload`；只更新主程序不会替换 root 单元。
 

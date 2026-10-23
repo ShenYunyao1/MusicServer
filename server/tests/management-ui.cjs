@@ -12,8 +12,6 @@ async function main() {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'musicserver-ui-v09-'));
   const password = 'isolated administrator password';
   const database = path.join(directory, 'library.sqlite');
-  const initialize = spawnSync(process.env.MUSIC_SERVER_TEST_PYTHON || 'python', [path.join(__dirname, 'admin-terminal.py'), binary, database, 'admin'], { input: password + '\n', encoding: 'utf8', timeout: 30000, windowsHide: true });
-  assert.equal(initialize.status, 0, initialize.stdout + initialize.stderr);
   const media = path.join(directory, 'media');
   await fs.mkdir(media);
   const audio = Buffer.alloc(844);
@@ -55,6 +53,30 @@ async function main() {
     const pageErrors = [];
     page.on('pageerror', error => {pageErrors.push(error.message);console.error('Browser error: '+error.stack)});
     await page.goto(base);
+    await page.locator('#setupScreen').waitFor();
+    assert.equal(await page.locator('#loginScreen').isVisible(),false);
+    assert.equal(await page.evaluate(()=>state.user),null);
+    const setupToken=(await fs.readFile(path.join(directory,'setup-token'),'utf8')).trim();
+    assert.equal(serverLog.includes(setupToken),false,'Logs must not contain initialization authorization');
+    await page.goto(base+'/#setup='+encodeURIComponent(setupToken));
+    await page.reload();
+    // Navigating only a fragment does not reload the document: reload above
+    // exercises the real one-time link entry point.
+    await page.locator('#setupScreen').waitFor();
+    assert.equal(await page.evaluate(()=>location.hash),'','Capability must leave the address bar');
+    assert.equal(await page.locator('#setupToken').isVisible(),false);
+    await page.fill('#setupPassword',password);
+    await page.fill('#setupConfirm','different confirmation');
+    await page.click('#setupSubmit');
+    await page.waitForFunction(()=>document.querySelector('#setupError').textContent.includes('不一致'));
+    await page.fill('#setupConfirm',password);
+    await page.click('#setupSubmit');
+    await page.locator('#loginScreen').waitFor();
+    assert.equal(await page.locator('#setupScreen').isVisible(),false);
+    assert.equal(await page.locator('#setupPassword').inputValue(),'');
+    assert.equal(await page.locator('#setupToken').inputValue(),'');
+    await assert.rejects(fs.stat(path.join(directory,'setup-token')), {code:'ENOENT'});
+    assert.equal((await(await fetch(base+'/api/v2/setup')).json()).required,false);
     if (lanIP) {
       assert.equal(await page.evaluate(() => isSecureContext), false, 'LAN regression must use an actual HTTP insecure context');
       assert.equal(await page.evaluate(() => typeof crypto.randomUUID), 'undefined');
@@ -230,7 +252,7 @@ async function main() {
     assert.equal(await page.locator('#playlistDetail').textContent(),'');
     assert.equal(await page.evaluate(async () => (await fetch('/api/v2/auth/me')).status), 401);
     assert.deepEqual(pageErrors, []);
-    console.log('Management UI passed: hidden console bootstrap, account login/reload/logout, session revocation, password change, key isolation, editing, playlists, restore, backup, audit, scanning and upload.');
+    console.log('Management UI passed: one-time web initialization, account login/reload/logout, session revocation, password change, key isolation, editing, playlists, restore, backup, audit, scanning and upload.');
     console.log('Isolated test data: ' + directory);
   } finally {
     if (browser) await browser.close();
