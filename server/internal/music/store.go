@@ -370,7 +370,10 @@ func (s *Store) PutPlaylist(playlist Playlist, options ...MutationOptions) error
 		if before.ID != "" {
 			playlist.OwnerID = before.OwnerID
 			playlist.SortOrder = before.SortOrder
+			playlist.CoverID = before.CoverID
+			playlist.CoverMIME = before.CoverMIME
 		} else {
+			playlist.CoverID, playlist.CoverMIME = "", ""
 			owner, err := internalOwner(tx, options)
 			if err != nil {
 				return err

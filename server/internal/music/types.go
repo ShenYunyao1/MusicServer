@@ -33,6 +33,8 @@ type Track struct {
 }
 
 type Playlist struct {
+	CoverID             string            `json:"cover_id,omitempty"`
+	CoverMIME           string            `json:"cover_mime,omitempty"`
 	UnavailableTrackIDs []string          `json:"unavailable_track_ids,omitempty"`
 	OwnerID             string            `json:"owner_id,omitempty"`
 	System              bool              `json:"system"`

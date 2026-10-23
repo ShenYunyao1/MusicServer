@@ -141,7 +141,8 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	resourceUpload := strings.HasPrefix(request.URL.Path, "/api/v2/tracks/") && (strings.HasSuffix(request.URL.Path, "/cover") || strings.HasSuffix(request.URL.Path, "/lyrics"))
-	if !strings.HasPrefix(request.URL.Path, "/api/v2/uploads") && !resourceUpload {
+	playlistUpload := strings.HasPrefix(request.URL.Path, "/api/v2/playlists/") && strings.HasSuffix(request.URL.Path, "/editor")
+	if !strings.HasPrefix(request.URL.Path, "/api/v2/uploads") && !resourceUpload && !playlistUpload {
 		request.Body = http.MaxBytesReader(response, request.Body, 2<<20)
 	}
 	var auth authContext
@@ -384,6 +385,14 @@ func (a *API) cover(response http.ResponseWriter, request *http.Request) {
 			}
 		}
 		if !allowed {
+			for _, playlist := range a.store.Playlists() {
+				if playlist.CoverID == id && canReadPlaylist(auth, a.store, playlist) {
+					allowed = true
+					break
+				}
+			}
+		}
+		if !allowed {
 			writeError(response, http.StatusNotFound, "COVER_NOT_FOUND", "cover not found")
 			return
 		}
@@ -609,6 +618,10 @@ func (a *API) playlists(response http.ResponseWriter, request *http.Request) {
 
 func (a *API) playlist(response http.ResponseWriter, request *http.Request) {
 	id := strings.TrimPrefix(request.URL.Path, "/api/v2/playlists/")
+	if strings.HasSuffix(id, "/editor") {
+		a.playlistEditor(response, request, strings.TrimSuffix(id, "/editor"))
+		return
+	}
 	if strings.Contains(id, "/tracks") {
 		a.playlistTracks(response, request, id)
 		return
