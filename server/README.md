@@ -1,4 +1,4 @@
-# 音乐服务器 0.14.0
+# 音乐服务器 0.14.1
 
 Go 1.26+，SQLite schema 7，HTTP API `/api/v2`，内置中文管理页。支持 Windows 和 Linux。
 

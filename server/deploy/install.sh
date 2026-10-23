@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Bootstrap only. Subsequent web upgrades use the independent, signed-package installer.
 set -euo pipefail
+if [[ $# -gt 1 || (${1:-} != '' && ${1:-} != --prepare-only) ]]; then echo 'Usage: install.sh [--prepare-only]' >&2; exit 1; fi
+prepare_only=${1:-}
 if [[ $EUID != 0 ]]; then echo 'Run with sudo from an extracted, verified release directory.' >&2; exit 1; fi
 if [[ $(uname -s) != Linux || $(uname -m) != x86_64 ]]; then echo 'This release supports Ubuntu Linux amd64.' >&2; exit 1; fi
 cd -- "$(dirname -- "$(readlink -f -- "$0")")/.."
@@ -23,8 +25,13 @@ ln -s releases/initial /opt/musicserver/current
 [[ -f /etc/musicserver/updater.json ]] || install -m 0644 deploy/updater.json.example /etc/musicserver/updater.json
 install -m 0644 deploy/musicserver.service deploy/musicserver-update.service deploy/musicserver-update.path deploy/musicserver-update-recovery.timer /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable musicserver.service musicserver-update.path musicserver-update-recovery.timer
+if [[ $prepare_only == --prepare-only ]]; then
+    echo 'Preparation complete. Initialize the administrator interactively, then start the services:'
+    echo 'runuser -u musicserver -- /opt/musicserver/current/musicserver admin init --data /var/lib/musicserver/library.sqlite --username admin'
+    echo 'systemctl enable --now musicserver.service musicserver-update.path musicserver-update-recovery.timer'
+    exit 0
+fi
 echo 'Set the administrator password in this terminal (never in a script or chat):'
 runuser -u musicserver -- /opt/musicserver/current/musicserver admin init --data /var/lib/musicserver/library.sqlite --username admin
-systemctl start musicserver.service musicserver-update.path musicserver-update-recovery.timer
+systemctl enable --now musicserver.service musicserver-update.path musicserver-update-recovery.timer
 echo 'Installation complete. Configure HTTPS and MUSIC_SERVER_PUBLIC_URL before public access.'

@@ -58,9 +58,19 @@ func TestSystemdInstallAndRollback(t *testing.T) {
 		exec.Command("systemctl", "daemon-reload").Run()
 	}()
 	binary := filepath.Join(root, "fixture")
-	cmd := exec.Command("go", "build", "-o", binary, "../../tests/fixtures/update-service")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("fixture build: %v %s", err, out)
+	if prebuilt := os.Getenv("MUSIC_SERVER_TEST_FIXTURE"); prebuilt != "" {
+		data, err := os.ReadFile(prebuilt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = os.WriteFile(binary, data, 0755); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		cmd := exec.Command("go", "build", "-o", binary, "../../tests/fixtures/update-service")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("fixture build: %v %s", err, out)
+		}
 	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

@@ -5,6 +5,7 @@ After=network-online.target
 
 [Service]
 Type=oneshot
+EnvironmentFile=-/etc/musicserver/musicserver.env
 ExecStart=/usr/local/lib/musicserver/musicserver-updater -config /etc/musicserver/updater.json
 TimeoutStartSec=16min
 UMask=0027

@@ -1,10 +1,10 @@
-MusicServer 0.14.0
+MusicServer 0.14.1
 
-- 分离“检查更新”和“安装更新”，定时检查不再下载程序。
-- 增加 Ubuntu systemd 独立更新器：验证 Ed25519 签名、停机备份、原子切换、重启健康检查，失败回退。
-- 更新任务状态持久化，重启后可继续查看；拒绝跨数据库 schema 自动升级。
-- GitHub Actions 自动测试、构建 Windows/Linux amd64 固定名称包并签名发布。
-- 数据库保持 schema 7，保留 0.13.0 的账户、API Key、媒体和歌单。
+- 独立更新服务读取 musicserver.env，支持必须经过代理访问 GitHub 的部署环境。
+- 安装脚本增加 --prepare-only，准备完成后由管理员在终端设置密码。
+- CI 增加 Ubuntu 22.04，与 Ubuntu 24.04、Windows 一同测试；构建使用 Go 1.26 最新补丁。
+- 云端隔离 systemd 回归支持预编译测试程序，目标主机无需安装 Go。
+- 数据库保持 schema 7，兼容 0.14.0 的账户、API Key、媒体和歌单。
 
 Windows 支持检查与手工替换程序；网页自动安装需要先在 Ubuntu 配置独立更新服务。
-首次从 0.13.0 部署到 Ubuntu 时需使用本版本安装脚本，旧更新器不能自动安装本版本。
+0.14.0 部署如需代理，须同步更新 musicserver-update.service 并执行 systemctl daemon-reload；主程序自动更新不会修改 root 服务模板。

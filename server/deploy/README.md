@@ -1,6 +1,6 @@
 # Ubuntu 部署与自动更新
 
-适用 Ubuntu 24.04、Linux amd64、systemd。数据库使用 schema 7；本版不迁移或清空旧库。首次部署和云端连通性仍需在目标主机验收。
+适用 Ubuntu 22.04/24.04、Linux amd64、systemd。数据库使用 schema 7；本版不迁移或清空旧库。目标主机网络和服务须按实际环境验收。
 
 ## 首次安装
 
@@ -8,6 +8,10 @@
 2. 从本项目正式 Release 下载 `musicserver-linux-amd64.tar.gz`、`release-manifest.json` 和 `release-manifest.json.sig`。先验证签名及包 SHA-256，再解压；不要以 root 身份直接解压未经验证的网络文件。
 3. 在普通用户的临时目录解压，执行 `sudo bash deploy/install.sh`。安装脚本拒绝覆盖已有 `/opt/musicserver/current`，管理员密码在终端设置。
 4. 在 `/etc/musicserver/musicserver.env` 设置 `MUSIC_SERVER_PUBLIC_URL=https://你的域名`，配置 HTTPS 反向代理至 `127.0.0.1:8080`，重启 `musicserver.service`。公网只开放 SSH 与 HTTPS，8080 保持回环监听。
+
+自动化准备可使用 `sudo bash deploy/install.sh --prepare-only`：只准备目录、账户和单元，不创建管理员、不启动服务；随后在交互终端执行脚本打印的初始化及启动命令。没有域名时先使用 SSH 本地端口转发，例如 `ssh -N -L 127.0.0.1:18080:127.0.0.1:8080 <SSH主机>`，浏览器访问 `http://127.0.0.1:18080`，无需开放公网 8080。
+
+主机访问 GitHub 必须走代理时，在上述环境文件配置 `HTTPS_PROXY`、`HTTP_PROXY`，并设置 `NO_PROXY=127.0.0.1,localhost,::1`。主服务和独立更新器共同读取该文件；修改后重启主服务，更新器下次运行读取新配置。不要为了配置代理而修改其他应用的全局网络设置。已有 0.14.0 部署需同时更新独立更新器服务模板并执行 `systemctl daemon-reload`；只更新主程序不会替换 root 单元。
 
 首次信任应从经过审查的源码或可信安装渠道取得公钥。可在有 Go 的本地开发机使用可信源码验证已下载资产，再上传到 Ubuntu；无需在云端编译：
 
