@@ -49,12 +49,37 @@ async function copyText(text){if(!text)throw new Error('没有可复制的内容
 function describeFile(value,batch){const file=value.file||value,path=String(value.path||file.webkitRelativePath||'').replace(/\\/g,'/').replace(/^\/+/,''),name=path.split('/').pop()||file.name,dot=name.lastIndexOf('.'),extension=dot<0?'':name.slice(dot+1).toLowerCase(),directory=path.includes('/')?'path:'+normalizedFileText(path.slice(0,path.lastIndexOf('/'))):'batch:'+batch;return {id:browserUUID(),file,path,directory,base:normalizedFileText(dot<0?name:name.slice(0,dot)),extension}}
 function matchingAttachment(upload,kind,track){const candidates=state.attachments.filter(attachment=>attachment.directory===upload.directory),find=(base,extensions)=>{for(const extension of extensions){const match=candidates.find(attachment=>attachment.base===base&&attachment.extension===extension);if(match)return match}return null};if(kind==='lyrics')return find(upload.base,['lrc','elrc','txt']);const extensions=['jpg','jpeg','png','webp','gif'],bases=[upload.base];if(track?.artist&&track?.album)bases.push(normalizedFileText('AlbumCover - '+track.artist+' - '+track.album));bases.push('cover','folder','albumcover');for(const base of bases){const match=find(base,extensions);if(match)return match}return null}
 async function readDroppedFiles(dataTransfer){const entries=[...dataTransfer.items].map(item=>item.webkitGetAsEntry?.()).filter(Boolean);if(!entries.length)return [...dataTransfer.files];const result=[];async function visit(entry,path){const name=path?path+'/'+entry.name:entry.name;if(entry.isFile){const file=await new Promise((resolve,reject)=>entry.file(resolve,reject));result.push({file,path:name})}else if(entry.isDirectory){const reader=entry.createReader();for(;;){const children=await new Promise((resolve,reject)=>reader.readEntries(resolve,reject));if(!children.length)break;for(const child of children)await visit(child,name)}}}for(const entry of entries)await visit(entry,'');return result}
-function uploadIsLocked(upload){return state.uploadBusy||state.uploads.some(x=>['暂存中','确认中'].includes(x.status))}
+function uploadIsLocked(upload){return state.uploadBusy||state.uploads.some(x=>x.inFlight||['暂存中','确认中'].includes(x.status))}
 // Local previews are rendered before the server stage response arrives. Keep
 // the original queue controls and use the staged response whenever it exists.
 async function discardStage(upload){if(!upload.stageId)return;try{await api('uploads/stage/'+encodeURIComponent(upload.stageId),'DELETE')}catch(error){if(error.status!==404)throw error}upload.stageId=null;upload.preview=null;upload.status='待暂存'}
 async function clearUploads(){state.uploadBusy=true;renderUploads();try{const uploads=state.uploads.slice();for(const upload of uploads){invalidateLocalParse(upload);await discardStage(upload);releaseLocalPreviewURL(upload)}for(const attachment of new Set([...state.attachments,...uploads.flatMap(x=>[x.coverFile,x.lyricsFile]).filter(Boolean)]))releaseAttachmentURL(attachment);state.uploads=[];state.attachments=[]}finally{state.uploadBusy=false;renderUploads()}}
-async function stageUpload(upload,taggedRetry=false){await discardStage(upload);upload.status='暂存中';upload.error='';renderUploads();try{const form=new FormData();form.append('file',upload.file);if(upload.lyricsFile)form.append('lyrics_file',upload.lyricsFile.file);if(upload.coverFile){form.append('cover',upload.coverFile.file);form.append('cover_source',upload.coverFile.manual?'manual':'external')}for(const [name,value] of Object.entries(upload.edits))form.append(name,value);const preview=await api('uploads/stage','POST',form);upload.preview=preview;upload.stageId=preview.id;for(const name of ['title','artist','album','genre','comment','lyrics']){if(!Object.hasOwn(upload.edits,name))upload[name]=preview.track?.[name]||''}if(!upload.coverFile?.manual&&!upload.ignoreAutomaticCover&&!taggedRetry){const taggedCover=matchingAttachment(upload,'cover',preview.track);if((taggedCover?.id||'')!==(upload.coverFile?.id||'')){invalidateLocalParse(upload);releaseLocalPreviewURL(upload);releaseAttachmentURL(upload.coverFile,upload);upload.localPreview=null;upload.localStatus='';upload.coverFile=taggedCover;return await stageUpload(upload,true)}}upload.status='待确认';return preview}catch(error){upload.status='失败';upload.error=error.message;throw error}finally{renderUploads()}}
+async function stageUpload(upload){
+  upload.inFlight=true;upload.status='准备上传';upload.error='';
+  try{
+    await discardStage(upload);upload.status='上传中';renderUploads();
+    const form=new FormData();form.append('file',upload.file);
+    if(upload.lyricsFile)form.append('lyrics_file',upload.lyricsFile.file);
+    if(upload.coverFile){form.append('cover',upload.coverFile.file);form.append('cover_source',upload.coverFile.manual?'manual':'external')}
+    for(const [name,value]of Object.entries(upload.edits))form.append(name,value);
+    let preview=await uploadRequest('uploads/stage','POST',form,upload);
+    const audioSendMS=upload.progress.sendMS;
+    upload.preview=preview;upload.stageId=preview.id;
+    for(const name of ['title','artist','album','genre','comment','lyrics'])if(!Object.hasOwn(upload.edits,name))upload[name]=preview.track?.[name]||'';
+    if(!upload.coverFile?.manual&&!upload.ignoreAutomaticCover){
+      const taggedCover=matchingAttachment(upload,'cover',preview.track);
+      if(taggedCover&&taggedCover.id!==upload.coverFile?.id){
+        invalidateLocalParse(upload);releaseLocalPreviewURL(upload);releaseAttachmentURL(upload.coverFile,upload);upload.localPreview=null;upload.localStatus='';upload.coverFile=taggedCover;
+        const attachment=new FormData();attachment.append('cover',taggedCover.file);attachment.append('cover_source','external');
+        const updated=await uploadRequest('uploads/stage/'+encodeURIComponent(upload.stageId)+'/cover','PUT',attachment,upload);
+        upload.progress.sendMS+=audioSendMS;
+        updated.timings=preview.timings;preview=updated;upload.preview=preview;
+      }
+    }
+    upload.status='待确认';return preview;
+  }catch(error){upload.status='失败';upload.error=error.message;throw error}
+  finally{upload.inFlight=false;renderUploads()}
+}
 async function confirmUpload(upload){if(!upload.stageId)throw new Error('请先暂存并预览曲目');if(upload.preview?.expires_at&&Date.now()>=Date.parse(upload.preview.expires_at)){await discardStage(upload);renderUploads();throw new Error('暂存已过期，请重新预览')}upload.status='确认中';upload.error='';renderUploads();try{const result=await api('uploads/stage/'+encodeURIComponent(upload.stageId)+'/commit','POST',upload.edits);upload.status=result.duplicate?'已去重':'完成';upload.stageId=null;await refreshCore();return result}catch(error){upload.status='失败';upload.error=error.message;throw error}finally{renderUploads()}}
 async function uploadAll(){state.uploadBusy=true;renderUploads();try{for(const upload of state.uploads.filter(x=>!x.stageId&&!['完成','已去重'].includes(x.status))){try{await stageUpload(upload)}catch(_){}}}finally{state.uploadBusy=false;renderUploads()}}
 async function confirmUploads(){state.uploadBusy=true;renderUploads();try{for(const upload of state.uploads.filter(x=>x.stageId&&['待确认','失败'].includes(x.status))){try{await confirmUpload(upload)}catch(_){}}}finally{state.uploadBusy=false;renderUploads()}}
@@ -134,6 +159,7 @@ function renderUploads(){
     row.innerHTML='<div class="upload-cover" title="'+txt(sourceName(track.cover_source))+'">♪</div><div class="upload-meta">'+
       '<div class="upload-name" title="'+txt(x.path||x.file.name)+'">'+txt(x.file.name)+'</div>'+
       '<div class="upload-detail">'+formatBytes(x.file.size)+(x.localStatus==='解析中'?' · 本地解析中…':'')+(x.localError?' · '+txt(x.localError):'')+(x.error?' · '+txt(x.error):'')+'</div>'+
+      '<div data-upload-progress class="upload-progress">'+(typeof uploadProgressMarkup==='function'?uploadProgressMarkup(x):'')+'</div>'+
       '<div class="upload-fields"><input data-upload-field="title" value="'+txt(x.title)+'" placeholder="标题" title="标题"><input data-upload-field="artist" value="'+txt(x.artist)+'" placeholder="作者" title="作者"><input data-upload-field="album" value="'+txt(x.album)+'" placeholder="专辑" title="专辑"><input data-upload-field="genre" value="'+txt(x.genre)+'" placeholder="风格" title="风格"></div>'+
       (hasInfo?'<div class="upload-summary">'+localPreviewLabel(x)+'<span class="badge '+(track.embedded_lyrics?'ok':'')+'">'+(track.embedded_lyrics?'含内嵌歌词':preview||track.lyrics_confirmed?'无内嵌歌词':'内嵌歌词待确认')+'</span><span class="badge '+(x.lyrics?'ok':'')+'">歌词：'+txt(x.lyrics?sourceName(editedLyrics?'manual':track.lyrics_source,track.embedded_lyrics):editedLyrics||preview||track.lyrics_confirmed?'无':'待确认')+'</span><span class="badge '+(track.cover_id?'ok':'')+'">封面：'+txt(track.cover_id?sourceName(track.cover_source):preview||track.tags_confirmed?'无':'待确认')+'</span>'+(duplicate?'<span class="badge warn">重复文件：'+txt(duplicateTrack?.title||duplicate)+'</span>':'')+'</div><div class="upload-detail" style="margin-top:6px">'+txt(technicalText(track))+'</div>':'')+
       '<details class="upload-text"'+(x.detailsOpen?' open':'')+'><summary>歌词与注释</summary><div class="form-grid"><div class="field"><label for="upload-lyrics-'+x.id+'">歌词</label><textarea id="upload-lyrics-'+x.id+'" data-upload-field="lyrics" spellcheck="false">'+txt(x.lyrics)+'</textarea></div><div class="field"><label for="upload-comment-'+x.id+'">注释</label><textarea id="upload-comment-'+x.id+'" data-upload-field="comment">'+txt(x.comment)+'</textarea></div></div></details>'+

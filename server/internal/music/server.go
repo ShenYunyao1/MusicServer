@@ -32,7 +32,7 @@ var accountPageScript []byte
 //go:embed users.js
 var usersPageScript []byte
 
-//go:embed management.css management.js navigation.js feedback.js library.js administration.js playlist-ui.js community.js sharing.js updater-ui.js setup.js
+//go:embed management.css management.js navigation.js feedback.js library.js administration.js playlist-ui.js community.js sharing.js updater-ui.js setup.js upload-progress.js system-logs.js
 var workspaceAssets embed.FS
 
 type API struct {
@@ -98,6 +98,22 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 				status = http.StatusOK
 			}
 			a.recordCall(callKeyID, status, tracked.bytes, time.Since(started))
+			if request.URL.Path != "/api/v2/admin/logs" && request.URL.Path != "/api/v2/auth/activity" {
+				fields := activityFields(request)
+				fields.Status = status
+				fields.Reason = response.Header().Get("X-Error-Code")
+				fields.DurationMS = time.Since(started).Milliseconds()
+				fields.Bytes = tracked.bytes
+				code := "request.completed"
+				if status >= 500 {
+					code = "request.failed"
+				} else if status >= 400 {
+					code = "request.denied"
+				} else if time.Since(started) > 2*time.Second {
+					code = "request.slow"
+				}
+				_ = a.store.activity.Emit(code, fields)
+			}
 		}()
 	}
 	response.Header().Set("X-Content-Type-Options", "nosniff")
@@ -107,6 +123,7 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	requestID, err := randomToken(8)
 	if err == nil {
 		response.Header().Set("X-Request-ID", requestID)
+		request.Header.Set("X-Music-Request-ID", requestID)
 	}
 	if !a.allowLANHTTP(request) {
 		writeError(response, http.StatusForbidden, "LAN_HTTP_ONLY", "HTTP access requires a local/private peer and an IP or localhost host; use HTTPS for public access")
@@ -119,6 +136,13 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if request.Method == http.MethodGet {
+		if request.URL.Path == "/assets/upload-progress.js" || request.URL.Path == "/assets/system-logs.js" {
+			data, _ := workspaceAssets.ReadFile(strings.TrimPrefix(request.URL.Path, "/assets/"))
+			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			response.Header().Set("Cache-Control", "no-cache")
+			_, _ = response.Write(data)
+			return
+		}
 		if request.URL.Path == "/assets/setup.js" {
 			data, _ := workspaceAssets.ReadFile("setup.js")
 			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
@@ -224,6 +248,10 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	}
 	if sharingEndpoint(request.URL.Path) {
 		a.sharing(response, request)
+		return
+	}
+	if request.URL.Path == "/api/v2/admin/logs" {
+		a.systemLogs(response, request)
 		return
 	}
 	if strings.HasPrefix(request.URL.Path, "/api/v2/public/") || request.URL.Path == "/api/v2/subscriptions" || strings.HasPrefix(request.URL.Path, "/api/v2/subscriptions/") {
@@ -396,6 +424,7 @@ func (a *API) adminUpdate(response http.ResponseWriter, request *http.Request) {
 			return
 		}
 		writeJSON(response, http.StatusAccepted, a.updater.Status())
+		emitActivity(a.store.activity, "update.checked", request, time.Now(), 0)
 		return
 	}
 	if request.URL.Path == "/api/v2/admin/update/apply" && request.Method == http.MethodPost {
@@ -411,6 +440,7 @@ func (a *API) adminUpdate(response http.ResponseWriter, request *http.Request) {
 			return
 		}
 		writeJSON(response, 202, a.updater.Status())
+		emitActivity(a.store.activity, "update.applied", request, time.Now(), 0)
 		return
 	}
 	writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
@@ -1127,16 +1157,33 @@ func (a *API) stageUpload(response http.ResponseWriter, request *http.Request) {
 		writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
 		return
 	}
+	started := time.Now()
+	metrics := activityFields(request)
+	_ = a.store.activity.Emit("upload.receiving", metrics)
+	received := false
+	defer func() {
+		if !received {
+			metrics.DurationMS = time.Since(started).Milliseconds()
+			_ = a.store.activity.Emit("upload.failed", metrics)
+		}
+	}()
 	max := a.store.Settings().MaxUploadBytes
 	if max <= 0 {
 		max = 512 << 20
 	}
 	request.Body = http.MaxBytesReader(response, request.Body, max+(12<<20))
+	body := &countedUploadBody{ReadCloser: request.Body}
+	request.Body = body
 	if err := request.ParseMultipartForm(8 << 20); err != nil {
 		writeError(response, http.StatusBadRequest, "INVALID_UPLOAD", "invalid upload or file exceeds configured limit")
 		return
 	}
 	defer request.MultipartForm.RemoveAll()
+	receiveMS := time.Since(started).Milliseconds()
+	metrics.Bytes = body.bytes
+	metrics.Timings = map[string]int64{"receive_ms": receiveMS}
+	_ = a.store.activity.Emit("upload.received", metrics)
+	received = true
 	file, header, err := request.FormFile("file")
 	if err != nil {
 		writeError(response, http.StatusBadRequest, "FILE_REQUIRED", "file is required")
@@ -1164,12 +1211,16 @@ func (a *API) stageUpload(response http.ResponseWriter, request *http.Request) {
 		writeError(response, http.StatusBadRequest, "INVALID_COVER_SOURCE", "cover_source must be manual or external")
 		return
 	}
-	preview, err := a.store.stageAudioWithAssets(header.Filename, file, fields, uploadAssets{Lyrics: lyrics, Cover: cover, CoverSource: coverSource}, mutationOptions(request))
+	ctx := context.WithValue(request.Context(), uploadActivityKey{}, metrics)
+	validationStarted := time.Now()
+	preview, err := a.store.stageAudioWithAssetsContext(ctx, header.Filename, file, fields, uploadAssets{Lyrics: lyrics, Cover: cover, CoverSource: coverSource}, mutationOptions(request))
 	if err != nil {
 		writeError(response, http.StatusBadRequest, "STAGE_FAILED", err.Error())
 		return
 	}
 	preview.Track = publicTrack(preview.Track, authFromRequest(request))
+	preview.Timings["validation_ms"] = time.Since(validationStarted).Milliseconds()
+	response.Header().Set("Server-Timing", fmt.Sprintf("receive;dur=%d, validate;dur=%d, probe;dur=%d", receiveMS, preview.Timings["validation_ms"], preview.Timings["probe_ms"]))
 	writeJSON(response, http.StatusCreated, preview)
 }
 
@@ -1190,6 +1241,10 @@ func (a *API) stagedUpload(response http.ResponseWriter, request *http.Request) 
 		return
 	}
 	if len(parts) == 2 && parts[1] == "cover" {
+		if request.Method == http.MethodPut {
+			a.stageCoverUpload(response, request, id)
+			return
+		}
 		if request.Method != http.MethodGet {
 			writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
 			return
@@ -1227,6 +1282,7 @@ func (a *API) stagedUpload(response http.ResponseWriter, request *http.Request) 
 			return
 		}
 		writeJSON(response, http.StatusOK, map[string]any{"track": publicTrack(track, authFromRequest(request)), "duplicate": duplicate})
+		emitActivity(a.store.activity, "upload.committed", request, time.Now(), track.Size)
 		return
 	}
 	switch request.Method {
@@ -1435,6 +1491,7 @@ func writeError(response http.ResponseWriter, status int, args ...string) {
 		code, message = args[0], args[1]
 	}
 	errorValue := map[string]string{"code": code, "message": message}
+	response.Header().Set("X-Error-Code", code)
 	if requestID := response.Header().Get("X-Request-ID"); requestID != "" {
 		errorValue["request_id"] = requestID
 	}
@@ -1442,6 +1499,7 @@ func writeError(response http.ResponseWriter, status int, args ...string) {
 }
 
 func writeErrorWithID(response http.ResponseWriter, status int, code, message, requestID string) {
+	response.Header().Set("X-Error-Code", code)
 	writeJSON(response, status, map[string]any{"error": map[string]string{"code": code, "message": message, "request_id": requestID}})
 }
 

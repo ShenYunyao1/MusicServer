@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"musicserver/internal/activity"
 	"musicserver/internal/music"
 	"musicserver/internal/update"
 	"musicserver/internal/version"
@@ -53,6 +54,14 @@ func main() {
 		log.Fatal(err)
 	}
 	defer store.Close()
+	journal, err := activity.Open(filepath.Join(filepath.Dir(store.DataPath()), "logs"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer journal.Close()
+	defer journal.Emit("server.stop", activity.Fields{})
+	store.SetActivity(journal)
+	_ = journal.Emit("server.start", activity.Fields{})
 	handler := music.NewAPI(store)
 	handler.SetAuthConfig(authConfig)
 	if err := handler.ConfigureWebSetup(); err != nil {
@@ -81,6 +90,7 @@ func main() {
 		return store.CleanupUploadStages()
 	}(); err != nil {
 		log.Printf("clean expired uploads: %v", err)
+		_ = journal.Emit("server.cleanup_failed", activity.Fields{})
 	}
 	stopCleanup := make(chan struct{})
 	cleanupDone := make(chan struct{})
@@ -97,6 +107,7 @@ func main() {
 				}
 				if err := store.CleanupUploadStages(); err != nil {
 					log.Printf("clean expired uploads: %v", err)
+					_ = journal.Emit("server.cleanup_failed", activity.Fields{})
 				}
 			case <-stopCleanup:
 				return

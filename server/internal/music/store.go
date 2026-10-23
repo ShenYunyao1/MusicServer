@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"musicserver/internal/activity"
 	"musicserver/internal/update"
 )
 
@@ -33,17 +34,20 @@ var errVersionConflict = errors.New("record changed; refresh before editing")
 var errTrackInUse = errors.New("this track is used by another account's playlist; contact an administrator")
 
 type Store struct {
-	dataPath   string
-	mediaRoot  string
-	db         *sql.DB
-	writeMu    sync.Mutex
-	stageMu    sync.Mutex
-	mediaMu    sync.RWMutex
-	scanMu     sync.Mutex
-	scanCancel context.CancelFunc
-	scanStatus ScanStatus
-	workers    sync.WaitGroup
-	closed     bool
+	activity     *activity.Journal
+	stageSlots   chan struct{}
+	activeStages map[string]bool
+	dataPath     string
+	mediaRoot    string
+	db           *sql.DB
+	writeMu      sync.Mutex
+	stageMu      sync.Mutex
+	mediaMu      sync.RWMutex
+	scanMu       sync.Mutex
+	scanCancel   context.CancelFunc
+	scanStatus   ScanStatus
+	workers      sync.WaitGroup
+	closed       bool
 }
 
 func NewStore(dataPath, mediaRoot string) (*Store, error) {
@@ -54,7 +58,7 @@ func NewStore(dataPath, mediaRoot string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	store := &Store{dataPath: dataPath, mediaRoot: filepath.Clean(root)}
+	store := &Store{dataPath: dataPath, mediaRoot: filepath.Clean(root), stageSlots: make(chan struct{}, 2), activeStages: map[string]bool{}}
 	if err := store.loadSQLite(); err != nil {
 		if store.db != nil {
 			_ = store.db.Close()

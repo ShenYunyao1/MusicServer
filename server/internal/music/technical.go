@@ -16,24 +16,34 @@ import (
 )
 
 func validateAudio(path, configured string) error {
+	_, err := validatedAudioContext(context.Background(), path, configured)
+	return err
+}
+func validatedAudioContext(ctx context.Context, path, configured string) (audioTechnical, error) {
 	candidates := []string{configured, os.Getenv("MUSIC_SERVER_FFPROBE")}
 	if found, err := exec.LookPath("ffprobe"); err == nil {
 		candidates = append(candidates, found)
 	}
 	available := false
+	seen := map[string]bool{}
 	for _, candidate := range candidates {
-		if strings.TrimSpace(candidate) == "" {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || seen[candidate] {
 			continue
 		}
+		seen[candidate] = true
 		available = true
-		if _, ok := probeWithFFprobe(path, candidate); ok {
-			return nil
+		if technical, ok := probeWithFFprobeContext(ctx, path, candidate); ok {
+			return technical, nil
+		}
+		if ctx.Err() != nil {
+			return audioTechnical{}, ctx.Err()
 		}
 	}
 	if !available {
-		return errors.New("FFPROBE_REQUIRED: configure ffprobe to validate uploads")
+		return audioTechnical{}, errors.New("FFPROBE_REQUIRED: configure ffprobe to validate uploads")
 	}
-	return errors.New("AUDIO_INVALID: no valid audio stream found or ffprobe failed; full decoding has not been performed")
+	return audioTechnical{}, errors.New("AUDIO_INVALID: no valid audio stream found or ffprobe failed; full decoding has not been performed")
 }
 
 // audioTechnical contains container/codec facts useful to clients. Zero
@@ -94,7 +104,7 @@ func probeWithFFprobe(path, ffprobePath string) (audioTechnical, bool) {
 func probeWithFFprobeContext(parent context.Context, path, ffprobePath string) (audioTechnical, bool) {
 	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, ffprobePath, "-v", "error", "-print_format", "json", "-show_streams", "-show_format", path)
+	command := exec.CommandContext(ctx, ffprobePath, "-v", "error", "-print_format", "json", "-show_entries", "stream=codec_type,duration,bit_rate,sample_rate,channels,bits_per_sample,bits_per_raw_sample:format=duration,bit_rate", path)
 	var output limitedBuffer
 	command.Stdout = &output
 	command.Stderr = io.Discard

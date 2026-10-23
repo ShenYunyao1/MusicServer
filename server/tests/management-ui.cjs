@@ -91,12 +91,17 @@ async function main() {
     await page.fill('#username', 'admin');
     await page.fill('#password', password);
     await page.click('#loginButton');
+    await page.waitForFunction(()=>state.user?.username==='admin');
+    await page.waitForFunction(async()=> (await api('admin/scan/status')).state==='completed',null,{polling:250});
+    await page.evaluate(()=>refreshCore());
     await page.waitForFunction(() => state.tracks.length === 1);
     await page.reload();
     await page.waitForFunction(() => state.user?.username === 'admin' && state.tracks.length === 1);
     await page.waitForFunction(() => document.querySelector('#status').textContent === '已登录');
     await require('./track-actions-ui.cjs')({page});
     if(process.env.MUSIC_SERVER_TEST_TRACK_ACTIONS_ONLY==='1')return;
+    await require('./operations-ui.cjs')({page,audio});
+    if(process.env.MUSIC_SERVER_TEST_OPERATIONS_ONLY==='1')return;
     await require('./updater-ui.cjs')({page});
     await require('./navigation-ui.cjs')({page});
     await require('./sidebar-ui.cjs')({page,directory});

@@ -1,6 +1,7 @@
 package music
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"musicserver/internal/activity"
 )
 
 const uploadStageTTL = 30 * time.Minute
@@ -48,6 +50,43 @@ func (s *Store) StageAudio(name string, reader io.Reader, fields map[string]stri
 }
 
 func (s *Store) stageAudioWithAssets(name string, reader io.Reader, fields map[string]string, assets uploadAssets, options ...MutationOptions) (UploadPreview, error) {
+	return s.stageAudioWithAssetsContext(context.Background(), name, reader, fields, assets, options...)
+}
+
+type uploadActivityKey struct{}
+
+func (s *Store) stageAudioWithAssetsContext(ctx context.Context, name string, reader io.Reader, fields map[string]string, assets uploadAssets, options ...MutationOptions) (result UploadPreview, resultErr error) {
+	started := time.Now()
+	metrics, _ := ctx.Value(uploadActivityKey{}).(activity.Fields)
+	if metrics.UserID == "" && len(options) > 0 {
+		metrics.UserID = options[0].UserID
+	}
+	timings := map[string]int64{}
+	for key, value := range metrics.Timings {
+		timings[key] = value
+	}
+	defer func() {
+		timings["total_ms"] = time.Since(started).Milliseconds() + timings["receive_ms"]
+		metrics.Timings = timings
+		metrics.DurationMS = timings["total_ms"]
+		result.Timings = timings
+		code := "upload.ready"
+		if resultErr != nil {
+			code = "upload.failed"
+			metrics.Reason = "UPLOAD_STORAGE"
+			switch {
+			case errors.Is(resultErr, context.Canceled):
+				metrics.Reason = "CLIENT_CANCELED"
+			case strings.Contains(resultErr.Error(), "FFPROBE_REQUIRED"):
+				metrics.Reason = "FFPROBE_REQUIRED"
+			case strings.Contains(resultErr.Error(), "AUDIO_INVALID"):
+				metrics.Reason = "AUDIO_INVALID"
+			case strings.Contains(resultErr.Error(), "upload limit"):
+				metrics.Reason = "UPLOAD_LIMIT"
+			}
+		}
+		_ = s.activity.Emit(code, metrics)
+	}()
 	ext := strings.ToLower(filepath.Ext(filepath.Base(name)))
 	if !audioExtensions[ext] {
 		return UploadPreview{}, errors.New("unsupported audio extension")
@@ -79,8 +118,21 @@ func (s *Store) stageAudioWithAssets(name string, reader io.Reader, fields map[s
 			return UploadPreview{}, errors.New("invalid cover (JPEG, PNG, GIF, WebP; maximum 8 MiB and 20 MP)")
 		}
 	}
+	waitStarted := time.Now()
+	select {
+	case s.stageSlots <- struct{}{}:
+		defer func() { <-s.stageSlots }()
+	case <-ctx.Done():
+		return UploadPreview{}, ctx.Err()
+	}
 	s.stageMu.Lock()
-	defer s.stageMu.Unlock()
+	locked := true
+	defer func() {
+		if locked {
+			s.stageMu.Unlock()
+		}
+	}()
+	timings["wait_ms"] = time.Since(waitStarted).Milliseconds()
 	if err := s.cleanupUploadStagesLocked(); err != nil {
 		return UploadPreview{}, err
 	}
@@ -101,10 +153,17 @@ func (s *Store) stageAudioWithAssets(name string, reader io.Reader, fields map[s
 	if err != nil {
 		return UploadPreview{}, err
 	}
+	s.activeStages[relative] = true
+	s.stageMu.Unlock()
+	locked = false
+	defer func() { s.stageMu.Lock(); delete(s.activeStages, relative); s.stageMu.Unlock() }()
 	settings := s.Settings()
 	max := settings.MaxUploadBytes
-	count, copyErr := io.Copy(file, io.LimitReader(reader, max+1))
+	writeStarted := time.Now()
+	count, copyErr := io.Copy(file, io.LimitReader(contextReader{ctx, reader}, max+1))
 	closeErr := file.Close()
+	metrics.Bytes = count
+	timings["write_ms"] = time.Since(writeStarted).Milliseconds()
 	if copyErr != nil || closeErr != nil || count > max {
 		_ = root.Remove(relative)
 		if count > max {
@@ -112,11 +171,17 @@ func (s *Store) stageAudioWithAssets(name string, reader io.Reader, fields map[s
 		}
 		return UploadPreview{}, errors.Join(copyErr, closeErr)
 	}
-	if err := validateAudio(filepath.Join(s.mediaRoot, filepath.FromSlash(relative)), settings.FFprobePath); err != nil {
+	_ = s.activity.Emit("upload.probing", metrics)
+	probeStarted := time.Now()
+	technical, probeErr := validatedAudioContext(ctx, filepath.Join(s.mediaRoot, filepath.FromSlash(relative)), settings.FFprobePath)
+	timings["probe_ms"] = time.Since(probeStarted).Milliseconds()
+	if probeErr != nil {
 		_ = root.Remove(relative)
-		return UploadPreview{}, err
+		return UploadPreview{}, probeErr
 	}
-	track, metadata, err := s.readTrackWithMetadata(filepath.Join(s.mediaRoot, filepath.FromSlash(relative)), name)
+	metadataStarted := time.Now()
+	track, metadata, err := s.readTrackWithTechnical(ctx, filepath.Join(s.mediaRoot, filepath.FromSlash(relative)), name, settings, &technical)
+	timings["metadata_ms"] = time.Since(metadataStarted).Milliseconds()
 	if err != nil {
 		_ = root.Remove(relative)
 		return UploadPreview{}, err
@@ -159,6 +224,7 @@ func (s *Store) stageAudioWithAssets(name string, reader io.Reader, fields map[s
 		return UploadPreview{}, err
 	}
 	record.Track.OwnerID, record.Track.UploadedBy = owner, owner
+	persistStarted := time.Now()
 	encoded, err := json.Marshal(record)
 	if err != nil {
 		_ = root.Remove(relative)
@@ -168,6 +234,7 @@ func (s *Store) stageAudioWithAssets(name string, reader io.Reader, fields map[s
 		_ = root.Remove(relative)
 		return UploadPreview{}, err
 	}
+	timings["persist_ms"] = time.Since(persistStarted).Milliseconds()
 	return s.previewLocked(id, filepath.Base(name), record, created, expires), nil
 }
 
@@ -497,7 +564,7 @@ func (s *Store) cleanupUploadStagesLocked() error {
 	// The mutex protects live stages while this sweep removes only our files.
 	for _, entry := range entries {
 		path := ".staging/" + entry.Name()
-		if !entry.Type().IsRegular() || !generatedStageFilename(entry.Name()) || retained[path] {
+		if !entry.Type().IsRegular() || !generatedStageFilename(entry.Name()) || retained[path] || s.activeStages[path] {
 			continue
 		}
 		if err := root.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {

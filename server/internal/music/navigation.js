@@ -1,9 +1,10 @@
 'use strict';
 
-const pageRoutes = {tracks:'library', public:'public/playlists', playlists:'playlists', upload:'uploads', keys:'player/keys', stats:'player/stats', overview:'admin/overview', users:'admin/users', maintenance:'admin/library/scan', settings:'admin/settings/general'};
-const adminPages = new Set(['overview', 'users', 'maintenance', 'settings']);
+const pageRoutes = {tracks:'library', public:'public/playlists', playlists:'playlists', upload:'uploads', keys:'player/keys', stats:'player/stats', overview:'admin/overview', users:'admin/users', maintenance:'admin/library/scan', logs:'admin/logs',settings:'admin/settings/general'};
+const adminPages = new Set(['overview', 'users', 'maintenance', 'settings','logs']);
 Object.assign(titles, {overview:'管理概览', tracks:'全局曲库', playlists:'我的歌单', upload:'上传任务', keys:'播放器接入', stats:'播放器接入', users:'用户管理', settings:'系统设置', maintenance:'曲库维护'});
 titles.public='公开歌单';
+titles.logs='系统日志';
 
 function makeButton(label, action, className = 'btn') {
   const button = document.createElement('button');
@@ -17,6 +18,7 @@ function routeLink(label, path) {
 const nav = document.querySelector('.nav');
 nav.setAttribute('aria-label','主导航');
 const navIcons={
+  logs:'<path d="M5 3h14v18H5zM8 7h8M8 12h8M8 17h5"/>',
   public:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18"/>',
   tracks:'<path d="M9 18V5l11-2v13M9 8l11-2"/><ellipse cx="6" cy="18" rx="3" ry="2"/><ellipse cx="17" cy="16" rx="3" ry="2"/>',
   playlists:'<path d="M4 5h16M4 10h16M4 15h8M17 14v6"/><ellipse cx="14.5" cy="20" rx="2.5" ry="1.8"/>',
@@ -39,7 +41,8 @@ trackDetails.addEventListener('close',()=>{$('trackDetailsBody').replaceChildren
 const clearCompleted=makeButton('清理已完成',()=>run(async()=>{for(const upload of [...state.uploads].filter(x=>['完成','已去重'].includes(x.status)))await removeUpload(upload)}));
 clearCompleted.id='clearCompleted';$('page-upload').querySelector('.queue-actions').prepend(clearCompleted);
 window.addEventListener('beforeunload',event=>{if(state.user&&state.uploads.some(x=>!['完成','已去重'].includes(x.status))){event.preventDefault();event.returnValue=''}});
-const groups = [['音乐', ['tracks','public','playlists','upload']], ['播放器',['keys']], ['管理',['overview','users','maintenance','settings']]];
+const groups = [['音乐', ['tracks','public','playlists','upload']], ['播放器',['keys']], ['管理',['overview','users','maintenance','logs','settings']]];
+const logsNav=makeButton('',()=>showPage('logs'));logsNav.dataset.page='logs';logsNav.innerHTML='<span class="nav-icon">▤</span><span class="nav-label">系统日志</span>';nav.append(logsNav);
 const maintenanceNav = makeButton('', () => showPage('maintenance'));
 maintenanceNav.dataset.page = 'maintenance';
 maintenanceNav.className='';
@@ -203,6 +206,7 @@ async function restoreWorkspaceRoute() {
       document.querySelectorAll('[data-filter]').forEach(el=>el.classList.toggle('active',el.dataset.filter===state.trackFilter));renderTracks();
     }
     if(page==='keys')await loadKeys();
+    if(page==='logs')await loadSystemLogs();
     if(page==='stats')await loadStats();
     if(page==='overview'){await loadUsers();renderOverview();await loadOverviewSummary()}
     if(page==='settings')await showSettingsTab(path[2]);

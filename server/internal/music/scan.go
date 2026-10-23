@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"musicserver/internal/activity"
 )
 
 type scanCandidate struct {
@@ -43,6 +44,9 @@ func (s *Store) readTrackWithMetadata(path, name string) (Track, audioMetadata, 
 	return s.readTrackWithSettings(context.Background(), path, name, s.Settings())
 }
 func (s *Store) readTrackWithSettings(ctx context.Context, path, name string, settings ServerSettings) (Track, audioMetadata, error) {
+	return s.readTrackWithTechnical(ctx, path, name, settings, nil)
+}
+func (s *Store) readTrackWithTechnical(ctx context.Context, path, name string, settings ServerSettings, validated *audioTechnical) (Track, audioMetadata, error) {
 	relative, err := filepath.Rel(s.mediaRoot, path)
 	if err != nil {
 		return Track{}, audioMetadata{}, err
@@ -70,7 +74,12 @@ func (s *Store) readTrackWithSettings(ctx context.Context, path, name string, se
 	if settings.ScanExternalCovers {
 		metadata = selectCover(root, relative, metadata)
 	}
-	technical := technicalMetadataContext(ctx, path, settings.FFprobePath)
+	var technical audioTechnical
+	if validated != nil {
+		technical = *validated
+	} else {
+		technical = technicalMetadataContext(ctx, path, settings.FFprobePath)
+	}
 	base := strings.TrimSuffix(filepath.Base(name), filepath.Ext(name))
 	title, artist := base, ""
 	if parts := strings.SplitN(base, " - ", 2); len(parts) == 2 {
@@ -206,7 +215,21 @@ func (s *Store) Scan() (int, error) {
 	return len(s.Tracks()), err
 }
 
-func (s *Store) runScan(ctx context.Context, full bool, options []MutationOptions) (int, error) {
+func (s *Store) runScan(ctx context.Context, full bool, options []MutationOptions) (changedResult int, scanErr error) {
+	started := time.Now()
+	fields := activity.Fields{}
+	if len(options) > 0 {
+		fields.UserID = options[0].UserID
+	}
+	_ = s.activity.Emit("scan.started", fields)
+	defer func() {
+		fields.DurationMS = time.Since(started).Milliseconds()
+		code := "scan.completed"
+		if scanErr != nil {
+			code = "scan.failed"
+		}
+		_ = s.activity.Emit(code, fields)
+	}()
 	baseline, err := s.allTracks()
 	if err != nil {
 		return 0, err

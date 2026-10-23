@@ -43,7 +43,8 @@ module.exports=async function({page,browser,base,directory}){
     await reader.evaluate(()=>location.hash='#/invitations');await reader.locator('[data-received-invitation]').waitFor();
     let requests=0;reader.on('request',r=>{if(r.url().includes('/api/v2/invitations'))requests++});
     await reader.evaluate(async()=>{window.sharingNow=Date.now;window.sharingTime=Date.now()+300001;Date.now=()=>window.sharingTime;Object.defineProperty(document,'hidden',{configurable:true,value:true});await communityCheck()});assert.equal(requests,0);
-    await reader.evaluate(async()=>{Object.defineProperty(document,'hidden',{configurable:true,value:false});await communityCheck()});assert.equal(requests,1);
+    const refreshed=reader.waitForRequest(r=>r.url().includes('/api/v2/invitations'));
+    await reader.evaluate(async()=>{Object.defineProperty(document,'hidden',{configurable:true,value:false});await communityCheck()});await refreshed;assert.equal(requests,1);
     await reader.evaluate(()=>{Date.now=window.sharingNow;delete document.hidden;scheduleCommunityRefresh()});
     await reader.locator('.account-menu summary').click();await reader.click('#logout');await reader.locator('#loginScreen').waitFor({state:'visible'});assert.equal(await reader.locator('#receivedInvitations').textContent(),'');assert.equal(await reader.evaluate(()=>state.receivedInvitations.length),0);
     assert.deepEqual(errors,[]);console.log('Sharing UI passed: shared editor, owner invitations and copy, account-bound login target, reject/reinvite/accept, explicit key grants, revoke/recover, resubscribe isolation, visible-only refresh, mobile and logout cleanup.');
