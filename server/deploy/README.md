@@ -4,12 +4,12 @@
 
 ## 首次安装
 
-1. 安装 `ffmpeg`（提供 `ffprobe`）、`curl` 和 Python 3。
+1. Ubuntu 安装 `ffmpeg`（提供 `ffprobe`）和 `curl`，运行服务器不需要安装 Go。
 2. 从本项目正式 Release 下载 `musicserver-linux-amd64.tar.gz`、`release-manifest.json` 和 `release-manifest.json.sig`。先验证签名及包 SHA-256，再解压；不要以 root 身份直接解压未经验证的网络文件。
 3. 在普通用户的临时目录解压，执行 `sudo bash deploy/install.sh`。安装脚本拒绝覆盖已有 `/opt/musicserver/current`，管理员密码在终端设置。
 4. 在 `/etc/musicserver/musicserver.env` 设置 `MUSIC_SERVER_PUBLIC_URL=https://你的域名`，配置 HTTPS 反向代理至 `127.0.0.1:8080`，重启 `musicserver.service`。公网只开放 SSH 与 HTTPS，8080 保持回环监听。
 
-首次信任应从经过审查的源码或可信安装渠道取得公钥。可用本项目源码中的验证命令验证已下载资产：
+首次信任应从经过审查的源码或可信安装渠道取得公钥。可在有 Go 的本地开发机使用可信源码验证已下载资产，再上传到 Ubuntu；无需在云端编译：
 
 ```sh
 # 在可信源码的 server/ 下运行；不启动服务、不接触数据库。

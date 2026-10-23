@@ -22,12 +22,12 @@
 
 - [x] 记录计划及本阶段授权范围。
 - [x] 核对仓库公开状态、HTTPS 读写权限与 GitHub CLI 登录；检查本地 Linux 测试环境。
-- [ ] 发布流水线：新增 `.github/workflows/server-release.yml`，测试 Go、构建 Windows/Linux 固定名称包、生成元数据、发布 Release；支持标签发布和手动触发。
+- [x] 发布流水线：新增 `.github/workflows/server-release.yml`，测试 Go、构建 Windows/Linux 固定名称包、生成元数据；普通推送与手动触发构建，标签触发 Release。构建已实际成功，正式发布按末项继续验收。
 - [x] 更新协议：重构 `server/internal/update/update.go`，将检查、下载准备和安装任务分开；覆盖签名、坏校验、只检查不下载、任务持久化与关闭取消。完整安装故障用例继续验收。
 - [x] 安装引擎：新增独立命令与 `server/internal/update/` 安装模块，安全解包、持久状态、停机备份、原子切换、重启健康检查和失败回退；用故障注入测试验证。
-- [ ] Ubuntu 接入：扩展 `server/deploy/` 中的 systemd 单元、配置示例与安装脚本；验证权限边界、并发锁和重启后的任务恢复。
+- [x] Ubuntu 接入：扩展 `server/deploy/` 中的 systemd 单元、配置示例与安装脚本；Bash 语法通过，隔离 systemd 集成覆盖普通账户、程序切换及中断恢复。生产目录首次安装仍待云端验收。
 - [x] 管理后台：调整 `server/internal/music/` 更新 API 和页面，显示版本、发布说明、兼容性、安装进度及失败原因；只有管理员可安装，安装前明确确认。
-- [ ] 构建文档：更新 `server/package-release.ps1`、README、更新日志和部署说明，固定产物路径与名称；说明 Windows 和 Ubuntu 支持范围。
+- [x] 构建文档：更新 `server/package-release.ps1`、README、更新日志和部署说明，固定产物路径与名称；说明 Windows 和 Ubuntu 支持范围。发行命令强制干净提交，检查所有程序的内嵌提交号与清单一致，使用显式文件清单打包。
 - [ ] 本地回归：相关单测、完整 Go 测试、vet、Windows/Linux 构建、前端交互及安装失败回退验证；逐项记录真实结果。
 - [ ] 本地提交并推送本次已验收改动，触发 Actions，核对构建日志、发行资产、版本及校验信息。
 - [ ] Ubuntu 云端部署（等待服务器）：检查 SSH、架构、GitHub 连通性；安装 ffprobe、systemd 与 HTTPS 入口，完成升级和回退实测。

@@ -42,6 +42,7 @@ func TestUpdateRepositoryPersistsAndRejectsInvalidURLs(t *testing.T) {
 func TestUpdateStatusRequiresAdministrator(t *testing.T) {
 	api, _ := testAPI(t)
 	api.SetUpdater(update.NewManager(filepath.Join(t.TempDir(), "updates"), func() string { return "" }))
+	t.Cleanup(api.updater.Close)
 	_, playerSecret := createPersistentKey(t, api, APIKeyCreateRequest{Name: "player"})
 	for _, tc := range []struct {
 		method, path, key string
@@ -93,6 +94,7 @@ func TestUpdateMaintenanceBlocksWritesButKeepsHealth(t *testing.T) {
 func TestApplyUpdateNeedsAnExplicitVersion(t *testing.T) {
 	api, _ := testAPI(t)
 	api.SetUpdater(update.NewManager(t.TempDir(), func() string { return update.Repository }))
+	t.Cleanup(api.updater.Close)
 	request := httptest.NewRequest("POST", "/api/v2/admin/update/apply", strings.NewReader(`{}`))
 	authorizeTestAdmin(api, request)
 	response := httptest.NewRecorder()
