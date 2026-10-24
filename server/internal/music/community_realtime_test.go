@@ -1,6 +1,7 @@
 package music
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -154,5 +155,46 @@ func TestRealtimeCursorExpiryAndReadySession(t *testing.T) {
 		if w := sessionRequest(api, token, "POST", "/api/v2/community/sync", body); w.Code != 400 {
 			t.Fatalf("invalid view: %d", w.Code)
 		}
+	}
+}
+
+func TestRealtimeUnavailableSubscriptionTracksAreMasked(t *testing.T) {
+	for _, missing := range []bool{false, true} {
+		t.Run(map[bool]string{false: "removed", true: "missing"}[missing], func(t *testing.T) {
+			api, author, reader, p := communityFixture(t)
+			bt := communityLogin(t, api.store, reader.Username)
+			p, err := api.store.SetPlaylistVisibility(p.ID, "public", MutationOptions{UserID: author.ID, ExpectedVersion: p.Version})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := api.store.Subscribe(p.ID, MutationOptions{UserID: reader.ID}); err != nil {
+				t.Fatal(err)
+			}
+			track, err := readTrackFrom(api.store.db, p.TrackIDs[0], true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			track.Title = "Hidden unavailable title"
+			track.Lyrics = "Hidden lyrics"
+			track.Comment = "Hidden comment"
+			track.Artist = "Hidden artist"
+			view := map[string]any{"subscriptions": true, "subscription_detail": p.ID}
+			before := realtimeTestSync(t, api, bt, "", view)
+			track.Removed = !missing
+			track.Missing = missing
+			track.Version++
+			if err := api.store.transaction(func(tx *sql.Tx) error { return writeTrack(tx, track) }); err != nil {
+				t.Fatal(err)
+			}
+			delta := realtimeTestSync(t, api, bt, before.Cursor, view)
+			var got Track
+			items := delta.Sections["subscription_tracks"].Changed
+			if len(items) != 1 || json.Unmarshal(items[0], &got) != nil {
+				t.Fatal("missing unavailable delta")
+			}
+			if got.Title != "Unavailable" || got.Lyrics != "" || got.Artist != "" || got.Comment != "" || got.Path != "" {
+				t.Fatal("unavailable subscription track exposed hidden fields")
+			}
+		})
 	}
 }

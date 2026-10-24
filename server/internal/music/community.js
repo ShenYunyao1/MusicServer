@@ -21,15 +21,16 @@ $('publicSearchForm').onsubmit=event=>{event.preventDefault();location.hash=publ
 $('publicPrevious').onclick=()=>location.hash=publicRoute(Math.max(0,(state.publicOffset||0)-30));$('publicNext').onclick=()=>location.hash=publicRoute((state.publicOffset||0)+30);
 $('refreshPublic').onclick=()=>loadPublicCatalog(true).catch(error=>setStatus(error.message,'error'));
 function communityRelevant(){return state.user&&(state.page==='public'||state.page==='playlists'&&(state.subscriptionsTab||state.invitationsTab))}
-function scheduleCommunityRefresh(){clearTimeout(communityTimer);if(!communityRelevant()||document.hidden)return;communityTimer=setTimeout(()=>communityCheck().catch(error=>setStatus(error.message,'error')),Math.max(1000,PUBLIC_REFRESH_MS-(Date.now()-communityLastCheck)))}
+function scheduleCommunityRefresh(){if(typeof scheduleCommunityRealtime==='function'){scheduleCommunityRealtime();return}clearTimeout(communityTimer);if(!communityRelevant()||document.hidden)return;communityTimer=setTimeout(()=>communityCheck().catch(error=>setStatus(error.message,'error')),Math.max(1000,PUBLIC_REFRESH_MS-(Date.now()-communityLastCheck)))}
 async function communityCheck(){
+  if(typeof syncCommunityRealtime==='function'){await syncCommunityRealtime();return}
   if(!communityRelevant()||document.hidden)return;
   if(Date.now()-communityLastCheck<PUBLIC_REFRESH_MS){scheduleCommunityRefresh();return}
   try{if(state.page==='public'){if(state.publicDetailId)await loadPublicDetail(state.publicDetailId);else await loadPublicCatalog(true)}else if(state.invitationsTab)await loadReceivedInvitations();else await loadMySubscriptions()}
   finally{communityLastCheck=Date.now();scheduleCommunityRefresh()}
 }
 document.addEventListener('visibilitychange',()=>{if(document.hidden)clearTimeout(communityTimer);else if(communityRelevant())communityCheck().catch(error=>setStatus(error.message,'error'))});
-function clearCommunityWorkspace(){clearTimeout(communityTimer);communityRequest++;communityCache.clear();communityLastCheck=0;state.publicDetailId=null;state.publicDetail=null;state.subscriptionsTab=false;$('publicCatalogList').replaceChildren();$('publicDetail').querySelector('.playlist-tracks')?.sortCleanup?.();$('publicDetail').replaceChildren();$('publicCatalogStatus').textContent='';$('publicSearch').value=''}
+function clearCommunityWorkspace(){if(typeof stopCommunityRealtime==='function')stopCommunityRealtime(true);clearTimeout(communityTimer);communityRequest++;communityCache.clear();communityLastCheck=0;state.publicDetailId=null;state.publicDetail=null;state.subscriptionsTab=false;$('publicCatalogList').replaceChildren();$('publicDetail').querySelector('.playlist-tracks')?.sortCleanup?.();$('publicDetail').replaceChildren();$('publicCatalogStatus').textContent='';$('publicSearch').value=''}
 function renderPublicCatalog(data){
   const list=$('publicCatalogList');list.replaceChildren();
   for(const p of data.items){

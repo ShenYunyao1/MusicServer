@@ -14,23 +14,24 @@ const realtimeCursorLimit = 64
 const realtimeRecordLimit = 5000
 
 type realtimeView struct {
-	Catalog          bool   `json:"catalog"`
-	Query            string `json:"query"`
-	Offset           int    `json:"offset"`
-	Subscriptions    bool   `json:"subscriptions"`
-	Invitations      bool   `json:"invitations"`
-	InvitationID     string `json:"invitation_id"`
-	InvitationOffset int    `json:"invitation_offset"`
-	OwnerPlaylist    string `json:"owner_playlist"`
-	OwnerOffset      int    `json:"owner_offset"`
-	PublicDetail     string `json:"public_detail"`
+	Catalog            bool   `json:"catalog"`
+	Query              string `json:"query"`
+	Offset             int    `json:"offset"`
+	Subscriptions      bool   `json:"subscriptions"`
+	SubscriptionDetail string `json:"subscription_detail"`
+	Invitations        bool   `json:"invitations"`
+	InvitationID       string `json:"invitation_id"`
+	InvitationOffset   int    `json:"invitation_offset"`
+	OwnerPlaylist      string `json:"owner_playlist"`
+	OwnerOffset        int    `json:"owner_offset"`
+	PublicDetail       string `json:"public_detail"`
 }
 
 func (v realtimeView) valid() bool {
 	if len(v.Query) > 1024 || v.Offset < 0 || v.InvitationOffset < 0 || v.OwnerOffset < 0 || v.Offset > 1000000 || v.InvitationOffset > 1000000 || v.OwnerOffset > 1000000 {
 		return false
 	}
-	for _, id := range []string{v.InvitationID, v.OwnerPlaylist, v.PublicDetail} {
+	for _, id := range []string{v.InvitationID, v.OwnerPlaylist, v.PublicDetail, v.SubscriptionDetail} {
 		if id != "" && !validID.MatchString(id) {
 			return false
 		}
@@ -167,6 +168,38 @@ func (s *Store) realtimeSnapshot(auth authContext, view realtimeView) (realtimeS
 			}
 		}
 		snapshot["invitations"] = section
+	}
+	if view.SubscriptionDetail != "" {
+		tracks := newRealtimeSection(map[string]any{})
+		err := s.transaction(func(tx *sql.Tx) error {
+			p, err := subscriptionView(tx, auth.userID, view.SubscriptionDetail)
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			if p.SubscriptionStatus != "active" {
+				return nil
+			}
+			for _, id := range p.TrackIDs {
+				track, err := readTrackFrom(tx, id, true)
+				if err != nil {
+					return err
+				}
+				if track.Removed || track.Missing {
+					track = unavailableTrack(track)
+				}
+				if err := tracks.add(id, publicTrack(track, auth)); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		snapshot["subscription_tracks"] = tracks
 	}
 	if view.OwnerPlaylist != "" {
 		playlist := newRealtimeSection(map[string]any{"available": false})

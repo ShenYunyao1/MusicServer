@@ -44,7 +44,7 @@ async function restoreSharedSubscription(i){await changeSubscription({id:i.playl
 
 const sharingDialog=document.createElement('dialog');sharingDialog.id='sharingDialog';sharingDialog.className='modal sharing-dialog';
 sharingDialog.innerHTML='<div class="modal-head"><h3>分享设置</h3><button id="closeSharing" class="btn">关闭</button></div><div class="modal-body"><p id="sharingSource" class="notice"></p><button id="editSharingVisibility" class="btn">编辑可见性</button><form id="inviteForm" class="invite-form"><div class="field"><label for="inviteUsername">完整登录名</label><input id="inviteUsername" autocomplete="off" maxlength="64" required placeholder="输入对方完整登录名"></div><button id="sendInvitation" type="submit" class="btn primary">发送邀请</button></form><p class="status">仅目标账户可接受，邀请不会自动授予播放器 Key 权限。</p><p id="sharingError" class="status error" role="alert"></p><div id="ownerInvitations"></div><div class="toolbar"><button id="previousOwnerInvitations" class="btn">上一页</button><button id="nextOwnerInvitations" class="btn">下一页</button><span id="ownerInvitationCount" class="status"></span></div></div>';
-document.body.append(sharingDialog);$('closeSharing').onclick=()=>sharingDialog.close();sharingDialog.addEventListener('close',()=>{sharingGeneration++;state.sharingPlaylist=null;$('inviteUsername').value='';$('ownerInvitations').replaceChildren();$('sharingSource').textContent='';$('sharingError').textContent=''});
+document.body.append(sharingDialog);$('closeSharing').onclick=()=>sharingDialog.close();sharingDialog.addEventListener('close',()=>{sharingGeneration++;state.sharingPlaylist=null;$('inviteUsername').value='';$('ownerInvitations').replaceChildren();$('sharingSource').textContent='';$('sharingError').textContent='';scheduleCommunityRefresh()});
 $('previousOwnerInvitations').onclick=()=>{state.ownerInvitationOffset=Math.max(0,state.ownerInvitationOffset-30);loadSharingSettings().catch(error=>setStatus(error.message,'error'))};$('nextOwnerInvitations').onclick=()=>{state.ownerInvitationOffset+=30;loadSharingSettings().catch(error=>setStatus(error.message,'error'))};
 $('editSharingVisibility').onclick=()=>{const p=state.sharingPlaylist;sharingDialog.close();if(p)editPlaylist(p)};
 $('inviteForm').onsubmit=event=>{event.preventDefault();mutateSharing(()=>api('playlists/'+state.sharingPlaylist.id+'/invitations','POST',{username:$('inviteUsername').value.trim()},undefined,state.sharingPlaylist.version),'邀请已保存')};
@@ -58,7 +58,10 @@ async function loadSharingSettings(){
   const generation=++sharingGeneration,userID=state.user?.id;
   const [detail,page]=await Promise.all([api('playlists/'+p.id),api('playlists/'+p.id+'/invitations?'+new URLSearchParams({offset:String(state.ownerInvitationOffset||0),limit:'30'}))]);
   if(generation!==sharingGeneration||state.user?.id!==userID||!sharingDialog.open||state.sharingPlaylist?.id!==p.id)return;
-  state.sharingPlaylist=detail.playlist;
+  renderSharingSettings(detail.playlist,page);scheduleCommunityRefresh();
+}
+function renderSharingSettings(playlist,page){
+  const detail={playlist},p=playlist;state.sharingPlaylist=playlist;
   $('sharingSource').textContent=detail.playlist.name+' · '+(detail.playlist.visibility==='shared'?'仅分享：只向接受邀请的账户开放。':'当前并非“仅分享”。请在编辑页切换可见性并保存后再邀请。');
   $('sendInvitation').disabled=$('inviteUsername').disabled=detail.playlist.visibility!=='shared'||page.total>=100;
   const rows=$('ownerInvitations');rows.replaceChildren();

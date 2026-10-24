@@ -67,20 +67,21 @@ module.exports=async function({page,browser,base,directory}){
     await reader.setViewportSize({width:1440,height:1000});await reader.evaluate(()=>location.hash='#/public/playlists');await reader.locator('[data-public-playlist="'+source.id+'"]').waitFor();
     const responses=[];reader.on('response',r=>{if(r.url().includes('/api/v2/public/playlists?'))responses.push(r.status())});
     await reader.click('#refreshPublic');await reader.waitForFunction(()=>!document.querySelector('#refreshPublic').disabled);assert.ok(responses.includes(304));
-    // Advance the clock without waiting five minutes. Hidden pages never poll;
-    // visible pages poll only when due, and returning before that uses cache.
-    const before=responses.length;
+    // Realtime remains primary; the minute delta check pauses in hidden tabs.
+    await reader.waitForFunction(()=>!communityLive.busy);
+    let deltaRequests=0;reader.on('request',r=>{if(r.url().endsWith('/api/v2/community/sync'))deltaRequests++});
+    const before=deltaRequests;
     await reader.evaluate(async()=>{
-      window.communityRealNow=Date.now;window.communityFakeNow=Date.now();Date.now=()=>window.communityFakeNow;
-      window.communityFakeNow+=300001;Object.defineProperty(document,'hidden',{configurable:true,value:true});await communityCheck();
-    });assert.equal(responses.length,before);
-    await reader.evaluate(async()=>{Object.defineProperty(document,'hidden',{configurable:true,value:false});await communityCheck()});assert.equal(responses.length,before+1);
-    await reader.evaluate(()=>communityCheck());assert.equal(responses.length,before+1);
+      window.communityRealNow=Date.now;window.communityFakeNow=Date.now()+60001;Date.now=()=>window.communityFakeNow;
+      Object.defineProperty(document,'hidden',{configurable:true,value:true});document.dispatchEvent(new Event('visibilitychange'));await communityCheck();
+    });assert.equal(deltaRequests,before);
+    await reader.evaluate(async()=>{Object.defineProperty(document,'hidden',{configurable:true,value:false});await communityCheck()});assert.equal(deltaRequests,before+1);
+    await reader.evaluate(()=>communityCheck());assert.equal(deltaRequests,before+1);
     await reader.evaluate(()=>{Date.now=window.communityRealNow;delete document.hidden;scheduleCommunityRefresh()});
     await reader.screenshot({path:path.join(directory,'public-catalog.png'),fullPage:true});
     await reader.locator('.account-menu summary').click();await reader.click('#logout');await reader.locator('#loginScreen').waitFor({state:'visible'});
     assert.equal(await reader.evaluate(()=>communityCache.size),0);assert.equal(await reader.locator('#publicDetail').textContent(),'');
-    assert.deepEqual(errors,[]);console.log('Community UI passed: shared-target login, atomic visibility, private notes, explicit grants, suspend/restore/unsubscribe, ETag and visible-only five-minute refresh.');
+    assert.deepEqual(errors,[]);console.log('Community UI passed: shared-target login, atomic visibility, private notes, explicit grants, suspend/restore/unsubscribe, ETag and visible-only minute delta fallback.');
   }finally{
     for(const c of contexts)await c.context.close();
     await page.evaluate(async id=>{await refreshCore();const p=state.playlists.find(v=>v.id===id);if(p)await api('playlists/'+id,'DELETE',undefined,undefined,p.version);await refreshCore()},source.id);

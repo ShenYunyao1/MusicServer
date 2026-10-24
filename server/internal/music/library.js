@@ -87,7 +87,7 @@ function renderPlaylists(){
   $('playlistBrowse').hidden=Boolean(detail);$('playlistDetail').hidden=!detail;
   $('page-playlists').querySelector(':scope > .page-intro').hidden=Boolean(detail);
   $('newPlaylist').hidden=Boolean(detail)||state.subscriptionsTab;
-  if(detail){renderPlaylistDetail(detail);return}
+  if(detail){renderPlaylistDetail(detail,state.subscriptionsTab&&state.liveSubscriptionTracksID===detail.id?{tracks:state.liveSubscriptionTracks}:{});return}
   state.playlistDetailId=null;
   if(state.page==='playlists')document.title='我的歌单 · 音乐服务器';
   const query=$('playlistSearch').value.trim().toLowerCase(),playlists=state.playlists.filter(p=>!p.system&&(state.subscriptionsTab?Boolean(p.subscription_status):!p.read_only)&&(p.name+' '+(p.description||'')).toLowerCase().includes(query));

@@ -98,6 +98,7 @@ async function main() {
     await page.reload();
     await page.waitForFunction(() => state.user?.username === 'admin' && state.tracks.length === 1);
     await page.waitForFunction(() => document.querySelector('#status').textContent === '已登录');
+    if(process.env.MUSIC_SERVER_TEST_REALTIME_ONLY==='1'){await require('./community-realtime-ui.cjs')({page,browser,base,directory});return}
     await require('./playlist-create-ui.cjs')({page,directory});
     if(process.env.MUSIC_SERVER_TEST_PLAYLIST_CREATE_ONLY==='1')return;
     await require('./track-actions-ui.cjs')({page});
