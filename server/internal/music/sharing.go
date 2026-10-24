@@ -94,7 +94,7 @@ func (s *Store) CreateInvitation(id, username string, options MutationOptions) (
 			return errSharingMode
 		}
 		var recipient string
-		if tx.QueryRow("SELECT id FROM users WHERE username=?", normalizeUsername(username)).Scan(&recipient) != nil {
+		if tx.QueryRow("SELECT id FROM users WHERE username=? COLLATE NOCASE", normalizeUsername(username)).Scan(&recipient) != nil {
 			return errInvitationTarget
 		}
 		if err = invitationTarget(tx, recipient, p.OwnerID); err != nil {

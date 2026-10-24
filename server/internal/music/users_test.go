@@ -40,11 +40,11 @@ func TestUsersAdminCreatesListsAndResets(t *testing.T) {
 	api, _ := testAPI(t)
 	a := createMemberFixture(t, api, "Alice")
 	b := createMemberFixture(t, api, "bob")
-	if a.User.Username != "alice" || a.User.Role != "member" || !a.User.MustChangePassword || len(a.Password) < 12 || a.Password == b.Password {
+	if a.User.Username != "Alice" || a.User.Role != "member" || !a.User.MustChangePassword || len(a.Password) < 12 || a.Password == b.Password {
 		t.Fatalf("bad temporary credentials: %+v", a.User)
 	}
 	list := callAPI(api, "GET", "/api/v2/admin/users", "")
-	if list.Code != 200 || !strings.Contains(list.Body.String(), "alice") || strings.Contains(list.Body.String(), a.Password) || strings.Contains(list.Body.String(), "password_hash") {
+	if list.Code != 200 || !strings.Contains(list.Body.String(), "Alice") || strings.Contains(list.Body.String(), a.Password) || strings.Contains(list.Body.String(), "password_hash") {
 		t.Fatalf("user list: %d %s", list.Code, list.Body)
 	}
 	if w := callAPI(api, "POST", "/api/v2/admin/users", `{"username":"ALICE"}`); w.Code != 409 {
@@ -104,11 +104,11 @@ func TestUsersConcurrentDuplicateCreation(t *testing.T) {
 	callAPI(api, "GET", "/api/v2/admin/users", "")
 	var wg sync.WaitGroup
 	codes := make(chan int, 2)
-	for range 2 {
+	for _, username := range []string{"Same-User", "sAME-uSER"} {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			codes <- callAPI(api, "POST", "/api/v2/admin/users", `{"username":"same-user"}`).Code
+			codes <- callAPI(api, "POST", "/api/v2/admin/users", `{"username":"`+username+`"}`).Code
 		}()
 	}
 	wg.Wait()

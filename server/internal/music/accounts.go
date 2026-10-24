@@ -37,13 +37,14 @@ type Session struct {
 	Current      bool      `json:"current"`
 }
 
-var usernamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{2,63}$`)
+var usernamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{2,63}$`)
 var errCredentials = errors.New("username or password incorrect")
 var errLoginLimited = errors.New("too many login attempts; retry later")
 
 const sessionIdle = 2 * time.Hour
 const sessionLifetime = 7 * 24 * time.Hour
 
+// Canonical lookup and rate-limit identity; never use this for stored spelling.
 func normalizeUsername(name string) string { return strings.ToLower(strings.TrimSpace(name)) }
 func passwordHash(password string) (string, error) {
 	if !utf8.ValidString(password) || utf8.RuneCountInString(password) < 12 || len(password) > 1024 {
@@ -97,7 +98,7 @@ func (s *Store) createUser(username, password, role string, bootstrap bool) (Use
 	return s.createUserRecord(username, password, role, "", false, bootstrap, nil)
 }
 func (s *Store) createUserRecord(username, password, role, display string, mustChange, bootstrap bool, options []MutationOptions) (User, error) {
-	username = normalizeUsername(username)
+	username = strings.TrimSpace(username)
 	if !usernamePattern.MatchString(username) || (role != "admin" && role != "member") {
 		return User{}, errors.New("invalid username or role (username: 3-64 ASCII letters, digits, dot, dash or underscore)")
 	}
@@ -125,7 +126,7 @@ func (s *Store) createUserRecord(username, password, role, display string, mustC
 			}
 		}
 		var exists bool
-		if err := tx.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE username=?)", username).Scan(&exists); err != nil {
+		if err := tx.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE username=? COLLATE NOCASE)", username).Scan(&exists); err != nil {
 			return err
 		}
 		if exists {
@@ -206,7 +207,7 @@ func (s *Store) Login(username, password, ip string) (User, Session, string, err
 		return User{}, Session{}, "", err
 	}
 	var id, encoded string
-	err := s.db.QueryRow("SELECT id,password_hash FROM users WHERE username=?", username).Scan(&id, &encoded)
+	err := s.db.QueryRow("SELECT id,password_hash FROM users WHERE username=? COLLATE NOCASE", username).Scan(&id, &encoded)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return User{}, Session{}, "", err
 	}
@@ -335,7 +336,7 @@ func (s *Store) replacePassword(username, old, password string, local, revokeKey
 		return errors.New("new password must differ from the previous password")
 	}
 	var id, before string
-	if err := s.db.QueryRow("SELECT id,password_hash FROM users WHERE username=?", username).Scan(&id, &before); err != nil {
+	if err := s.db.QueryRow("SELECT id,password_hash FROM users WHERE username=? COLLATE NOCASE", username).Scan(&id, &before); err != nil {
 		return err
 	}
 	if !local && !verifyPassword(before, old) {

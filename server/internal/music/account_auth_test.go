@@ -23,7 +23,7 @@ func TestAccountBootstrapAndPasswordStorage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if user.Username != "admin" || user.Role != "admin" {
+	if user.Username != "Admin" || user.Role != "admin" {
 		t.Fatalf("bad admin: %+v", user)
 	}
 	if _, err := store.InitializeAdmin("other", "different password here"); err == nil {

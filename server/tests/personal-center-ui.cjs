@@ -94,7 +94,13 @@ async function main() {
     assert.equal(await page.locator('#accountName').textContent(),'响应顺序测试');
     await page.fill('#profileName','并发更新');await page.click('#saveProfile');await page.waitForFunction(()=>state.user.display_name==='并发更新');
 
-    const created=await page.evaluate(()=>api('admin/users','POST',{username:'profile-member'}));
+    await page.goto(base+'/#/admin/users');await page.locator('#createUser').click();
+    await page.fill('[data-field="username"]','Profile-Member');await page.click('#saveModal');
+    await page.locator('#temporaryPasswordDialog').waitFor({state:'visible'});
+    assert.equal(await page.locator('#temporaryPasswordAccount').textContent(),'账号：Profile-Member');
+    const created={user:await page.evaluate(()=>state.users.find(user=>user.username==='Profile-Member')),temporary_password:await page.locator('#temporaryPasswordValue').textContent()};
+    assert.ok(created.user);await page.click('#closeTemporaryPassword');
+    await page.goto(base+'/#/account/profile');await page.locator('#profileName').waitFor();
     const memberContext=await browser.newContext();const member=await memberContext.newPage();member.setDefaultTimeout(10000);member.on('pageerror',e=>errors.push(e.message));
     await member.goto(base+'/#/account/profile');await member.fill('#username','profile-member');await member.fill('#password',created.temporary_password);await member.click('#loginButton');
     await member.locator('#firstPasswordScreen').waitFor({state:'visible'});
@@ -113,13 +119,13 @@ async function main() {
       await refreshCore();return state.playlists.find(item=>item.id===p.id);
     },created.user.username);
     await page.evaluate(p=>openSharingSettings(p),shared);
-    await page.locator('#ownerInvitations').filter({hasText:'并发更新 (@profile-member)'}).waitFor();await page.click('#closeSharing');
+    await page.locator('#ownerInvitations').filter({hasText:'并发更新 (@Profile-Member)'}).waitFor();await page.click('#closeSharing');
     await member.goto(base+'/#/invitations');
     await member.locator('#receivedInvitations').filter({hasText:'并发更新 (@admin)'}).waitFor();
     await page.goto(base+'/#/admin/users');
     const memberRow=page.locator('[data-user-id="'+created.user.id+'"]');await memberRow.waitFor();
     assert.equal(await memberRow.locator('strong').textContent(),'并发更新');
-    assert.match(await memberRow.textContent(),/@profile-member/);
+    assert.match(await memberRow.textContent(),/@Profile-Member/);
     await page.goto(base+'/#/account/profile');await page.locator('#profileName').waitFor();
 
     const secondContext=await browser.newContext();const second=await secondContext.newPage();await login(second,base,'admin',password);
