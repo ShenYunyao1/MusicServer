@@ -180,6 +180,26 @@ func (a *API) accountAuth(response http.ResponseWriter, request *http.Request) {
 			return
 		}
 		writeJSON(response, 200, map[string]any{"user": user, "csrf_token": auth.csrf})
+	case path == "me" && request.Method == "PATCH":
+		var body struct {
+			DisplayName *string `json:"display_name"`
+		}
+		request.Body = http.MaxBytesReader(response, request.Body, 4096)
+		if decodeStrict(request, &body) != nil || body.DisplayName == nil {
+			writeError(response, 400, "INVALID_PROFILE", "only display_name is required")
+			return
+		}
+		options := mutationOptions(request)
+		if options.ExpectedVersion < 1 {
+			writeError(response, 428, "VERSION_REQUIRED", "If-Match with current user version is required")
+			return
+		}
+		user, err := a.store.UpdateUser(auth.userID, AccountPatch{DisplayName: body.DisplayName}, options)
+		if err != nil {
+			writeUserError(response, err)
+			return
+		}
+		writeJSON(response, 200, map[string]any{"user": user, "csrf_token": auth.csrf})
 	case path == "logout" && request.Method == "POST":
 		if err := a.store.RevokeSession(auth.userID, auth.keyID, mutationOptions(request)); err != nil {
 			writeError(response, 500, "LOGOUT_FAILED", "could not revoke session")
