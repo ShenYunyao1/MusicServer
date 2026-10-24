@@ -63,7 +63,7 @@ module.exports=async function runMultiuserUI({browser,adminPage,base,audio,direc
   await a.page.waitForFunction(()=>state.tracks.some(t=>t.title==='Alice song'));
   const track=await a.page.evaluate(()=>state.tracks.find(t=>t.title==='Alice song'));
   assert.equal(track.owner_id,a.user.id);assert.equal(track.uploaded_by,a.user.id);assert.equal(track.path,'');
-  await a.page.click('[data-page="playlists"]');await a.page.click('#newPlaylist');await a.page.fill('[data-field="name"]','Alice private');await a.page.click('#saveModal');await a.page.waitForFunction(()=>state.playlists.some(p=>p.name==='Alice private'));
+  await a.page.click('[data-page="playlists"]');await a.page.click('#newPlaylist');await a.page.fill('#playlistEditName','Alice private');await a.page.click('#savePlaylistEdit');await a.page.waitForFunction(()=>state.playlists.some(p=>p.name==='Alice private'));
   await a.page.evaluate(async id=>{const p=state.playlists.find(p=>p.name==='Alice private');await api('playlists/'+p.id+'/tracks','POST',{track_ids:[id]},undefined,p.version);await refreshCore()},track.id);
   await a.page.click('[data-page="keys"]');await a.page.click('#newKey');await a.page.fill('#policyName','Alice player');
   const alicePlaylist=await a.page.evaluate(()=>state.playlists.find(p=>p.name==='Alice private'));
@@ -71,7 +71,7 @@ module.exports=async function runMultiuserUI({browser,adminPage,base,audio,direc
   assert.equal(await a.page.evaluate(async secret=>(await fetch('/api/v2/tracks',{headers:{'X-API-Key':secret}})).status,aliceSecret),200);
   await a.page.click('[data-page="tracks"]');await a.page.click('[data-filter="mine"]');assert.equal(await a.page.locator('#trackRows tr').count(),1);
   await b.page.evaluate(()=>refreshCore());
-  await b.page.click('[data-page="playlists"]');await b.page.click('#newPlaylist');await b.page.fill('[data-field="name"]','Bob private');await b.page.click('#saveModal');
+  await b.page.click('[data-page="playlists"]');await b.page.click('#newPlaylist');await b.page.fill('#playlistEditName','Bob private');await b.page.click('#savePlaylistEdit');
   await b.page.waitForFunction(()=>state.playlists.some(p=>p.name==='Bob private'));
   await b.page.evaluate(()=>openPlaylistTrackPicker(state.playlists.find(p=>p.name==='Bob private')));
   await b.page.locator('#modalBody input[value="'+track.id+'"]').check();await b.page.click('#saveModal');await b.page.waitForFunction(()=>state.playlists.some(p=>p.name==='Bob private'&&p.track_ids.length===1));

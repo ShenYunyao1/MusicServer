@@ -98,6 +98,8 @@ async function main() {
     await page.reload();
     await page.waitForFunction(() => state.user?.username === 'admin' && state.tracks.length === 1);
     await page.waitForFunction(() => document.querySelector('#status').textContent === '已登录');
+    await require('./playlist-create-ui.cjs')({page,directory});
+    if(process.env.MUSIC_SERVER_TEST_PLAYLIST_CREATE_ONLY==='1')return;
     await require('./track-actions-ui.cjs')({page});
     if(process.env.MUSIC_SERVER_TEST_TRACK_ACTIONS_ONLY==='1')return;
     await require('./operations-ui.cjs')({page,audio});
@@ -113,8 +115,8 @@ async function main() {
     await page.waitForFunction(() => state.tracks[0].title === 'Edited in browser');
     await page.click('[data-page="playlists"]');
     await page.click('#newPlaylist');
-    await page.fill('[data-field="name"]', 'Browser playlist');
-    await page.click('#saveModal');
+    await page.fill('#playlistEditName', 'Browser playlist');
+    await page.click('#savePlaylistEdit');
     await page.waitForFunction(() => state.playlists.some(playlist => playlist.name === 'Browser playlist') ||
       document.querySelector('#status').textContent.includes('randomUUID'));
     assert.ok(await page.evaluate(() => state.playlists.some(playlist => playlist.name === 'Browser playlist')),

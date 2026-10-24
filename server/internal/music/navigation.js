@@ -188,8 +188,9 @@ async function restoreWorkspaceRoute() {
     if(page==='playlists') {
       state.invitationsTab=path[0]==='invitations';
       state.subscriptionsTab=path[0]==='subscriptions';
-      state.playlistEditing=path[2]==='edit';
-      state.playlistDetailId=state.invitationsTab?null:path[1]||null;
+      state.playlistCreating=path[0]==='playlists'&&path.length===2&&path[1]==='new';
+      state.playlistEditing=state.playlistCreating||path[2]==='edit';
+      state.playlistDetailId=state.invitationsTab||state.playlistCreating?null:path[1]||null;
       state.invitationDetailID=state.invitationsTab?path[1]||null:null;
       state.invitationOffset=Math.max(0,parseInt(new URLSearchParams(location.hash.split('?')[1]||'').get('offset'),10)||0);
       if(state.invitationsTab){renderPlaylists();await loadReceivedInvitations()}

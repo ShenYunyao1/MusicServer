@@ -115,6 +115,10 @@ function openPlaylistTrackDetails(p,track,unavailable){
 
 const playlistEditor=document.createElement('section');playlistEditor.id='playlistEditor';playlistEditor.hidden=true;$('page-playlists').append(playlistEditor);
 let playlistDraft=null,playlistReturnScroll=null,cropState=null,imageSelection=0;
+function beginPlaylistCreate(){
+  state.playlistEditReturn={creating:true,route:location.hash,y:scrollY};
+  location.hash='#/playlists/new';
+}
 function beginPlaylistEdit(p){
   if(p.read_only)return;
   state.playlistEditReturn={id:p.id,route:location.hash,y:scrollY};
@@ -123,7 +127,7 @@ function beginPlaylistEdit(p){
 function returnPlaylistList(){playlistReturnScroll={route:'#/playlists',y:state.playlistListScrollY||0};showPage('playlists')}
 function playlistDraftDirty(){return Boolean(playlistDraft&&(playlistDraft.name!==playlistDraft.original.name||playlistDraft.description!==(playlistDraft.original.description||'')||playlistDraft.visibility!==(playlistDraft.original.visibility||'private')||playlistDraft.coverChanged))}
 function closePlaylistCrop(){imageSelection++;cropPointer=null;if(cropState){URL.revokeObjectURL(cropState.url);cropState=null}if(playlistCrop.open)playlistCrop.close()}
-function disposePlaylistDraft(){closePlaylistCrop();if(playlistDraft?.previewURL)URL.revokeObjectURL(playlistDraft.previewURL);playlistDraft=null;playlistEditor.replaceChildren();playlistEditor.hidden=true;state.playlistEditing=false;state.managedPlaylistEdit=null}
+function disposePlaylistDraft(){closePlaylistCrop();if(playlistDraft?.previewURL)URL.revokeObjectURL(playlistDraft.previewURL);playlistDraft=null;playlistEditor.replaceChildren();playlistEditor.hidden=true;state.playlistEditing=false;state.playlistCreating=false;state.managedPlaylistEdit=null}
 function clearPlaylistWorkspace(){disposePlaylistDraft();$('playlistList').sortCleanup?.();$('playlistDetail').querySelector('.playlist-tracks')?.sortCleanup?.();$('playlistDetail').replaceChildren();state.playlistEditReturn=null;state.playlistListScrollY=0;state.playlistTrackQuery='';state.playlistTrackSearchID=null;playlistReturnScroll=null}
 function permitPlaylistNavigation(hash){
   if(!playlistDraft||hash===playlistDraft.route)return true;
@@ -134,18 +138,19 @@ function permitPlaylistNavigation(hash){
 }
 function restorePlaylistScroll(){if(playlistReturnScroll&&location.hash===playlistReturnScroll.route){const y=playlistReturnScroll.y;playlistReturnScroll=null;requestAnimationFrame(()=>scrollTo(0,y))}}
 window.addEventListener('beforeunload',event=>{if(playlistDraftDirty()){event.preventDefault();event.returnValue=''}});
-function renderPlaylistEditor(p){
-  if(playlistDraft?.id===p.id){playlistEditor.hidden=false;document.title=p.name+' · 编辑歌单 · 音乐服务器';return}
-  disposePlaylistDraft();state.playlistEditing=true;
+function renderPlaylistEditor(p,creating=false){
+  if(playlistDraft?.id===p.id){playlistEditor.hidden=false;document.title=creating?'新建歌单 · 音乐服务器':p.name+' · 编辑歌单 · 音乐服务器';return}
+  disposePlaylistDraft();state.playlistEditing=true;state.playlistCreating=creating;
   if(p.owner_id!==state.user.id)state.managedPlaylistEdit=p;
-  const back=state.playlistEditReturn?.id===p.id?state.playlistEditReturn:null;
-  playlistDraft={id:p.id,original:{...p},name:p.name,description:p.description||'',visibility:p.visibility||'private',coverChanged:false,coverBlob:null,removeCover:false,previewURL:null,saving:false,route:'#/playlists/'+p.id+'/edit',returnRoute:back?.route||'#/playlists/'+p.id,returnY:back?.y||0};
-  const backButton=makeButton(back?.route.startsWith('#/admin/users')?'← 返回用户详情':'← 返回歌单',()=>location.hash=playlistDraft.returnRoute);backButton.id='playlistEditBack';backButton.classList.add('page-back');
+  const back=(creating?state.playlistEditReturn?.creating:state.playlistEditReturn?.id===p.id)?state.playlistEditReturn:null;
+  playlistDraft={id:p.id,creating,original:{...p},name:p.name,description:p.description||'',visibility:p.visibility||'private',coverChanged:false,coverBlob:null,removeCover:false,previewURL:null,saving:false,route:creating?'#/playlists/new':'#/playlists/'+p.id+'/edit',returnRoute:back?.route||(creating?'#/playlists':'#/playlists/'+p.id),returnY:back?.y||0};
+  const backButton=makeButton(creating?'← 返回我的歌单':back?.route.startsWith('#/admin/users')?'← 返回用户详情':'← 返回歌单',()=>location.hash=playlistDraft.returnRoute);backButton.id='playlistEditBack';backButton.classList.add('page-back');
   const intro=document.createElement('div');intro.className='page-intro';intro.innerHTML='<div><h1>编辑歌单</h1><p>调整名称、简介和封面，保存后应用。</p></div>';
   const form=document.createElement('form');form.id='playlistEditForm';form.className='panel playlist-editor-form';
   form.innerHTML='<div class="playlist-editor-grid"><div class="playlist-artwork"><span id="playlistCoverPreview" class="playlist-cover-preview">♪</span><div class="actions"><label class="btn" for="playlistCoverFile">更换图片</label><button id="removePlaylistCover" type="button" class="btn">移除</button></div><input id="playlistCoverFile" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" hidden><p class="status">JPEG、PNG、静态 WebP<br>最多 8 MiB／2000 万像素</p></div><div class="playlist-editor-fields"><div class="field"><label for="playlistEditName">歌单名称</label><input id="playlistEditName" required maxlength="256"></div><div class="field"><label for="playlistEditDescription">歌单简介</label><textarea id="playlistEditDescription" rows="7" maxlength="8000" placeholder="写下这个歌单的故事…"></textarea></div></div></div><p id="playlistEditError" role="alert" class="notice" hidden></p><div class="playlist-editor-footer"><button id="reloadPlaylistDraft" type="button" class="btn" hidden>重新载入</button><button id="cancelPlaylistEdit" type="button" class="btn">取消</button><button id="savePlaylistEdit" type="submit" class="btn primary">保存修改</button></div>';
+  if(creating){intro.querySelector('h1').textContent='新建歌单';intro.querySelector('p').textContent='设置名称、简介、可见性和封面，保存后创建。';form.querySelector('#savePlaylistEdit').textContent='创建歌单'}
   const danger=document.createElement('div');danger.className='playlist-danger-zone';const deleteButton=makeButton('删除歌单',()=>deletePlaylist(p),'btn danger');danger.append(deleteButton);
-  playlistEditor.replaceChildren(backButton,intro,form,danger);playlistEditor.hidden=false;document.title=p.name+' · 编辑歌单 · 音乐服务器';
+  playlistEditor.replaceChildren(backButton,intro,form,...(creating?[]:[danger]));playlistEditor.hidden=false;document.title=creating?'新建歌单 · 音乐服务器':p.name+' · 编辑歌单 · 音乐服务器';
   const visibility=document.createElement('div');visibility.className='field';visibility.innerHTML='<label for="playlistEditVisibility">可见性</label><select id="playlistEditVisibility"><option value="private">私有 · 仅本人</option><option value="public">公开 · 平台登录用户可见</option><option value="shared">仅分享 · 指定账户接受后可见</option></select><p class="status" style="white-space:normal">个人备注始终按账户隔离。仅分享需在歌单详情的分享设置中邀请账户；转私有会暂停外部授权。</p>';form.querySelector('.playlist-editor-fields').append(visibility);$('playlistEditVisibility').value=playlistDraft.visibility;$('playlistEditVisibility').onchange=e=>playlistDraft.visibility=e.target.value;
   if(p.owner_id!==state.user.id){const inspection=document.createElement('section');inspection.className='panel';const title=document.createElement('h3');title.textContent='歌单曲目（管理查看）';inspection.append(title);for(const id of p.track_ids||[]){const track=state.tracks.find(t=>t.id===id),row=document.createElement('p');row.textContent=(track?.title||'不可用曲目')+' · '+(p.track_notes?.[id]||'无个人备注');inspection.append(row)}playlistEditor.append(inspection)}
   scrollTo(0,0);
@@ -158,7 +163,7 @@ function renderPlaylistEditor(p){
   $('reloadPlaylistDraft').onclick=async()=>{if(!confirm('重新载入会放弃当前草稿，继续？'))return;try{const fresh=await api('playlists/'+p.id);disposePlaylistDraft();renderPlaylistEditor(fresh.playlist)}catch(error){showPlaylistEditError(error)}};
   form.onsubmit=event=>{event.preventDefault();savePlaylistDraft()};
 }
-function showPlaylistEditError(error){if(!$('playlistEditError'))return;$('playlistEditError').textContent=error.message;$('playlistEditError').hidden=false;$('reloadPlaylistDraft').hidden=error.status!==409}
+function showPlaylistEditError(error){if(!$('playlistEditError'))return;$('playlistEditError').textContent=error.message;$('playlistEditError').hidden=false;$('reloadPlaylistDraft').hidden=Boolean(playlistDraft?.creating)||error.status!==409}
 async function savePlaylistDraft(){
   const draft=playlistDraft;if(!draft||draft.saving)return;
   if(!draft.name.trim())return showPlaylistEditError(new Error('请输入歌单名称'));
@@ -167,11 +172,12 @@ async function savePlaylistDraft(){
   try{
     const data=new FormData();data.append('name',draft.name);data.append('description',draft.description);data.append('visibility',draft.visibility);
     if(draft.coverBlob)data.append('cover',draft.coverBlob,'cover.png');if(draft.removeCover)data.append('remove_cover','true');
-    const saved=await api('playlists/'+draft.id+'/editor','PUT',data,undefined,draft.original.version);
-    const index=state.playlists.findIndex(p=>p.id===saved.id);if(index>=0)state.playlists[index]=saved;
+    if(draft.creating)data.append('id',draft.id);
+    const saved=await api(draft.creating?'playlists':'playlists/'+draft.id+'/editor',draft.creating?'POST':'PUT',data,undefined,draft.creating?undefined:draft.original.version);
+    const index=state.playlists.findIndex(p=>p.id===saved.id);if(index>=0)state.playlists[index]=saved;else if(draft.creating)state.playlists.push(saved);
     draft.original={...saved};draft.coverChanged=false;draft.saving=false;clearCoverCache();
     communityCache.clear();
-    location.hash=draft.returnRoute;setStatus('歌单修改已保存','ok');
+    location.hash=draft.creating?'#/playlists/'+saved.id:draft.returnRoute;setStatus(draft.creating?'歌单已创建':'歌单修改已保存','ok');
   }catch(error){showPlaylistEditError(error)}finally{if(playlistDraft===draft){draft.saving=false;playlistEditor.querySelectorAll('input,textarea,select,button').forEach(el=>el.disabled=false)}}
 }
 

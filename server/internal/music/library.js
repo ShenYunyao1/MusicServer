@@ -81,6 +81,7 @@ function renderPlaylists(){
   invitationBrowse.hidden=!state.invitationsTab;
   if(state.invitationsTab){playlistEditor.hidden=true;$('playlistBrowse').hidden=true;$('playlistDetail').hidden=true;$('newPlaylist').hidden=true;$('page-playlists').querySelector(':scope > .page-intro').hidden=false;return}
   if(detail)$('playlistList').sortCleanup?.();
+  if(state.playlistCreating){$('playlistList').sortCleanup?.();$('playlistBrowse').hidden=true;$('playlistDetail').hidden=true;$('page-playlists').querySelector(':scope > .page-intro').hidden=true;const p=playlistDraft?.creating?playlistDraft.original:{id:browserUUID(),name:'',description:'',visibility:'private',owner_id:state.user.id,track_ids:[]};renderPlaylistEditor(p,true);return}
   if(state.playlistEditing&&detail){$('playlistBrowse').hidden=true;$('playlistDetail').hidden=true;$('page-playlists').querySelector(':scope > .page-intro').hidden=true;renderPlaylistEditor(detail);return}
   playlistEditor.hidden=true;
   $('playlistBrowse').hidden=Boolean(detail);$('playlistDetail').hidden=!detail;

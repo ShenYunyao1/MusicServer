@@ -212,7 +212,7 @@ $('trackSearch').oninput=renderTracks;
 $('selectAll').onchange=event=>{document.querySelectorAll('[data-track-id]').forEach(input=>{input.checked=event.target.checked;if(input.checked)state.selectedTrackIds.add(input.dataset.trackId);else state.selectedTrackIds.delete(input.dataset.trackId)});updateTrackSelection()};
 document.querySelectorAll('[data-filter]').forEach(button=>button.onclick=()=>{state.trackFilter=button.dataset.filter;document.querySelectorAll('[data-filter]').forEach(element=>element.classList.toggle('active',element===button));renderTracks()});
 $('trackFilterButton').onclick=event=>{event.stopPropagation();showContextMenu(event,[{label:'全部曲目',action:()=>document.querySelector('[data-filter="all"]').click()},{label:'未加入我的歌单',action:()=>document.querySelector('[data-filter="orphan"]').click()}])};
-$('newPlaylist').onclick=()=>openEditor('新建歌单',{name:'',description:''},async fields=>{await api('playlists','POST',{...fields,id:browserUUID(),track_ids:[]});await refreshCore()});
+$('newPlaylist').onclick=()=>beginPlaylistCreate();
 $('uploadInput').onchange=event=>{addFiles(event.target.files);event.target.value=''};
 $('uploadFolderInput').onchange=event=>{addFiles(event.target.files);event.target.value=''};
 $('uploadAll').onclick=()=>run(uploadAll);

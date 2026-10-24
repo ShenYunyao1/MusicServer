@@ -191,7 +191,7 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	resourceUpload := strings.HasPrefix(request.URL.Path, "/api/v2/tracks/") && (strings.HasSuffix(request.URL.Path, "/cover") || strings.HasSuffix(request.URL.Path, "/lyrics"))
-	playlistUpload := strings.HasPrefix(request.URL.Path, "/api/v2/playlists/") && strings.HasSuffix(request.URL.Path, "/editor")
+	playlistUpload := strings.HasPrefix(request.URL.Path, "/api/v2/playlists/") && strings.HasSuffix(request.URL.Path, "/editor") || request.URL.Path == "/api/v2/playlists" && request.Method == http.MethodPost && strings.HasPrefix(request.Header.Get("Content-Type"), "multipart/form-data")
 	if !strings.HasPrefix(request.URL.Path, "/api/v2/uploads") && !resourceUpload && !playlistUpload {
 		request.Body = http.MaxBytesReader(response, request.Body, 2<<20)
 	}
@@ -690,6 +690,10 @@ func (a *API) playlists(response http.ResponseWriter, request *http.Request) {
 		writeJSON(response, http.StatusOK, playlists)
 	case http.MethodPost:
 		if !a.requireAccount(response, request) {
+			return
+		}
+		if strings.HasPrefix(request.Header.Get("Content-Type"), "multipart/form-data") {
+			a.playlistEditor(response, request, "")
 			return
 		}
 		var playlist Playlist

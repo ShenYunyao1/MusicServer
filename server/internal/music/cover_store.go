@@ -17,7 +17,14 @@ import (
 
 // The editor submits an already cropped PNG/JPEG, never an arbitrary asset ID.
 func (s *Store) SavePlaylistEditor(id, name, description string, cover []byte, remove bool, options ...MutationOptions) (Playlist, error) {
+	return s.savePlaylistEditor(id, name, description, cover, remove, false, options...)
+}
+
+func (s *Store) savePlaylistEditor(id, name, description string, cover []byte, remove, create bool, options ...MutationOptions) (Playlist, error) {
 	var result Playlist
+	if create && (!validID.MatchString(id) || id == "library") {
+		return result, errors.New("invalid playlist id")
+	}
 	if strings.TrimSpace(name) == "" {
 		return result, errors.New("playlist name is required")
 	}
@@ -49,7 +56,33 @@ func (s *Store) SavePlaylistEditor(id, name, description string, cover []byte, r
 	}
 	err := s.transaction(func(tx *sql.Tx) error {
 		before, err := readPlaylistFrom(tx, id)
-		if err != nil {
+		if create {
+			if err == nil {
+				if err := checkActorOwner(tx, before.OwnerID, options); err != nil {
+					return err
+				}
+				return errVersionConflict
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			var retired bool
+			if err := tx.QueryRow("SELECT EXISTS(SELECT 1 FROM playlist_tombstones WHERE id=?)", id).Scan(&retired); err != nil {
+				return err
+			}
+			if retired {
+				return errors.New("deleted playlist ID cannot be reused")
+			}
+			owner, err := internalOwner(tx, options)
+			if err != nil {
+				return err
+			}
+			var order int
+			if err := tx.QueryRow("SELECT COALESCE(MAX(sort_order),0)+1 FROM playlists WHERE owner_id=? AND system=0", owner).Scan(&order); err != nil {
+				return err
+			}
+			before = Playlist{ID: id, OwnerID: owner, SortOrder: order, Visibility: "private", TrackIDs: []string{}}
+		} else if err != nil {
 			return err
 		}
 		if before.System {
@@ -90,13 +123,17 @@ func (s *Store) SavePlaylistEditor(id, name, description string, cover []byte, r
 		if err := recordChange(tx, "playlist", id, false); err != nil {
 			return err
 		}
+		if create {
+			return auditMutation(tx, "playlist.create", id, nil, result, options)
+		}
 		return auditMutation(tx, "playlist.editor", id, before, result, options)
 	})
 	return result, err
 }
 
 func (a *API) playlistEditor(response http.ResponseWriter, request *http.Request, id string) {
-	if request.Method != http.MethodPut {
+	create := id == "" && request.Method == http.MethodPost
+	if !create && request.Method != http.MethodPut {
 		writeError(response, 405, "METHOD_NOT_ALLOWED", "method not allowed")
 		return
 	}
@@ -136,12 +173,19 @@ func (a *API) playlistEditor(response http.ResponseWriter, request *http.Request
 	if values := request.MultipartForm.Value["visibility"]; len(values) > 0 {
 		options.PlaylistVisibility = &values[0]
 	}
-	stored, err := a.store.SavePlaylistEditor(id, request.FormValue("name"), request.FormValue("description"), data, request.FormValue("remove_cover") == "true", options)
+	if create {
+		id = request.FormValue("id")
+	}
+	stored, err := a.store.savePlaylistEditor(id, request.FormValue("name"), request.FormValue("description"), data, request.FormValue("remove_cover") == "true", create, options)
 	if err != nil {
 		writePlaylistMutationError(response, err)
 		return
 	}
-	writeJSON(response, 200, stored)
+	status := http.StatusOK
+	if create {
+		status = http.StatusCreated
+	}
+	writeJSON(response, status, stored)
 }
 
 func hashBytes(data []byte) string {
