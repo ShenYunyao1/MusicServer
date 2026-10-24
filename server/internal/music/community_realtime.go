@@ -257,7 +257,6 @@ func (a *API) realtimeSync(response http.ResponseWriter, request *http.Request) 
 	indexes, digest := indexRealtime(snapshot)
 	now, binding, view := time.Now(), realtimeBinding(auth), realtimeViewKey(input.View)
 	a.realtimeMu.Lock()
-	defer a.realtimeMu.Unlock()
 	if a.realtimeCursors == nil {
 		a.realtimeCursors = map[string]realtimeBaseline{}
 	}
@@ -307,10 +306,12 @@ func (a *API) realtimeSync(response http.ResponseWriter, request *http.Request) 
 		}
 		reply.Cursor, err = randomToken(24)
 		if err != nil {
+			a.realtimeMu.Unlock()
 			writeError(response, 500, "REALTIME_FAILED", "unable to create cursor")
 			return
 		}
 		a.realtimeCursors[reply.Cursor] = realtimeBaseline{Binding: binding, View: view, Expires: now.Add(realtimeCursorTTL), Sections: indexes, Digest: digest}
 	}
+	a.realtimeMu.Unlock()
 	writeJSON(response, 200, reply)
 }

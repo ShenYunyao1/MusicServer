@@ -67,6 +67,13 @@ func (s *Store) Close() error {
 	}
 	s.scanMu.Unlock()
 	s.workers.Wait()
+	s.changeMu.Lock()
+	s.changeClosed = true
+	if s.changeSignal != nil {
+		close(s.changeSignal)
+		s.changeSignal = nil
+	}
+	s.changeMu.Unlock()
 	return s.db.Close()
 }
 func openSQLite(path string) (*sql.DB, error) {
@@ -329,7 +336,11 @@ func (s *Store) transaction(run func(*sql.Tx) error) error {
 	if err = run(tx); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.notifyCommunityCommit()
+	return nil
 }
 func (s *Store) Revision() int64 {
 	var value string

@@ -34,20 +34,25 @@ var errVersionConflict = errors.New("record changed; refresh before editing")
 var errTrackInUse = errors.New("this track is used by another account's playlist; contact an administrator")
 
 type Store struct {
-	activity     *activity.Journal
-	stageSlots   chan struct{}
-	activeStages map[string]bool
-	dataPath     string
-	mediaRoot    string
-	db           *sql.DB
-	writeMu      sync.Mutex
-	stageMu      sync.Mutex
-	mediaMu      sync.RWMutex
-	scanMu       sync.Mutex
-	scanCancel   context.CancelFunc
-	scanStatus   ScanStatus
-	workers      sync.WaitGroup
-	closed       bool
+	changeMu       sync.Mutex
+	changeSignal   chan struct{}
+	changeStamp    string
+	changeWatchers int
+	changeClosed   bool
+	activity       *activity.Journal
+	stageSlots     chan struct{}
+	activeStages   map[string]bool
+	dataPath       string
+	mediaRoot      string
+	db             *sql.DB
+	writeMu        sync.Mutex
+	stageMu        sync.Mutex
+	mediaMu        sync.RWMutex
+	scanMu         sync.Mutex
+	scanCancel     context.CancelFunc
+	scanStatus     ScanStatus
+	workers        sync.WaitGroup
+	closed         bool
 }
 
 func NewStore(dataPath, mediaRoot string) (*Store, error) {

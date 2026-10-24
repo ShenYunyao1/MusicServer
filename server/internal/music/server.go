@@ -38,6 +38,7 @@ var workspaceAssets embed.FS
 type API struct {
 	realtimeMu      sync.Mutex
 	realtimeCursors map[string]realtimeBaseline
+	realtimeStreams map[string]int
 	store           *Store
 	updater         *update.Manager
 	concurrencyMu   sync.Mutex
@@ -100,7 +101,7 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 				status = http.StatusOK
 			}
 			a.recordCall(callKeyID, status, tracked.bytes, time.Since(started))
-			if request.URL.Path != "/api/v2/admin/logs" && request.URL.Path != "/api/v2/auth/activity" {
+			if request.URL.Path != "/api/v2/admin/logs" && request.URL.Path != "/api/v2/auth/activity" && request.URL.Path != "/api/v2/community/events" {
 				fields := activityFields(request)
 				fields.Status = status
 				fields.Reason = response.Header().Get("X-Error-Code")
@@ -252,6 +253,10 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	}
 	if request.URL.Path == "/api/v2/community/sync" {
 		a.realtimeSync(response, request)
+		return
+	}
+	if request.URL.Path == "/api/v2/community/events" {
+		a.communityEvents(response, request)
 		return
 	}
 	if sharingEndpoint(request.URL.Path) {
@@ -1455,6 +1460,8 @@ type trackingResponseWriter struct {
 	status int
 	bytes  int64
 }
+
+func (w *trackingResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func (w *trackingResponseWriter) WriteHeader(status int) {
 	if w.status != 0 {
