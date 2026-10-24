@@ -248,6 +248,17 @@ func (a *API) accountAuth(response http.ResponseWriter, request *http.Request) {
 			return
 		}
 		writeJSON(response, 200, sessions)
+	case path == "sessions/revoke-others" && request.Method == "POST":
+		count, err := a.store.RevokeOtherSessions(auth.userID, auth.keyID, mutationOptions(request))
+		if err != nil {
+			if errors.Is(err, errCredentials) {
+				writeError(response, 401, "AUTH_INVALID", "current login is no longer valid")
+			} else {
+				writeError(response, 500, "SESSIONS_FAILED", "could not revoke other logins")
+			}
+			return
+		}
+		writeJSON(response, 200, map[string]int64{"revoked": count})
 	case strings.HasPrefix(path, "sessions/") && request.Method == "DELETE":
 		id := strings.TrimPrefix(path, "sessions/")
 		if err := a.store.RevokeSession(auth.userID, id, mutationOptions(request)); err != nil {

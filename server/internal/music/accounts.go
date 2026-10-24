@@ -266,7 +266,7 @@ func (s *Store) sessionIdentity(token string) (User, Session, bool) {
 	return user, session, err == nil && user.Enabled && user.AuthVersion == version && now.Before(session.ExpiresAt) && now.Before(session.LastActiveAt.Add(sessionIdle))
 }
 func (s *Store) Sessions(userID, current string) ([]Session, error) {
-	rows, err := s.db.Query("SELECT id,created_at,last_active_at,expires_at FROM sessions WHERE user_id=? AND revoked_at='' AND expires_at>? AND last_active_at>? ORDER BY created_at DESC", userID, persistedTime(time.Now()), persistedTime(time.Now().Add(-sessionIdle)))
+	rows, err := s.db.Query("SELECT id,created_at,last_active_at,expires_at FROM sessions WHERE user_id=? AND revoked_at='' AND expires_at>? AND last_active_at>? ORDER BY (id=?) DESC,created_at DESC", userID, persistedTime(time.Now()), persistedTime(time.Now().Add(-sessionIdle)), current)
 	if err != nil {
 		return nil, err
 	}
@@ -300,6 +300,30 @@ func (s *Store) RevokeSession(userID, id string, options ...MutationOptions) err
 		return auditMutation(tx, "session.revoke", id, nil, nil, options)
 	})
 }
+func (s *Store) RevokeOtherSessions(userID, current string, options MutationOptions) (int64, error) {
+	var count int64
+	err := s.transaction(func(tx *sql.Tx) error {
+		now := time.Now()
+		var valid bool
+		if err := tx.QueryRow("SELECT EXISTS(SELECT 1 FROM sessions WHERE user_id=? AND id=? AND revoked_at='' AND expires_at>? AND last_active_at>?)", userID, current, persistedTime(now), persistedTime(now.Add(-sessionIdle))).Scan(&valid); err != nil {
+			return err
+		}
+		if !valid {
+			return errCredentials
+		}
+		result, err := tx.Exec("UPDATE sessions SET revoked_at=? WHERE user_id=? AND id<>? AND revoked_at='' AND expires_at>? AND last_active_at>?", persistedTime(now), userID, current, persistedTime(now), persistedTime(now.Add(-sessionIdle)))
+		if err != nil {
+			return err
+		}
+		count, err = result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		return auditMutation(tx, "session.revoke_others", userID, nil, map[string]int64{"revoked_count": count}, []MutationOptions{options})
+	})
+	return count, err
+}
+
 func (s *Store) ResetPassword(username, password string, revokeKeys bool) error {
 	return s.replacePassword(normalizeUsername(username), "", password, true, revokeKeys, nil)
 }
