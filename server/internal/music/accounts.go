@@ -170,6 +170,9 @@ func (s *Store) BeginServer() error {
 		if _, err := tx.Exec("UPDATE sessions SET revoked_at=? WHERE revoked_at=''", persistedTime(time.Now())); err != nil {
 			return err
 		}
+		if _, err := tx.Exec("DELETE FROM api_keys WHERE json_extract(payload,'$.revoked_at') IS NOT NULL"); err != nil {
+			return err
+		}
 		return syncCallStats(tx)
 	})
 }
@@ -359,15 +362,8 @@ func (s *Store) replacePassword(username, old, password string, local, revokeKey
 			return err
 		}
 		if revokeKeys {
-			keys, err := queryJSON[APIKey](tx, "SELECT payload FROM api_keys WHERE user_id=?", id)
-			if err != nil {
+			if _, err := deleteAccountKeyRows(tx, id); err != nil {
 				return err
-			}
-			for _, key := range keys {
-				key.RevokedAt = time.Now().UTC()
-				if err := saveKey(tx, key); err != nil {
-					return err
-				}
 			}
 		}
 		if local {
@@ -383,16 +379,16 @@ func (s *Store) SetUserEnabled(id string, enabled bool, expected int64) error {
 
 func (s *Store) RevokeAccountKeys(userID string, options ...MutationOptions) error {
 	return s.transaction(func(tx *sql.Tx) error {
-		keys, err := queryJSON[APIKey](tx, "SELECT payload FROM api_keys WHERE user_id=?", userID)
+		if len(options) > 0 && options[0].UserID != "" && options[0].UserID != userID {
+			return errResourceHidden
+		}
+		if err := checkActorOwner(tx, userID, options); err != nil {
+			return err
+		}
+		count, err := deleteAccountKeyRows(tx, userID)
 		if err != nil {
 			return err
 		}
-		for _, key := range keys {
-			key.RevokedAt = time.Now().UTC()
-			if err := saveKey(tx, key); err != nil {
-				return err
-			}
-		}
-		return auditMutation(tx, "key.revoke_all", userID, nil, nil, options)
+		return auditMutation(tx, "key.delete_all", userID, nil, map[string]int64{"deleted_count": count}, options)
 	})
 }

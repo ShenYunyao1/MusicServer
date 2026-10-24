@@ -146,9 +146,9 @@ setInterval(() => {
 const revokeAllKeys = document.createElement('button');
 revokeAllKeys.className = 'btn danger';
 revokeAllKeys.id = 'revokeAllKeys';
-revokeAllKeys.textContent = '撤销我的全部 Key';
+revokeAllKeys.textContent = '删除我的全部 Key';
 revokeAllKeys.onclick = () => {
-  if (confirm('撤销当前账号的全部播放器 Key？需要重新配置播放器。')) {
+  if (confirm('永久删除当前账号的全部播放器 Key、授权和调用统计？此操作无法撤销，需要重新创建 Key 并配置播放器。')) {
     run(async () => { await api('auth/keys', 'DELETE'); await loadKeys(); });
   }
 };

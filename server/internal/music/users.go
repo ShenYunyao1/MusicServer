@@ -166,15 +166,8 @@ func (s *Store) ResetMemberPassword(id string, revoke bool, options MutationOpti
 			return err
 		}
 		if revoke {
-			keys, err := queryJSON[APIKey](tx, "SELECT payload FROM api_keys WHERE user_id=?", id)
-			if err != nil {
+			if _, err := deleteAccountKeyRows(tx, id); err != nil {
 				return err
-			}
-			for _, key := range keys {
-				key.RevokedAt = time.Now().UTC()
-				if err := saveKey(tx, key); err != nil {
-					return err
-				}
 			}
 		}
 		user.MustChangePassword = true

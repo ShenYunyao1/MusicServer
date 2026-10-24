@@ -1374,7 +1374,7 @@ func (a *API) keys(response http.ResponseWriter, request *http.Request) {
 			writeJSON(response, http.StatusCreated, created)
 		case http.MethodDelete:
 			if err := a.store.RevokeAccountKeys(authFromRequest(request).userID, mutationOptions(request)); err != nil {
-				writeError(response, 500, "KEY_REVOKE_FAILED", "could not revoke keys")
+				writeError(response, 500, "KEY_DELETE_FAILED", "could not delete keys")
 				return
 			}
 			response.WriteHeader(204)
@@ -1430,7 +1430,7 @@ func (a *API) keys(response http.ResponseWriter, request *http.Request) {
 	if err := a.store.RevokeAPIKey(id, mutationOptions(request)); errors.Is(err, os.ErrNotExist) {
 		writeError(response, http.StatusNotFound, "KEY_NOT_FOUND", "key not found")
 	} else if err != nil {
-		writeError(response, http.StatusInternalServerError, "KEY_REVOKE_FAILED", err.Error())
+		writeError(response, http.StatusInternalServerError, "KEY_DELETE_FAILED", err.Error())
 	} else {
 		response.WriteHeader(http.StatusNoContent)
 	}

@@ -14,9 +14,13 @@
 ## 阶段与验证
 
 - [x] D00：核对 Key 撤销、统计、账户状态和资源外键，记录规则与实现顺序。
-- [ ] K01：`store.go`、`accounts.go`、`users.go`、`stats.go`、Key 页面：主动撤销改为直接删除，更新单个／全部／重置的回归；验证跨账户拒绝、失败回滚、统计不复活及停用恢复。
+- [x] K01：`key_delete.go`、`store.go`、`accounts.go`、`users.go`、Key 页面：主动撤销改为直接删除，更新单个／全部／重置的回归；验证跨账户拒绝、失败回滚、统计不复活及停用恢复，沿用 `stats.go` 的不存在 Key 不写统计规则。
 - [ ] D01：新增 `account_delete.go`、扩展 `accounts.go`／`users.go`／`users_http.go`／`ownership.go`：删除标记与守卫、资源约束、凭据／订阅／邀请清理、扫描归属及事务审计；验证版本、权限、并发边界、持久化和其他账户隔离。
 - [ ] D02：`users.js`、`administration.js`：已停用账户的删除入口、确认与失败提示，删除后回用户列表；增加隔离浏览器覆盖删除 Key、停用恢复、资源接管及账户删除，更新 README 并固定路径编译。
 - [ ] D03：用户另行要求后推送，Actions 完整回归与正式发行另行验收；云端由用户网页更新。
 
 先运行能复现原行为的针对性测试，再实现。完整跨平台 Go／race 交后续 Actions；本地仅运行相关 Go／vet、隔离浏览器和必要构建。每阶段通过后勾选、记录证据并创建本地提交。
+
+## 验收记录
+
+- K01：先复现撤销后 api_keys 仍有记录且可以轮换恢复，再将单个／全部／重置选项统一改为物理删除；授权与 scopes 使用既有外键级联，统计与操作审计同事务。启动清理旧已撤销记录，保留有效及过期但未删除的 Key。`go test ./internal/music -run '^TestKeyDeletion|^TestStats|^TestBulkKey|^TestUsers|^TestPasswordChangeResetAndRestart|^TestAPIKey' -count=1 -timeout 90s`、额外启动清理专项、`go vet ./internal/music`、相关 JS 语法和 diff 检查通过。覆盖删除后不复活／不重建统计、跨用户拒绝、重置选项、其他账户保留、清理失败回滚及停用再启用同 Key；网页完整验收留待 D02。CI 待推送。

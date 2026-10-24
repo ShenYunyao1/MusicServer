@@ -46,12 +46,8 @@ func TestStatsFollowKeyCreationRenameAndRevocation(t *testing.T) {
 	if err := api.store.db.QueryRow("SELECT count(*) FROM api_call_stats WHERE key_id=?", key.ID).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("revoked key statistics still persisted: %d %v", count, err)
 	}
-	if _, err := api.store.RotateAPIKey(key.ID); err != nil {
-		t.Fatal(err)
-	}
-	stats = api.readCallStats()
-	if len(stats.Keys) != 1 || stats.Total.TotalRequests != 0 {
-		t.Fatalf("reactivated key should start at zero: %+v", stats)
+	if _, err := api.store.RotateAPIKey(key.ID); err == nil {
+		t.Fatal("deleted key must not be reactivated")
 	}
 }
 

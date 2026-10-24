@@ -261,10 +261,6 @@ func (s *Store) mutateKey(id, action string, edit func(*APIKey) error, options [
 	})
 	return result, err
 }
-func (s *Store) RevokeAPIKey(id string, options ...MutationOptions) error {
-	_, err := s.mutateKey(id, "key.revoke", func(key *APIKey) error { key.RevokedAt = time.Now().UTC(); return nil }, options)
-	return err
-}
 func (s *Store) RotateAPIKey(id string, options ...MutationOptions) (APIKeyView, error) {
 	secret, err := randomToken(32)
 	if err != nil {

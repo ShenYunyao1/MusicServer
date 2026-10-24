@@ -36,7 +36,7 @@ $('createUser').onclick=()=>openEditor('创建成员',{username:'',display_name:
 $('refreshUsers').onclick=()=>run(loadUsers);
 function openResetUser(user){
  if(user.id===state.user?.id){setStatus('请使用个人中心的账户安全','error');return}
- $('modalTitle').textContent='重置 '+user.username+' 的密码';$('modalBody').innerHTML='<p>生成新的临时密码，撤销全部登录会话，再次要求首次改密。</p><label><input id="resetRevokeKeys" type="checkbox"> 同时主动撤销全部播放器 Key（重新启用账户也不会恢复）</label>';
+ $('modalTitle').textContent='重置 '+user.username+' 的密码';$('modalBody').innerHTML='<p>生成新的临时密码，撤销全部登录会话，再次要求首次改密。</p><label><input id="resetRevokeKeys" type="checkbox"> 同时删除全部播放器 Key、授权和调用统计（不可恢复）</label>';
  state.saveAction=async()=>{const result=await api('admin/users/'+user.id+'/reset-password','POST',{revoke_keys:$('resetRevokeKeys').checked},undefined,user.version);$('editor').close();showTemporaryPassword(result)};$('editor').showModal();
 }
 function managedUser(){return (state.users||[]).find(user=>user.id===state.managedUserID)}
