@@ -49,7 +49,7 @@ Go 1.26+，SQLite schema 7，HTTP API `/api/v2`，内置中文管理页。支持
 
 ## 公开与订阅
 
-新歌单默认私有。在编辑页修改可见性，与名称、简介及封面一起点击保存应用。公开目录仅面向本平台已登录账户，不提供匿名访问。目录按发布时间分页，每页 30 项，搜索支持歌单和作者；相关页面可见时每五分钟检查一次，使用专用修订号及 ETag，支持手动刷新。
+新歌单默认私有。在编辑页修改可见性，与名称、简介及封面一起点击保存应用。公开目录仅面向本平台已登录账户，不提供匿名访问。目录按发布时间分页，每页 30 项，搜索支持歌单和作者；网页通过 SSE 接收变化通知，再读取当前页面的增量，正常联网时以 1–3 秒更新为目标。普通目录接口保留专用修订号与 ETag，支持手动刷新。
 
 公开详情地址为 `/#/public/playlists/<UUID>`，复制链接后对方登录仍回到该详情。点击订阅后出现在“我的歌单 → 我订阅的”，关联原 UUID，作者更新会跟随；订阅不复制歌单，不能编辑源结构。作者个人备注不会公开，订阅者的备注按账户隔离。
 
@@ -93,6 +93,21 @@ MusicPlayer2 服务器适配 0.13.0 显示 `[订阅]`／`[分享]`／`[失效]` 
 | POST | `/invitations/{inviteID}/accept` 或 `/decline` | 目标账户接受／拒绝，If-Match 为邀请版本 |
 
 分页参数 offset／limit 默认 0／30，limit 最大 100。缺版本为 428，旧版本／状态冲突为 409，无权访问为 404；不可邀请的账户统一 400。仅分享不会进入公开目录，分享角色不允许转授、修改源结构或管理服务器。
+
+## 网页社区实时刷新
+
+公开目录及详情、本人订阅及详情、收到的邀请、作者打开的分享设置自动跟随变更，邀请页签显示待处理数量。每个可见标签页使用一条 SSE 连接，只通知本账户当前视图发生的变化；网页合并通知后应用变化项、移除项和新顺序，保留无变化的目录卡片、滚动位置、搜索及分享输入。隐藏标签页停连并暂停检查，重新可见或恢复联网后补取；同时每 60 秒补查一次，连接失败或浏览器不支持 EventSource 时也可使用补查。播放器仍按每小时刷新，不使用网页 SSE。
+
+| 方法 | `/api/v2` 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/community/events?view=<JSON>` | 同源会话 SSE；ready／change 触发补取，expired 退出，reconnect 重连 |
+| POST | `/community/sync` | 带 CSRF 的 `{ "cursor": "", "view": { "catalog": true, "offset": 0 } }`，返回游标与视图差异 |
+
+`view` 可指定 catalog／query／offset、subscriptions／subscription_detail、invitations／invitation_id／invitation_offset、owner_playlist／owner_offset 或 public_detail；所有 ID 按当前用户权限过滤。响应 `sections` 中每段含 changed／removed／order／meta，reset 表示重建基线；没有变化时为空 sections。接口只接受账户会话，播放器 Key 不可调用，不更新最近登录活动。
+
+服务端在事务提交成功后唤醒观察者，合并 150ms 内的连续变化；通知只包含信号，数据仍由接口鉴权。15 秒心跳复核会话，每账户最多 8、全站最多 128 条连接，单次发送最多等待 5 秒。Nginx 模板已配置 `proxy_buffering off` 和 300 秒读取超时，部署时需保留这些配置。
+
+增量比较当前状态与服务端短期指纹基线，不提供历史事件回放。游标绑定账户、会话、认证版本与视图，有效 5 分钟、全站最多 64 条；过期、淘汰或重启时返回 reset，单段超过 5000 项后以该段重置控制基线内存。数据库仍是权威数据，不增加 schema 或持久化事件表。实现及验收见 [实时刷新计划](../Docs/网页社区实时增量刷新开发计划.md)。
 
 ## 启动
 
@@ -330,6 +345,8 @@ node tests/management-ui.cjs
 ```
 
 安装 Playwright 及其 Chromium、Python 后运行；终端初始化测试在 Windows 需要 pywinpty，其他系统需要 pexpect。`MUSIC_SERVER_PLAYWRIGHT` 也可为模块绝对路径。浏览器回归调用 `multiuser-ui.cjs` 和 `users-ui.cjs`，覆盖管理员和两个成员的首次改密、上传收藏、私人备注、引用保护、下架恢复、Key/统计隔离、启停同密钥恢复和资源接管，以及原有管理流程。Linux 交叉编译不等于已在 Linux 主机实际运行验证。
+
+网页实时刷新专项使用上述环境再设置 `$env:MUSIC_SERVER_TEST_REALTIME_ONLY='1'`，运行 `node tests/management-ui.cjs`；完成后移除该环境变量可恢复完整浏览器回归。专项验证多账户通知与隐私、邀请角标和作者输入保留、订阅及曲目增量、撤回清理、无变化节点复用、搜索选区保留、断网／后台恢复、降级及登出清理。Go 专项为 `go test ./internal/music -run '^TestRealtime' -count=1`，覆盖游标绑定、分页／搜索边界、失效信息遮蔽及真实 HTTP SSE。Actions 的 Linux race 步骤增加该专项，须推送后执行。
 
 个人中心专项浏览器验收使用相同环境变量运行 `node tests/personal-center-ui.cjs`，仅需 Playwright／Chromium，无需 Python 或音乐样本；测试自行建立本地端口、管理员和测试成员，测试数据及截图在忽略的 `build/personal-center-*` 目录。可选 `MUSIC_SERVER_BROWSER` 指定已安装 Chromium 的程序路径。覆盖昵称保存／持久化／冲突／同名分享、未保存输入、首次改密、单个及批量退出、改密后浏览器失效而 Key 保留、375px 移动布局。现有 Actions 运行 Go 回归与构建，浏览器专项须按上述命令另行运行。
 

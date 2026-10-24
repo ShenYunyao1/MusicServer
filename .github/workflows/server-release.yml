@@ -59,7 +59,9 @@ jobs:
           CGO_ENABLED: '0'
       - name: Linux race tests
         if: runner.os == 'Linux'
-        run: go test -race ./internal/update -count=1 -timeout 120s
+        run: |
+          go test -race ./internal/update -count=1 -timeout 120s
+          go test -race ./internal/music -run '^TestRealtime' -count=1 -timeout 120s
       - name: Linux installation integration
         if: runner.os == 'Linux'
         run: sudo -E env PATH="$PATH" bash tests/update-systemd.sh
