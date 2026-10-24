@@ -100,7 +100,7 @@ function applyPersonalIdentity(identity) {
   state.users=(state.users||[]).map(item=>item.id===user.id?user:item);
   const update=playlist=>{if(playlist?.owner_id===user.id)playlist.source_owner_name=user.display_name};
   state.playlists.forEach(update);update(state.publicDetail?.playlist);update(state.sharingPlaylist);
-  for(const invite of state.receivedInvitations||[])if(invite.inviter_id===user.id)invite.inviter_name=user.display_name;
+  for(const invite of state.receivedInvitations||[]){if(invite.inviter_id===user.id)invite.inviter_name=user.display_name;if(invite.recipient_id===user.id)invite.recipient_display_name=user.display_name;}
   // Cached catalog payloads may still contain the old author after a self edit.
   for(const cached of communityCache.values())for(const item of cached.data.items||[])update(item);
   communityCache.clear();

@@ -29,18 +29,20 @@ func externalPlaylistAccess(reader sqlReader, userID string, p Playlist) bool {
 }
 
 type PlaylistInvitation struct {
-	ID                string `json:"id"`
-	PlaylistID        string `json:"playlist_id"`
-	InviterID         string `json:"inviter_id"`
-	RecipientID       string `json:"recipient_id"`
-	RecipientUsername string `json:"recipient_username"`
-	InviterName       string `json:"inviter_name"`
-	PlaylistName      string `json:"playlist_name"`
-	State             string `json:"state"`
-	Version           int64  `json:"version"`
-	CreatedAt         string `json:"created_at"`
-	UpdatedAt         string `json:"updated_at"`
-	Available         bool   `json:"available"`
+	ID                   string `json:"id"`
+	PlaylistID           string `json:"playlist_id"`
+	InviterID            string `json:"inviter_id"`
+	RecipientID          string `json:"recipient_id"`
+	RecipientUsername    string `json:"recipient_username"`
+	RecipientDisplayName string `json:"recipient_display_name"`
+	InviterName          string `json:"inviter_name"`
+	InviterUsername      string `json:"inviter_username"`
+	PlaylistName         string `json:"playlist_name"`
+	State                string `json:"state"`
+	Version              int64  `json:"version"`
+	CreatedAt            string `json:"created_at"`
+	UpdatedAt            string `json:"updated_at"`
+	Available            bool   `json:"available"`
 }
 type InvitationPage struct {
 	Items  []PlaylistInvitation `json:"items"`
@@ -49,12 +51,12 @@ type InvitationPage struct {
 	Limit  int                  `json:"limit"`
 }
 
-const invitationColumns = `i.id,i.playlist_id,i.inviter_id,i.recipient_id,r.username,u.display_name,i.last_name,i.state,i.version,i.created_at,i.updated_at,(p.visibility='shared' AND p.owner_id=i.inviter_id AND u.enabled=1)`
+const invitationColumns = `i.id,i.playlist_id,i.inviter_id,i.recipient_id,r.username,r.display_name,u.display_name,u.username,i.last_name,i.state,i.version,i.created_at,i.updated_at,(p.visibility='shared' AND p.owner_id=i.inviter_id AND u.enabled=1)`
 const invitationJoin = ` FROM playlist_invitations i JOIN playlists p ON p.id=i.playlist_id JOIN users u ON u.id=i.inviter_id JOIN users r ON r.id=i.recipient_id`
 
 func scanInvitation(row interface{ Scan(...any) error }) (PlaylistInvitation, error) {
 	var i PlaylistInvitation
-	err := row.Scan(&i.ID, &i.PlaylistID, &i.InviterID, &i.RecipientID, &i.RecipientUsername, &i.InviterName, &i.PlaylistName, &i.State, &i.Version, &i.CreatedAt, &i.UpdatedAt, &i.Available)
+	err := row.Scan(&i.ID, &i.PlaylistID, &i.InviterID, &i.RecipientID, &i.RecipientUsername, &i.RecipientDisplayName, &i.InviterName, &i.InviterUsername, &i.PlaylistName, &i.State, &i.Version, &i.CreatedAt, &i.UpdatedAt, &i.Available)
 	return i, err
 }
 func readInvitation(reader sqlReader, id string) (PlaylistInvitation, error) {

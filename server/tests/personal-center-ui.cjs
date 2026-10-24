@@ -83,6 +83,23 @@ async function main() {
     await member.locator('#profileName').waitFor();assert.equal(await member.locator('[data-page="users"]').isVisible(),false);
     await member.fill('#profileName','并发更新');await member.click('#saveProfile');await member.waitForFunction(()=>state.user.display_name==='并发更新');
 
+    // Duplicate nicknames must still identify the exact invitee and author.
+    const shared=await page.evaluate(async username=>{
+      const p=await api('playlists','POST',{id:browserUUID(),name:'Nickname sharing fixture'});
+      const source=await api('playlists/'+p.id+'/visibility','PUT',{visibility:'shared'},undefined,p.version);
+      await api('playlists/'+p.id+'/invitations','POST',{username},undefined,source.version);
+      await refreshCore();return state.playlists.find(item=>item.id===p.id);
+    },created.user.username);
+    await page.evaluate(p=>openSharingSettings(p),shared);
+    await page.locator('#ownerInvitations').filter({hasText:'并发更新 (@profile-member)'}).waitFor();await page.click('#closeSharing');
+    await member.goto(base+'/#/invitations');
+    await member.locator('#receivedInvitations').filter({hasText:'并发更新 (@admin)'}).waitFor();
+    await page.goto(base+'/#/admin/users');
+    const memberRow=page.locator('[data-user-id="'+created.user.id+'"]');await memberRow.waitFor();
+    assert.equal(await memberRow.locator('strong').textContent(),'并发更新');
+    assert.match(await memberRow.textContent(),/@profile-member/);
+    await page.goto(base+'/#/account/profile');await page.locator('#profileName').waitFor();
+
     const secondContext=await browser.newContext();const second=await secondContext.newPage();await login(second,base,'admin',password);
     const key=await page.evaluate(()=>api('auth/keys','POST',{name:'profile-fixture'}));
     await page.locator('#accountMenu summary').click();await page.click('#manageSessions');await page.locator('.session-card[data-current="true"]').waitFor();
@@ -93,6 +110,13 @@ async function main() {
     assert.equal(await member.evaluate(async()=> (await fetch('/api/v2/auth/me')).status),200);
     assert.equal((await fetch(base+'/api/v2/playlists',{headers:{'X-API-Key':key.secret}})).status,200);
     await page.screenshot({path:path.join(directory,'sessions-desktop.png'),fullPage:true});
+    // Single-login revocation supports cancellation and preserves this browser.
+    await login(second,base,'admin',password);await page.click('#refreshAccountSessions');
+    const otherLogin=page.locator('.session-card[data-current="false"] [data-revoke-session]');await otherLogin.waitFor();
+    page.once('dialog',d=>d.dismiss());await otherLogin.click();assert.equal(await otherLogin.count(),1);
+    page.once('dialog',d=>d.accept());await otherLogin.click();
+    await page.waitForFunction(()=>document.querySelectorAll('.session-card').length===1);
+    assert.equal(await second.evaluate(async()=> (await fetch('/api/v2/auth/me')).status),401);
     await login(second,base,'admin',password);
     await page.locator('#accountMenu summary').click();await page.click('#changePassword');
     await page.fill('#accountOldPassword',password);await page.fill('#accountNewPassword','new personal center password');await page.fill('#accountConfirmPassword','different confirmation');await page.click('#saveAccountPassword');
@@ -109,11 +133,16 @@ async function main() {
     await login(page,base,'admin','new personal center password');await page.locator('#profileName').waitFor();
     assert.equal(await page.inputValue('#profileName'),'并发更新');
 
-    await member.setViewportSize({width:375,height:812});await member.goto(base+'/#/account/security');await member.locator('#accountOldPassword').waitFor({state:'visible'});
+    await member.setViewportSize({width:375,height:812});await member.goto(base+'/#/account/security');await member.reload();await member.locator('#accountOldPassword').waitFor({state:'visible'});
     await member.waitForFunction(()=>parseFloat(getComputedStyle(document.querySelector('.main')).marginLeft)===0);
     assert.equal(await member.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
     await member.locator('#notifications .ok').waitFor({state:'detached'});
     await member.screenshot({path:path.join(directory,'account-mobile.png'),fullPage:true,animations:'disabled'});
+    await member.goto(base+'/#/account/sessions');await member.locator('.session-card[data-current="true"]').waitFor();
+    member.once('dialog',d=>d.accept());await member.locator('.session-card[data-current="true"] button').click();
+    await member.locator('#loginScreen').waitFor({state:'visible'});
+    assert.equal(await member.inputValue('#profileName'),'');
+    assert.equal(await member.evaluate(async()=> (await fetch('/api/v2/auth/me')).status),401);
     assert.deepEqual(errors,[]);
     console.log('PASS personal center: nickname/persistence/conflict, dirty navigation, first-password gate, current/other sessions, password logout with retained keys, mobile layout');
     console.log('Artifacts: '+directory);

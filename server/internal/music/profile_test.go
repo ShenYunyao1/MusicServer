@@ -122,3 +122,29 @@ func TestProfilePublicAuthorInvalidatesCatalog(t *testing.T) {
 		t.Fatal("nickname changed playlist ownership or members")
 	}
 }
+
+func TestProfileSharingNamesKeepUniqueLogins(t *testing.T) {
+	api, author, reader, playlist := sharingFixture(t)
+	at := communityLogin(t, api.store, author.Username)
+	bt := communityLogin(t, api.store, reader.Username)
+	for _, item := range []struct {
+		token string
+		user  User
+	}{{at, author}, {bt, reader}} {
+		if w := memberVersionRequest(api, item.token, "PATCH", "/api/v2/auth/me", `{"display_name":"同名朋友"}`, item.user.Version); w.Code != 200 {
+			t.Fatalf("duplicate display name: %d %s", w.Code, w.Body)
+		}
+	}
+	invitation, err := api.store.CreateInvitation(playlist.ID, reader.Username, MutationOptions{UserID: author.ID, ExpectedVersion: playlist.Version})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := sessionRequest(api, bt, "GET", "/api/v2/invitations/"+invitation.ID, "")
+	var view map[string]any
+	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &view) != nil {
+		t.Fatalf("invitation: %d %s", response.Code, response.Body)
+	}
+	if view["inviter_name"] != "同名朋友" || view["recipient_display_name"] != "同名朋友" || view["inviter_username"] != author.Username || view["recipient_username"] != reader.Username {
+		t.Fatalf("ambiguous invitation identity: %s", response.Body)
+	}
+}
