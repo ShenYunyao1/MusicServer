@@ -92,7 +92,7 @@ async function main() {
     await page.fill('#password', password);
     await page.click('#loginButton');
     await page.waitForFunction(()=>state.user?.username==='admin');
-    await page.waitForFunction(async()=> (await api('admin/scan/status')).state==='completed',null,{polling:250});
+    await page.waitForFunction(async()=>{const scan=await api('admin/scan/status');return scan.id&&scan.state==='completed'},null,{polling:250});
     await page.evaluate(()=>refreshCore());
     await page.waitForFunction(() => state.tracks.length === 1);
     await page.reload();

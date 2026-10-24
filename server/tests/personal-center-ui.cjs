@@ -61,6 +61,10 @@ async function main() {
     await page.waitForFunction(()=>state.page==='tracks');
     await page.locator('#accountMenu summary').click();await page.click('#personalCenter');await page.locator('#profileName').waitFor();
     await page.click('#accountBack');await page.waitForFunction(()=>location.hash==='#/library');
+    await page.goto(base+'/#/playlists/not-accessible');await page.locator('#routeError').waitFor({state:'visible'});
+    await page.locator('#accountMenu summary').click();await page.click('#personalCenter');await page.locator('#profileName').waitFor();
+    await page.click('#accountBack');
+    assert.equal(await page.evaluate(()=>location.hash),'#/library','Return should use the previous valid page, not an unavailable detail');
     await page.goto(base+'/#/account/profile');await page.locator('#profileName').waitFor();
     // A concurrent edit must not silently discard the unsaved form.
     const current=await page.evaluate(()=>state.user);
@@ -71,6 +75,24 @@ async function main() {
     page.once('dialog',d=>d.accept());await page.click('#reloadProfile');
     await page.waitForFunction(()=>document.querySelector('#profileName').value==='并发更新');
     await page.screenshot({path:path.join(directory,'profile-desktop.png'),fullPage:true});
+
+    // Typing and saving during a slow identity read must preserve the draft.
+    await page.goto(base+'/#/library');
+    let releaseIdentity,identityFetched;
+    const release=new Promise(resolve=>releaseIdentity=resolve),fetched=new Promise(resolve=>identityFetched=resolve);
+    await page.route('**/api/v2/auth/me',async route=>{
+      if(route.request().method()!=='GET')return route.continue();
+      const response=await route.fetch();identityFetched();await release;await route.fulfill({response});
+    });
+    await page.goto(base+'/#/account/profile');await fetched;
+    await page.fill('#profileName','响应顺序测试');await page.click('#saveProfile');
+    await page.waitForFunction(()=>personalBusy&&requestQueue.length>0);
+    assert.equal(await page.inputValue('#profileName'),'响应顺序测试');
+    const delayed=page.waitForResponse(r=>r.url().endsWith('/auth/me')&&r.request().method()==='GET');
+    releaseIdentity();await delayed;await page.waitForFunction(()=>state.user.display_name==='响应顺序测试'&&!personalBusy);await page.unroute('**/api/v2/auth/me');
+    assert.equal(await page.inputValue('#profileName'),'响应顺序测试');
+    assert.equal(await page.locator('#accountName').textContent(),'响应顺序测试');
+    await page.fill('#profileName','并发更新');await page.click('#saveProfile');await page.waitForFunction(()=>state.user.display_name==='并发更新');
 
     const created=await page.evaluate(()=>api('admin/users','POST',{username:'profile-member'}));
     const memberContext=await browser.newContext();const member=await memberContext.newPage();member.setDefaultTimeout(10000);member.on('pageerror',e=>errors.push(e.message));

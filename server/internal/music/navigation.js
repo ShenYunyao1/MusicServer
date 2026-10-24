@@ -180,7 +180,6 @@ async function restoreWorkspaceRoute() {
     state.statsUserID=page==='stats'&&state.statsScope==='admin'?new URLSearchParams(location.hash.split('?')[1]||'').get('user')||'':'';
     renderStatsUsers();
     displayWorkspacePage(page);
-    notePersonalNavigation(location.hash,page);
     if(page==='account')await showPersonalCenter(path[1]);
     if(page==='public'){
       state.publicDetailId=path[2]||null;const query=new URLSearchParams(location.hash.split('?')[1]||'');state.publicQuery=query.get('q')||'';state.publicOffset=Math.max(0,parseInt(query.get('offset'),10)||0);
@@ -223,6 +222,8 @@ async function restoreWorkspaceRoute() {
       state.managedUserID=path[2]||null;await loadUsers();
       if(path[2]&&!managedUser())throw new Error('用户不存在或无法读取。');
     }
+    if(generation!==routeGeneration||!state.user)return;
+    notePersonalNavigation(location.hash,page);
     restorePlaylistScroll();
     scheduleCommunityRefresh();
   } catch(error) {
