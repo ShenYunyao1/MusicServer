@@ -36,8 +36,12 @@ func (s *Store) UserResources(id, kind, relation string, offset, limit int, opti
 		if err := requireAdminActor(tx, options); err != nil {
 			return err
 		}
-		if _, err := readUser(tx, id); err != nil {
+		user, err := readUser(tx, id)
+		if err != nil {
 			return err
+		}
+		if user.DeletedAt != "" {
+			return sql.ErrNoRows
 		}
 		var total int
 		if kind == "tracks" {
@@ -97,6 +101,9 @@ func (s *Store) TransferResources(source string, request TransferRequest, option
 		from, err := readUser(tx, source)
 		if err != nil {
 			return err
+		}
+		if from.DeletedAt != "" {
+			return sql.ErrNoRows
 		}
 		to, err := readUser(tx, request.TargetID)
 		if err != nil {

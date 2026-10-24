@@ -26,6 +26,7 @@ type User struct {
 	AuthVersion        int64     `json:"-"`
 	Version            int64     `json:"version"`
 	CreatedAt          time.Time `json:"created_at"`
+	DeletedAt          string    `json:"deleted_at,omitempty"`
 }
 
 type Session struct {
@@ -77,7 +78,7 @@ func verifyPassword(encoded, password string) bool {
 func readUser(reader sqlReader, id string) (User, error) {
 	var user User
 	var created string
-	err := reader.QueryRow("SELECT id,username,display_name,role,enabled,auth_version,version,created_at,must_change_password FROM users WHERE id=?", id).Scan(&user.ID, &user.Username, &user.DisplayName, &user.Role, &user.Enabled, &user.AuthVersion, &user.Version, &created, &user.MustChangePassword)
+	err := reader.QueryRow("SELECT id,username,display_name,role,enabled,auth_version,version,created_at,must_change_password,COALESCE((SELECT value FROM meta WHERE key='deleted_user/'||users.id),'') FROM users WHERE id=?", id).Scan(&user.ID, &user.Username, &user.DisplayName, &user.Role, &user.Enabled, &user.AuthVersion, &user.Version, &created, &user.MustChangePassword, &user.DeletedAt)
 	if err == nil {
 		user.CreatedAt, err = parsePersistedTime(created)
 	}
@@ -116,6 +117,11 @@ func (s *Store) createUserRecord(username, password, role, display string, mustC
 	now := time.Now().UTC()
 	user := User{ID: uuid.NewString(), Username: username, DisplayName: display, Role: role, Enabled: true, MustChangePassword: mustChange, AuthVersion: 1, Version: 1, CreatedAt: now}
 	err = s.transaction(func(tx *sql.Tx) error {
+		if !bootstrap && len(options) > 0 && options[0].UserID != "" {
+			if err := requireAdminActor(tx, options); err != nil {
+				return err
+			}
+		}
 		if bootstrap {
 			var count int
 			if err := tx.QueryRow("SELECT count(*) FROM users WHERE role='admin'").Scan(&count); err != nil {
@@ -341,6 +347,13 @@ func (s *Store) replacePassword(username, old, password string, local, revokeKey
 	var id, before string
 	if err := s.db.QueryRow("SELECT id,password_hash FROM users WHERE username=? COLLATE NOCASE", username).Scan(&id, &before); err != nil {
 		return err
+	}
+	user, err := readUser(s.db, id)
+	if err != nil {
+		return err
+	}
+	if user.DeletedAt != "" {
+		return sql.ErrNoRows
 	}
 	if !local && !verifyPassword(before, old) {
 		return errCredentials

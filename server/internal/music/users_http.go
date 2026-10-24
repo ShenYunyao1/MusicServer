@@ -38,6 +38,12 @@ func writeUserError(response http.ResponseWriter, err error) {
 		writeError(response, 409, "USERNAME_EXISTS", err.Error())
 	case errors.Is(err, errVersionConflict):
 		writeError(response, 409, "VERSION_CONFLICT", err.Error())
+	case errors.Is(err, errAccountDeleteSelf):
+		writeError(response, 409, "ACCOUNT_DELETE_SELF", err.Error())
+	case errors.Is(err, errAccountNotDisabled):
+		writeError(response, 409, "ACCOUNT_NOT_DISABLED", err.Error())
+	case errors.Is(err, errAccountHasResources):
+		writeError(response, 409, "ACCOUNT_HAS_RESOURCES", err.Error())
 	case errors.Is(err, sql.ErrNoRows):
 		writeError(response, 404, "NOT_FOUND", "account not found")
 	default:
@@ -83,6 +89,19 @@ func (a *API) adminUsers(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	parts := strings.Split(path, "/")
+	if len(parts) == 1 && request.Method == "DELETE" {
+		options := mutationOptions(request)
+		if options.ExpectedVersion < 1 {
+			writeError(response, 428, "VERSION_REQUIRED", "If-Match is required")
+			return
+		}
+		if err := a.store.DeleteUser(parts[0], options); err != nil {
+			writeUserError(response, err)
+			return
+		}
+		response.WriteHeader(204)
+		return
+	}
 	if len(parts) == 2 && (parts[1] == "tracks" || parts[1] == "playlists" || parts[1] == "keys") && request.Method == "GET" {
 		offset, limit := 0, 100
 		var err error

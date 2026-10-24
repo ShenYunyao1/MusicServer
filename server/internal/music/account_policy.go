@@ -12,6 +12,12 @@ var errResourceHidden = errors.New("resource not found")
 
 // Mutation identity is supplied by the authenticated server handler, never JSON.
 func checkActorOwner(reader sqlReader, owner string, options []MutationOptions) error {
+	if owner != "" {
+		user, err := readUser(reader, owner)
+		if err != nil || user.DeletedAt != "" {
+			return errResourceHidden
+		}
+	}
 	if len(options) == 0 || options[0].UserID == "" {
 		return nil
 	}

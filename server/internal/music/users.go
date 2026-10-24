@@ -28,10 +28,22 @@ func (s *Store) UpdateUser(id string, patch AccountPatch, options MutationOption
 		patch.DisplayName = &v
 	}
 	err := s.transaction(func(tx *sql.Tx) error {
+		if options.UserID != "" && options.ActorType != "console" {
+			if patch.Enabled != nil || options.UserID != id {
+				if err := requireAdminActor(tx, []MutationOptions{options}); err != nil {
+					return err
+				}
+			} else if err := checkActorOwner(tx, id, []MutationOptions{options}); err != nil {
+				return err
+			}
+		}
 		var err error
 		user, err = readUser(tx, id)
 		if err != nil {
 			return err
+		}
+		if user.DeletedAt != "" {
+			return sql.ErrNoRows
 		}
 		if err := checkVersion(user.Version, []MutationOptions{options}); err != nil {
 			return err
@@ -123,7 +135,7 @@ func (s *Store) CreateMember(username, display string, options ...MutationOption
 	return TemporaryAccount{user, password}, nil
 }
 func (s *Store) Users() ([]User, error) {
-	rows, err := s.db.Query("SELECT id,username,display_name,role,enabled,auth_version,version,created_at,must_change_password FROM users ORDER BY username")
+	rows, err := s.db.Query("SELECT id,username,display_name,role,enabled,auth_version,version,created_at,must_change_password FROM users WHERE NOT EXISTS(SELECT 1 FROM meta WHERE key='deleted_user/'||users.id) ORDER BY username")
 	if err != nil {
 		return nil, err
 	}
@@ -151,10 +163,18 @@ func (s *Store) ResetMemberPassword(id string, revoke bool, options MutationOpti
 	}
 	var user User
 	err = s.transaction(func(tx *sql.Tx) error {
+		if options.UserID != "" {
+			if err := requireAdminActor(tx, []MutationOptions{options}); err != nil {
+				return err
+			}
+		}
 		var err error
 		user, err = readUser(tx, id)
 		if err != nil {
 			return err
+		}
+		if user.DeletedAt != "" {
+			return sql.ErrNoRows
 		}
 		if err = checkVersion(user.Version, []MutationOptions{options}); err != nil {
 			return err
