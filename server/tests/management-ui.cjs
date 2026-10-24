@@ -48,7 +48,7 @@ async function main() {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     assert.ok(ready, serverLog);
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch({ headless: true, ...(process.env.MUSIC_SERVER_BROWSER?{executablePath:process.env.MUSIC_SERVER_BROWSER}:{}) });
     const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
     const pageErrors = [];
     page.on('pageerror', error => {pageErrors.push(error.message);console.error('Browser error: '+error.stack)});
@@ -225,17 +225,17 @@ async function main() {
     await otherPage.waitForFunction(() => state.user?.username === 'admin');
     await page.locator('#accountMenu summary').click();
     await page.click('#manageSessions');
-    await page.locator('#modalBody button').filter({ hasText: '撤销' }).click();
-    await page.locator('#modalBody button').filter({ hasText: '撤销' }).waitFor({ state: 'detached' });
+    page.once('dialog',dialog=>dialog.accept());
+    await page.locator('.session-card[data-current="false"] [data-revoke-session]').click();
+    await page.locator('.session-card[data-current="false"]').waitFor({ state: 'detached' });
     assert.equal(await otherPage.evaluate(async () => (await fetch('/api/v2/auth/me')).status), 401);
-    await page.click('#cancelModal');
     await otherContext.close();
     await page.locator('#accountMenu summary').click();
     await page.click('#changePassword');
-    await page.fill('[data-field="old_password"]', password);
-    await page.fill('[data-field="new_password"]', 'changed administrator password');
-    await page.fill('[data-field="confirm_password"]', 'changed administrator password');
-    await page.click('#saveModal');
+    await page.fill('#accountOldPassword', password);
+    await page.fill('#accountNewPassword', 'changed administrator password');
+    await page.fill('#accountConfirmPassword', 'changed administrator password');
+    await page.click('#saveAccountPassword');
     await page.waitForFunction(() => !state.user && !document.querySelector('#loginScreen').hidden);
     await page.fill('#username', 'admin');
     await page.fill('#password', password);

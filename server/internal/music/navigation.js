@@ -1,6 +1,7 @@
 'use strict';
 
-const pageRoutes = {tracks:'library', public:'public/playlists', playlists:'playlists', upload:'uploads', keys:'player/keys', stats:'player/stats', overview:'admin/overview', users:'admin/users', maintenance:'admin/library/scan', logs:'admin/logs',settings:'admin/settings/general'};
+const pageRoutes = {account:'account/profile',tracks:'library', public:'public/playlists', playlists:'playlists', upload:'uploads', keys:'player/keys', stats:'player/stats', overview:'admin/overview', users:'admin/users', maintenance:'admin/library/scan', logs:'admin/logs',settings:'admin/settings/general'};
+titles.account='个人中心';
 const adminPages = new Set(['overview', 'users', 'maintenance', 'settings','logs']);
 Object.assign(titles, {overview:'管理概览', tracks:'全局曲库', playlists:'我的歌单', upload:'上传任务', keys:'播放器接入', stats:'播放器接入', users:'用户管理', settings:'系统设置', maintenance:'曲库维护'});
 titles.public='公开歌单';
@@ -157,11 +158,13 @@ function displayWorkspacePage(page) {
 let routeGeneration=0;
 async function restoreWorkspaceRoute() {
   if(!state.user || state.user.must_change_password)return;
+  if(!permitPersonalNavigation(location.hash))return;
   if(!permitPlaylistNavigation(location.hash))return;
   const generation=++routeGeneration;
   if(!location.hash || location.hash==='#/') {history.replaceState(null,'','#/'+pageRoutes[isAdministrator()?'overview':'tracks']);}
   const path=location.hash.slice(2).split('?')[0].split('/');
   let page=Object.keys(pageRoutes).find(key=>pageRoutes[key]===path.join('/'));
+  if(path[0]==='account'&&path.length===2&&['profile','security','sessions'].includes(path[1]))page='account';
   if(path[0]==='playlists'&&path.length===2)page='playlists';
   if(path[0]==='playlists'&&path.length===3&&path[2]==='edit')page='playlists';
   if(path[0]==='subscriptions'&&(path.length===1||path.length===2))page='playlists';
@@ -177,6 +180,8 @@ async function restoreWorkspaceRoute() {
     state.statsUserID=page==='stats'&&state.statsScope==='admin'?new URLSearchParams(location.hash.split('?')[1]||'').get('user')||'':'';
     renderStatsUsers();
     displayWorkspacePage(page);
+    notePersonalNavigation(location.hash,page);
+    if(page==='account')await showPersonalCenter(path[1]);
     if(page==='public'){
       state.publicDetailId=path[2]||null;const query=new URLSearchParams(location.hash.split('?')[1]||'');state.publicQuery=query.get('q')||'';state.publicOffset=Math.max(0,parseInt(query.get('offset'),10)||0);
       if(state.publicDetailId)await loadPublicDetail(state.publicDetailId);else await loadPublicCatalog();
@@ -229,4 +234,5 @@ async function restoreWorkspaceRoute() {
 window.addEventListener('hashchange',()=>restoreWorkspaceRoute());
 // The layout must be ready before restoring a browser login.
 setupAdministration();
-initializeAccountScreen();
+// Deferred personal-center script runs after the existing classic scripts.
+window.addEventListener('DOMContentLoaded',()=>{setupProfileWorkspace();initializeAccountScreen()});

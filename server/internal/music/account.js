@@ -33,6 +33,7 @@ const memberPlayer=document.createElement('audio');memberPlayer.id='memberPlayer
 function playTrack(track){if(track.missing || track.removed)return;memberPlayer.src='/api/v2/media/'+encodeURIComponent(track.id);memberPlayer.hidden=false;$('previewBar').hidden=false;$('previewTitle').textContent=track.title||'未命名曲目';memberPlayer.play().catch(error=>setStatus(error.message,'error'))}
 
 function setLoggedOut() {
+  if(typeof clearProfileWorkspace==='function')clearProfileWorkspace();
   if(typeof clearSystemLogs==='function')clearSystemLogs();
   if(typeof clearSharingWorkspace==='function')clearSharingWorkspace();
   if(typeof clearCommunityWorkspace==='function')clearCommunityWorkspace();
@@ -121,44 +122,9 @@ $('loginForm').onsubmit = async event => {
 };
 
 $('logout').onclick = () => run(async () => {
+  if(typeof confirmPersonalExit==='function'&&!confirmPersonalExit())return;
   await api('auth/logout', 'POST');
   setLoggedOut();
-});
-
-$('changePassword').onclick = () => openEditor('修改密码', {
-  old_password: '', new_password: '', confirm_password: '',
-}, async fields => {
-  if (fields.new_password !== fields.confirm_password) throw new Error('两次新密码不一致');
-  await api('auth/password', 'PUT', {
-    old_password: fields.old_password, new_password: fields.new_password,
-  });
-  setLoggedOut();
-  $('modalBody').replaceChildren();
-  $('loginError').textContent = '密码已修改，请重新登录。';
-});
-
-$('manageSessions').onclick = () => run(async () => {
-  const sessions = await api('auth/sessions');
-  $('modalTitle').textContent = '登录会话';
-  $('modalBody').replaceChildren();
-  for (const session of sessions) {
-    const row = document.createElement('p');
-    const button = document.createElement('button');
-    button.className = 'btn small danger';
-    button.textContent = session.current ? '退出当前会话' : '撤销';
-    button.onclick = () => run(async () => {
-      await api('auth/sessions/' + encodeURIComponent(session.id), 'DELETE');
-      if (session.current) setLoggedOut();
-      else row.remove();
-    });
-    row.append(document.createTextNode(
-      (session.current ? '当前会话 · ' : '') + new Date(session.created_at).toLocaleString()
-      + ' · 到期 ' + new Date(session.expires_at).toLocaleString() + ' ',
-    ), button);
-    $('modalBody').append(row);
-  }
-  state.saveAction = async () => { $('editor').close(); };
-  $('editor').showModal();
 });
 
 let userActive = false;
