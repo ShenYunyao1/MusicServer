@@ -121,7 +121,7 @@ function renderManagedUserPage(){
   $('managedUserStatus').textContent='登录名：'+user.username+' · '+(user.enabled?'已启用':'已停用')+(user.must_change_password?' · 首次登录需改密':'');
   const actions=$('userDetailActions');actions.replaceChildren($('refreshUsers'));
   const row=[...$('userList').children].find(el=>el.dataset.userId===user.id);
-  for(const action of ['display','reset','enabled']){
+  for(const action of ['display','reset','enabled','delete']){
     const source=row?.querySelector('[data-user-action="'+action+'"]');if(!source)continue;
     const button=makeButton(source.textContent,()=>source.click(),source.className);button.dataset.accountAction=action;button.disabled=source.disabled;button.title=source.title;actions.append(button);
   }

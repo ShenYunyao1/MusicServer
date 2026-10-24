@@ -29,8 +29,23 @@ function renderUsers(){
    if(user.enabled&&!confirm('停用 '+user.username+'？浏览器会话将退出，Key 暂不可用但记录和统计保留。'))return;
    run(async()=>{try{await api('admin/users/'+user.id,'PATCH',{enabled:!user.enabled},undefined,user.version)}finally{await loadUsers()}});
   };
+  if(!user.enabled&&user.id!==state.user?.id){const button=document.createElement('button');button.className='btn small danger';button.dataset.userAction='delete';button.textContent='删除账户';button.title='先接管全部曲目和歌单，删除后不能重新启用';button.onclick=()=>deleteUserAccount(user);row.querySelector('.actions').append(button)}
   $('userList').append(row);
  }
+}
+function deleteUserAccount(user){
+ if(!confirm('永久删除账户“'+user.username+'”？请先接管其管理的全部曲目和歌单。删除后不能重新启用，登录、Key、授权、调用统计、订阅和邀请将被清理；原始上传者与审计记录保留。'))return;
+ run(async()=>{
+  try{
+   await api('admin/users/'+user.id,'DELETE',undefined,undefined,user.version);
+   if(state.managedUserID===user.id){state.managedUserID=null;state.userResources=[];state.resourceTotal=0;$('userResources').replaceChildren()}
+   await loadUsers();location.hash='#/admin/users';setStatus('账户已删除，已接管的曲目和歌单保持可用。','ok');
+  }catch(error){
+   await loadUsers();
+   const messages={ACCOUNT_HAS_RESOURCES:'请先在资源页接管该账户管理的全部曲目和歌单，再删除账户。',ACCOUNT_NOT_DISABLED:'请先停用账户，再执行删除。',ACCOUNT_DELETE_SELF:'不能删除当前登录的管理员账户。'};
+   error.message=messages[error.code]||error.message;throw error;
+  }
+ });
 }
 $('createUser').onclick=()=>openEditor('创建成员',{username:'',display_name:''},async fields=>{const result=await api('admin/users','POST',fields);$('editor').close();showTemporaryPassword(result)});
 $('refreshUsers').onclick=()=>run(loadUsers);

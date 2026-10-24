@@ -99,6 +99,7 @@ async function main() {
     await page.waitForFunction(() => state.user?.username === 'admin' && state.tracks.length === 1);
     await page.waitForFunction(() => document.querySelector('#status').textContent === '已登录');
     if(process.env.MUSIC_SERVER_TEST_REALTIME_ONLY==='1'){await require('./community-realtime-ui.cjs')({page,browser,base,directory});return}
+    if(process.env.MUSIC_SERVER_TEST_ACCOUNT_DELETE_ONLY==='1'){await require('./account-delete-ui.cjs')({page,browser,base,directory});return}
     await require('./playlist-create-ui.cjs')({page,directory});
     if(process.env.MUSIC_SERVER_TEST_PLAYLIST_CREATE_ONLY==='1')return;
     await require('./track-actions-ui.cjs')({page});
@@ -252,6 +253,7 @@ async function main() {
     await require('./admin-layout-ui.cjs')({page,directory,...members});
     await require('./community-ui.cjs')({page,browser,base,directory});
     await require('./sharing-ui.cjs')({page,browser,base,directory});
+    await require('./account-delete-ui.cjs')({page,browser,base,directory});
     await page.locator('#accountMenu summary').click();
     await page.click('#logout');
     await page.waitForFunction(() => !state.user);
