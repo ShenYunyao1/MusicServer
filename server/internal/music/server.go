@@ -36,15 +36,17 @@ var usersPageScript []byte
 var workspaceAssets embed.FS
 
 type API struct {
-	store         *Store
-	updater       *update.Manager
-	concurrencyMu sync.Mutex
-	active        map[string]int
-	authConfig    AuthConfig
-	hashSlots     chan struct{}
-	updating      func() bool
-	setupMu       sync.Mutex
-	setupToken    string
+	realtimeMu      sync.Mutex
+	realtimeCursors map[string]realtimeBaseline
+	store           *Store
+	updater         *update.Manager
+	concurrencyMu   sync.Mutex
+	active          map[string]int
+	authConfig      AuthConfig
+	hashSlots       chan struct{}
+	updating        func() bool
+	setupMu         sync.Mutex
+	setupToken      string
 }
 
 type authContext struct {
@@ -246,6 +248,10 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	}
 	if strings.HasPrefix(request.URL.Path, "/api/v2/auth/") && !strings.HasPrefix(request.URL.Path, "/api/v2/auth/keys") {
 		a.accountAuth(response, request)
+		return
+	}
+	if request.URL.Path == "/api/v2/community/sync" {
+		a.realtimeSync(response, request)
 		return
 	}
 	if sharingEndpoint(request.URL.Path) {
