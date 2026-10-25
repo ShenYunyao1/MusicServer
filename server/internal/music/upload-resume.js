@@ -57,7 +57,9 @@ function persistResumeQueue() {
   clearTimeout(resumeSaveTimer);
   const owner = state.user?.id;
   if (!owner) return Promise.resolve(false);
-  const records = state.uploads.filter(upload => !upload.resumeCanceled && !upload.resumeCompleted && !['完成', '已去重'].includes(upload.status)).map(resumeDraft);
+  // A cancellation flag interrupts the sender before DELETE is acknowledged.
+  // Keep its draft until the row is actually removed, including slow/failed DELETEs.
+  const records = state.uploads.filter(upload => !upload.resumeCompleted && !['完成', '已去重'].includes(upload.status)).map(resumeDraft);
   resumeQueueWrite = resumeQueueWrite.catch(() => {}).then(() => resumeQueueStorage.write(owner, records)).then(() => true, error => {
     if (state.user?.id === owner) setStatus('队列元数据未能保存；刷新后编辑和附件需重新选择：' + error.message, 'error');
     return false;
@@ -280,7 +282,11 @@ function resumeStageUpload(upload) {
         const attachments = {}; for (const kind of ['cover', 'lyrics']) if (upload[kind + 'File']?.file) attachments[kind] = upload[kind + 'File'].file.name;
         task = await resumeJSON('', 'POST', { name: file.name, size: file.size, fields: upload.edits, attachments }, owner, epoch);
       } else task = await resumeJSON('/' + upload.resumeId, 'GET', undefined, owner, epoch);
-      resumeGuard(owner, epoch, upload); applyResumeTask(upload, task); await persistResumeQueue();
+      // Pause/cancel may arrive while creation is in flight. Retain the server
+      // identity before honoring that flag so continue reuses it and cancel can
+      // delete it. An old account's acknowledgement never enters the new queue.
+      if (resumeCurrent(owner, epoch, upload)) { applyResumeTask(upload, task); await persistResumeQueue(); }
+      resumeGuard(owner, epoch, upload);
       if (task.state === 'ready') {
         const preview = await resumeFinishRequest(upload, task, {}, owner, epoch);
         return await applyResumePreview(upload, preview, owner, epoch);
@@ -344,7 +350,12 @@ async function cancelResumeUpload(upload, restarting = false) {
   const owner = state.user?.id, epoch = resumeWorkspaceEpoch;
   if (!restarting) { upload.resumeCanceled = true; pauseResumeUpload(upload); await resumeRuns.get(upload); }
   if (upload.resumeId) {
-    try { await resumeJSON('/' + upload.resumeId, 'DELETE', undefined, owner, epoch); } catch (error) { if (error.status !== 404) { upload.resumeCanceled = false; throw error; } }
+    try { await resumeJSON('/' + upload.resumeId, 'DELETE', undefined, owner, epoch); } catch (error) {
+      if (error.status !== 404) {
+        if (resumeCurrent(owner, epoch, upload)) { upload.resumeCanceled = false; await persistResumeQueue(); renderUploads(); }
+        throw error;
+      }
+    }
   } else if (upload.stageId) {
     try { await api('uploads/stage/' + encodeURIComponent(upload.stageId), 'DELETE'); } catch (error) { if (error.status !== 404) throw error; }
   }

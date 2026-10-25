@@ -153,6 +153,60 @@ if (require.main === module) {
     assert.equal(h.sent.length, 1, 'reselecting the missing attachment preserves acknowledged audio');
     assert.equal(Buffer.from(h.finishBodies[0].lyrics, 'base64').toString(), '[00:01]Durable lyric');
   });
+  test('a slow failed cancellation preserves persisted edits and attachment names', async () => {
+    const h = harness(), upload = h.upload(Buffer.alloc(1024, 13));
+    await h.context.resumeStageUpload(upload);
+    upload.edits.title = 'Latest unsaved-to-server title';
+    upload.lyricsFile = { file: Object.assign(new Blob(['[00:01]Keep lyric']), { name: 'keep.lrc' }), manual: true };
+    await h.context.persistResumeQueue();
+    let release, announce;
+    const gate = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { announce = resolve; });
+    h.context.fetch = async () => { announce(); await gate; return { ok: false, status: 503, text: async () => JSON.stringify({ error: { message: 'temporary delete failure' } }) }; };
+    const cancellation = h.context.cancelResumeUpload(upload); await started;
+    await new Promise(resolve => setTimeout(resolve, 220));
+    assert.equal(h.drafts.get('owner-a')[0]?.edits.title, 'Latest unsaved-to-server title');
+    assert.equal(h.drafts.get('owner-a')[0]?.attachments.lyrics, 'keep.lrc');
+    release(); await assert.rejects(cancellation, /503/);
+    assert.equal(upload.resumeCanceled, false);
+    assert.equal(h.drafts.get('owner-a')[0]?.edits.title, 'Latest unsaved-to-server title');
+    assert.equal(h.tasks.get(upload.resumeId).state, 'ready');
+  });
+  test('a delayed cancellation failure cannot change a replacement account queue', async () => {
+    const h = harness(), upload = h.upload(Buffer.alloc(1024, 16));
+    await h.context.resumeStageUpload(upload);
+    let release, announce;
+    const gate = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { announce = resolve; });
+    h.context.fetch = async () => { announce(); await gate; return { ok: false, status: 503, text: async () => '{}' }; };
+    const cancellation = h.context.cancelResumeUpload(upload); await started;
+    h.context.clearResumeWorkspace(); h.state.user = { id: 'owner-b' }; h.state.uploads = [];
+    const newer = h.upload(Buffer.alloc(32, 17)); newer.edits.title = 'Account B draft'; await h.context.persistResumeQueue();
+    release(); await assert.rejects(cancellation);
+    assert.equal(upload.resumeCanceled, true, 'old cancellation catch must not mutate an abandoned workspace');
+    assert.equal(h.state.uploads[0], newer); assert.equal(h.drafts.get('owner-b')[0].edits.title, 'Account B draft');
+  });
+  for (const action of ['pause', 'cancel', 'switch-account']) test('delayed creation acknowledgement respects ' + action, async () => {
+    const h = harness(), upload = h.upload(Buffer.alloc(1024, 14)), originalFetch = h.context.fetch;
+    let release, announce;
+    const gate = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { announce = resolve; });
+    h.context.fetch = async (url, options) => {
+      const response = await originalFetch(url, options);
+      if (options?.method === 'POST' && url.endsWith('/resumable')) { announce(); await gate; }
+      return response;
+    };
+    const running = h.context.resumeStageUpload(upload); await started;
+    let cancellation, newer;
+    if (action === 'pause') h.context.pauseResumeUpload(upload);
+    else if (action === 'cancel') cancellation = h.context.cancelResumeUpload(upload);
+    else { h.context.clearResumeWorkspace(); h.state.user = { id: 'owner-b' }; h.state.uploads = []; newer = h.upload(Buffer.alloc(32, 15)); }
+    release(); await running; if (cancellation) await cancellation;
+    const task = [...h.tasks.values()][0];
+    if (action === 'pause') {
+      assert.equal(upload.resumeId, task.id); assert.equal(upload.status, '已暂停'); assert.equal(h.sent.length, 0);
+      assert.equal(h.drafts.get('owner-a')[0].resumeId, task.id);
+      await h.context.resumeStageUpload(upload); assert.equal(h.tasks.size, 1); assert.equal(upload.status, '待确认');
+    } else if (action === 'cancel') { assert.equal(task.state, 'canceled'); assert.equal(h.sent.length, 0); }
+    else { assert.equal(h.state.uploads.length, 1); assert.equal(h.state.uploads[0], newer); assert.equal(newer.resumeId, undefined); assert.equal(task.state, 'uploading'); }
+  });
 }
 
 module.exports = async function resumableBrowserChecks({ page, directory }) {
