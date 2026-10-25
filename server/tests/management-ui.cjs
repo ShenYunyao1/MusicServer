@@ -107,6 +107,7 @@ async function main() {
     if(process.env.MUSIC_SERVER_TEST_BACKUP_ONLY==='1'){await require('./backup-ui.cjs')({page,browser,base,directory});return}
     if(process.env.MUSIC_SERVER_TEST_STORAGE_ONLY==='1'){await require('./storage-ui.cjs')({page,directory});return}
     if(process.env.MUSIC_SERVER_TEST_SIDEBAR_ONLY==='1'){await require('./sidebar-ui.cjs')({page,directory});return}
+    if(process.env.MUSIC_SERVER_TEST_MULTIUSER_ONLY==='1'){await require('./multiuser-ui.cjs')({browser,adminPage:page,base,audio,directory});return}
     if(process.env.MUSIC_SERVER_TEST_PLAYLIST_ITEMS_ONLY==='1'){
       await page.evaluate(async()=>{await api('playlists','POST',{id:browserUUID(),name:'Browser playlist',track_ids:[state.tracks[0].id],track_notes:{[state.tracks[0].id]:'Browser cue'}});await refreshCore()});
       await require('./playlist-ui.cjs')({page,browser,directory});return;
@@ -167,8 +168,10 @@ async function main() {
     await page.locator('#removedResults button').click();
     await page.waitForFunction(() => state.tracks.length === 1);
     assert.equal(await page.evaluate(() => state.playlists.find(playlist => playlist.name === 'Browser playlist').track_notes[state.tracks[0].id]), 'Browser cue');
-    await page.click('[data-page="settings"]');await page.locator('#settingsTabs a[href="#/admin/settings/backup"]').click();await page.click('#createBackup');
-    await page.waitForFunction(() => document.querySelector('#backupResult').textContent.includes('.tar.gz'));
+    await page.click('[data-page="settings"]');await page.locator('#settingsTabs a[href="#/admin/settings/backup"]').click();
+    await page.locator('[data-settings-pane="backup"]').waitFor({state:'visible'});await page.waitForFunction(()=>backupPolicyLoaded&&!backupLoading);
+    const previousBackupJob=await page.evaluate(()=>backupCurrentJob?.id||null);
+    await page.click('#createBackup');await page.waitForFunction(previous=>backupCurrentJob?.id!==previous&&backupCurrentJob?.state==='completed',previousBackupJob);
     await page.locator('#settingsTabs a[href="#/admin/settings/audit"]').click();await page.click('#viewAudit');
     await page.waitForFunction(() => document.querySelectorAll('#auditResults details').length > 0);
     await page.click('[data-page="maintenance"]');await page.click('#scan');

@@ -93,7 +93,9 @@ module.exports=async function runMultiuserUI({browser,adminPage,base,audio,direc
   await b.page.screenshot({path:path.join(directory,'member-overview.png'),fullPage:true});
   // Administrator removal preserves a visible placeholder and Bob's note.
   await adminPage.evaluate(()=>refreshCore());await adminPage.evaluate(async id=>{const t=state.tracks.find(t=>t.id===id);await api('tracks/'+id,'DELETE',undefined,undefined,t.version)},track.id);
-  await b.page.evaluate(()=>refreshCore());await b.page.click('[data-page="playlists"]');await b.page.evaluate(()=>{state.playlistDetailId=state.playlists.find(p=>p.name==='Bob private').id;renderPlaylists()});
+  await b.page.evaluate(()=>refreshCore());
+  await b.page.evaluate(id=>location.hash='#/playlists/'+id,playlist.id);
+  await b.page.waitForFunction(id=>state.playlistDetailId===id&&document.querySelector('#playlistDetail').textContent.includes('不可用曲目'),playlist.id);
   assert.ok((await b.page.locator('#playlistDetail').textContent()).includes('不可用曲目'));assert.ok((await b.page.locator('#playlistDetail').textContent()).includes('Bob personal cue'));
   await adminPage.evaluate(async id=>{const removed=await api('admin/removed');const t=removed.find(t=>t.id===id);await api('admin/removed/'+id,'POST',undefined,undefined,t.version)},track.id);
   await b.page.evaluate(()=>refreshCore());assert.ok((await b.page.locator('#playlistDetail').textContent()).includes('Alice song'));
