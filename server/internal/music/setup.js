@@ -16,6 +16,8 @@ document.body.append(setupScreen);
 }
 
 async function initializeAccountScreen(){
+ const loginFields=[...$('loginForm').querySelectorAll('input,button')];
+ loginFields.forEach(field=>field.disabled=true);$('loginForm').setAttribute('aria-busy','true');$('loginButton').textContent='正在检查登录…';
  try {
   const status=await api('setup');
   if(status.required){
@@ -27,6 +29,7 @@ async function initializeAccountScreen(){
   $('setupForm').reset();
   await enterAccount(await api('auth/me'));
  }catch(error){setLoggedOut();if(error.status!==401)$('loginError').textContent=error.message}
+ finally{loginFields.forEach(field=>field.disabled=false);$('loginForm').removeAttribute('aria-busy');$('loginButton').textContent='登录'}
 }
 $('setupForm').onsubmit=async event=>{
  event.preventDefault();$('setupError').textContent='';$('setupSubmit').disabled=true;

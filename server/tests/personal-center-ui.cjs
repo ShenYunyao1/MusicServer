@@ -41,6 +41,8 @@ async function main() {
     browser=await chromium.launch({headless:true,...(process.env.MUSIC_SERVER_BROWSER?{executablePath:process.env.MUSIC_SERVER_BROWSER}:{})});
     const context=await browser.newContext({viewport:{width:1365,height:1000}});
     const page=await context.newPage();page.setDefaultTimeout(10000);page.on('pageerror',e=>errors.push(e.message));
+    await require('./bootstrap-login-ui.cjs')(page,base);
+    if(process.env.MUSIC_SERVER_TEST_BOOTSTRAP_ONLY==='1')return;
     await login(page,base,'admin',password);
     await page.locator('#profileName').waitFor();
     assert.equal(await page.locator('#page-account h1').count(),1);
