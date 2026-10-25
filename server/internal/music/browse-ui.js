@@ -67,6 +67,10 @@ async function refreshBrowseCore(){
   browseState.summary=summary;state.browseSummary=summary;state.revision=summary.revision;
   await Promise.all([loadBrowseTracks(state.page==='tracks'?browseRouteOffset():browseState.tracks?.offset||0,summary.revision),loadBrowsePlaylists(state.page==='playlists'&&!state.playlistDetailId?browseRouteOffset():browseState.playlists?.offset||0,summary.revision)]);
   if(epoch!==browseState.epoch)return;
+  if(state.page==='keys'||state.page==='public'||state.page==='playlists'&&(state.subscriptionsTab||state.invitationsTab)){
+    const subscriptions=await api('subscriptions');if(epoch!==browseState.epoch)return;
+    state.playlists=state.playlists.filter(p=>!p.subscription_status).concat(list(subscriptions,'playlists'));
+  }
   if(state.page==='playlists'&&state.playlistDetailId&&!state.subscriptionsTab&&!state.invitationsTab&&!state.playlistCreating){
     const detailID=state.playlistDetailId;
     try{await loadBrowseMembers(detailID,browseRouteOffset())}catch(error){
