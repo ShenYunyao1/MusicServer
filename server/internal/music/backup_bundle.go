@@ -304,6 +304,10 @@ func (s *Store) CreateBackupBundle(ctx context.Context, includeMedia bool, progr
 		return BackupArchive{}, errors.New("backup manifest exceeds limit")
 	}
 	name, _ := backupArchiveName(manifest.ID)
+	// Allow for incompressible input, gzip framing and tar headers.
+	if err := s.checkSpace(s.backupDirectory(), total+total/50+int64(len(inputs))*1024+(1<<20)); err != nil {
+		return BackupArchive{}, err
+	}
 	final := filepath.Join(s.backupDirectory(), name)
 	partial := final + ".partial"
 	output, err := os.OpenFile(partial, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
@@ -318,7 +322,7 @@ func (s *Store) CreateBackupBundle(ctx context.Context, includeMedia bool, progr
 			os.Remove(final)
 		}
 	}()
-	compressed, _ := gzip.NewWriterLevel(output, gzip.BestSpeed)
+	compressed, _ := gzip.NewWriterLevel(storageWriter{s, s.backupDirectory(), output}, gzip.BestSpeed)
 	archive := tar.NewWriter(compressed)
 	if err := archive.WriteHeader(&tar.Header{Name: "manifest.json", Mode: 0600, Size: int64(len(encoded))}); err != nil {
 		return BackupArchive{}, err

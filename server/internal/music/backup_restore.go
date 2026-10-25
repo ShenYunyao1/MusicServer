@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"musicserver/internal/diskspace"
 	"musicserver/internal/version"
 )
 
@@ -129,6 +130,20 @@ func RestoreBackup(ctx context.Context, archivePath, destination string) (Backup
 	}
 	if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
 		return manifest, err
+	}
+	var required int64
+	for _, file := range manifest.Files {
+		required += file.Size
+		if file.Path == "database.sqlite" {
+			required += file.Size
+		}
+	}
+	space, err := diskspace.Read(filepath.Dir(target))
+	if err != nil {
+		return manifest, err
+	}
+	if uint64(required+diskspace.DefaultReserve) > space.Available {
+		return manifest, errStorageLow
 	}
 	temporary, err := os.MkdirTemp(filepath.Dir(target), ".musicserver-restore-*")
 	if err != nil {

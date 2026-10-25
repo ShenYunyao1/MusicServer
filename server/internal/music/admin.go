@@ -45,6 +45,15 @@ func (s *Store) Backup() (string, error) {
 	return s.backupSnapshot(context.Background())
 }
 func (s *Store) backupSnapshot(ctx context.Context) (string, error) {
+	var size int64
+	for _, suffix := range []string{"", "-wal"} {
+		if stat, err := os.Stat(s.dataPath + suffix); err == nil {
+			size += stat.Size()
+		}
+	}
+	if err := s.checkSpace(filepath.Dir(s.dataPath), size+(1<<20)); err != nil {
+		return "", err
+	}
 	if err := backupAcquire(ctx, s.writeMu.TryLock); err != nil {
 		return "", err
 	}

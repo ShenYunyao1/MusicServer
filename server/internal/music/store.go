@@ -21,6 +21,7 @@ import (
 
 	"github.com/google/uuid"
 	"musicserver/internal/activity"
+	"musicserver/internal/diskspace"
 	"musicserver/internal/update"
 )
 
@@ -34,6 +35,8 @@ var errVersionConflict = errors.New("record changed; refresh before editing")
 var errTrackInUse = errors.New("this track is used by another account's playlist; contact an administrator")
 
 type Store struct {
+	storageWriteMu sync.Mutex
+	spaceProbe     func(string) (diskspace.Space, error)
 	backupBundleMu sync.Mutex
 	backupMu       sync.Mutex
 	backupJob      BackupJob

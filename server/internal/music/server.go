@@ -32,7 +32,7 @@ var accountPageScript []byte
 //go:embed users.js
 var usersPageScript []byte
 
-//go:embed management.css management.js navigation.js feedback.js library.js administration.js playlist-ui.js community.js sharing.js updater-ui.js setup.js upload-progress.js system-logs.js profile.js profile.css community-realtime.js backup-ui.js
+//go:embed management.css management.js navigation.js feedback.js library.js administration.js playlist-ui.js community.js sharing.js updater-ui.js setup.js upload-progress.js system-logs.js profile.js profile.css community-realtime.js backup-ui.js storage-ui.js
 var workspaceAssets embed.FS
 
 type API struct {
@@ -163,6 +163,7 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		assets := map[string]string{"/assets/management.css": "text/css; charset=utf-8", "/assets/management.js": "text/javascript; charset=utf-8", "/assets/navigation.js": "text/javascript; charset=utf-8", "/assets/feedback.js": "text/javascript; charset=utf-8", "/assets/library.js": "text/javascript; charset=utf-8", "/assets/administration.js": "text/javascript; charset=utf-8", "/assets/playlist-ui.js": "text/javascript; charset=utf-8", "/assets/community.js": "text/javascript; charset=utf-8", "/assets/sharing.js": "text/javascript; charset=utf-8"}
 		assets["/assets/profile.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/backup-ui.js"] = "text/javascript; charset=utf-8"
+		assets["/assets/storage-ui.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/community-realtime.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/profile.css"] = "text/css; charset=utf-8"
 		if contentType, ok := assets[request.URL.Path]; ok {
@@ -267,6 +268,10 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	}
 	if request.URL.Path == "/api/v2/admin/backups" || strings.HasPrefix(request.URL.Path, "/api/v2/admin/backups/") {
 		a.backups(response, request)
+		return
+	}
+	if request.URL.Path == "/api/v2/admin/storage" || strings.HasPrefix(request.URL.Path, "/api/v2/admin/storage/") {
+		a.storage(response, request)
 		return
 	}
 	if request.URL.Path == "/api/v2/admin/logs" {
@@ -1128,11 +1133,17 @@ func (a *API) upload(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	maxUpload := a.store.Settings().MaxUploadBytes
+	if !a.protectUpload(response, request) {
+		return
+	}
 	if maxUpload <= 0 {
 		maxUpload = 512 << 20
 	}
 	request.Body = http.MaxBytesReader(response, request.Body, maxUpload)
 	if err := request.ParseMultipartForm(8 << 20); err != nil {
+		if writeStorageError(response, err) {
+			return
+		}
 		writeError(response, 400, "invalid upload or file exceeds configured limit")
 		return
 	}
@@ -1151,6 +1162,9 @@ func (a *API) upload(response http.ResponseWriter, request *http.Request) {
 	}
 	preview, err := a.store.StageAudio(header.Filename, file, metadata, mutationOptions(request))
 	if err != nil {
+		if writeStorageError(response, err) {
+			return
+		}
 		writeError(response, 400, err.Error())
 		return
 	}
@@ -1159,6 +1173,9 @@ func (a *API) upload(response http.ResponseWriter, request *http.Request) {
 		_ = a.store.DeleteUploadStage(preview.ID)
 	}
 	if err != nil {
+		if writeStorageError(response, err) {
+			return
+		}
 		writeError(response, 400, err.Error())
 		return
 	}
@@ -1181,6 +1198,9 @@ func (a *API) stageUpload(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	started := time.Now()
+	if !a.protectUpload(response, request) {
+		return
+	}
 	metrics := activityFields(request)
 	_ = a.store.activity.Emit("upload.receiving", metrics)
 	received := false
@@ -1198,6 +1218,9 @@ func (a *API) stageUpload(response http.ResponseWriter, request *http.Request) {
 	body := &countedUploadBody{ReadCloser: request.Body}
 	request.Body = body
 	if err := request.ParseMultipartForm(8 << 20); err != nil {
+		if writeStorageError(response, err) {
+			return
+		}
 		writeError(response, http.StatusBadRequest, "INVALID_UPLOAD", "invalid upload or file exceeds configured limit")
 		return
 	}
@@ -1238,6 +1261,9 @@ func (a *API) stageUpload(response http.ResponseWriter, request *http.Request) {
 	validationStarted := time.Now()
 	preview, err := a.store.stageAudioWithAssetsContext(ctx, header.Filename, file, fields, uploadAssets{Lyrics: lyrics, Cover: cover, CoverSource: coverSource}, mutationOptions(request))
 	if err != nil {
+		if writeStorageError(response, err) {
+			return
+		}
 		writeError(response, http.StatusBadRequest, "STAGE_FAILED", err.Error())
 		return
 	}
@@ -1301,6 +1327,9 @@ func (a *API) stagedUpload(response http.ResponseWriter, request *http.Request) 
 			return
 		}
 		if err != nil {
+			if writeStorageError(response, err) {
+				return
+			}
 			writeError(response, http.StatusBadRequest, "COMMIT_FAILED", err.Error())
 			return
 		}

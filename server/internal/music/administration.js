@@ -31,11 +31,12 @@ function setupAdministration(){
 
   const settings=$('page-settings'),general=settings.querySelector('.panel'),update=$('updateStatus').closest('.panel');general.dataset.settingsPane='general';update.dataset.settingsPane='update';update.hidden=true;
   const backup=document.createElement('section');backup.className='panel';backup.dataset.settingsPane='backup';backup.hidden=true;settings.append(backup);setupBackupPane(backup);
+  const storage=document.createElement('section');storage.className='panel';storage.dataset.settingsPane='storage';storage.hidden=true;settings.append(storage);setupStoragePane(storage);
   const audit=document.createElement('section');audit.className='panel';audit.dataset.settingsPane='audit';audit.hidden=true;audit.innerHTML='<h3>操作记录</h3><p class="status">最近 100 条记录；展开查看变更详情。</p><div id="auditResults"></div>';
   const auditButton=makeButton('刷新操作记录',()=>run(loadAuditEntries));auditButton.id='viewAudit';audit.querySelector('#auditResults').before(auditButton);
   settings.append(backup,audit);
   const settingsTabs=document.createElement('nav');settingsTabs.className='page-tabs';settingsTabs.id='settingsTabs';
-  for(const [tab,label] of [['general','常规'],['backup','数据库备份'],['update','程序更新'],['audit','操作记录']])settingsTabs.append(routeLink(label,'admin/settings/'+tab));settings.querySelector('.page-intro').after(settingsTabs);
+  for(const [tab,label] of [['general','常规'],['storage','容量与额度'],['backup','备份与恢复'],['update','程序更新'],['audit','操作记录']])settingsTabs.append(routeLink(label,'admin/settings/'+tab));settings.querySelector('.page-intro').after(settingsTabs);
   const updateSource=document.createElement('div');updateSource.id='updateSource';updateSource.className='field';update.querySelector('#updateStatus').before(updateSource);
   const saveUpdate=makeButton('保存更新来源',()=>run(()=>saveSettings('update')),'btn primary');updateSource.after(saveUpdate);
   $('saveSettings').onclick=()=>run(()=>saveSettings('general'));
@@ -82,6 +83,7 @@ async function showSettingsTab(tab){
   if(['general','update'].includes(tab))await loadSettings();
   if(tab==='update')await loadUpdate();
   if(tab==='backup')await loadBackupManagement(true);
+  if(tab==='storage')await loadStorage();
   if(tab==='audit')await loadAuditEntries();
 }
 async function loadRemovedTracks(){

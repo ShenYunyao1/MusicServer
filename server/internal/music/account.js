@@ -34,6 +34,7 @@ function playTrack(track){if(track.missing || track.removed)return;memberPlayer.
 
 function setLoggedOut() {
   if(typeof clearBackupWorkspace==='function')clearBackupWorkspace();
+  if(typeof clearStorageWorkspace==='function')clearStorageWorkspace();
   if(typeof clearProfileWorkspace==='function')clearProfileWorkspace();
   if(typeof clearSystemLogs==='function')clearSystemLogs();
   if(typeof clearSharingWorkspace==='function')clearSharingWorkspace();

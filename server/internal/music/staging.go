@@ -149,6 +149,12 @@ func (s *Store) stageAudioWithAssetsContext(ctx context.Context, name string, re
 		return UploadPreview{}, err
 	}
 	relative := ".staging/" + id + ext
+	if err := s.checkSpace(s.mediaRoot, 0); err != nil {
+		return UploadPreview{}, err
+	}
+	if err := s.checkSpace(filepath.Dir(s.dataPath), 1<<20); err != nil {
+		return UploadPreview{}, err
+	}
 	file, err := root.OpenFile(relative, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return UploadPreview{}, err
@@ -160,7 +166,7 @@ func (s *Store) stageAudioWithAssetsContext(ctx context.Context, name string, re
 	settings := s.Settings()
 	max := settings.MaxUploadBytes
 	writeStarted := time.Now()
-	count, copyErr := io.Copy(file, io.LimitReader(contextReader{ctx, reader}, max+1))
+	count, copyErr := io.Copy(storageWriter{s, s.mediaRoot, file}, io.LimitReader(contextReader{ctx, reader}, max+1))
 	closeErr := file.Close()
 	metrics.Bytes = count
 	timings["write_ms"] = time.Since(writeStarted).Milliseconds()
@@ -227,6 +233,10 @@ func (s *Store) stageAudioWithAssetsContext(ctx context.Context, name string, re
 	persistStarted := time.Now()
 	encoded, err := json.Marshal(record)
 	if err != nil {
+		_ = root.Remove(relative)
+		return UploadPreview{}, err
+	}
+	if err := s.checkSpace(filepath.Dir(s.dataPath), int64(len(encoded))*2+(1<<20)); err != nil {
 		_ = root.Remove(relative)
 		return UploadPreview{}, err
 	}
@@ -337,6 +347,12 @@ func (s *Store) commitUploadStageWithMetadata(id string, fields map[string]strin
 		return Track{}, false, err
 	}
 	final := "uploads/" + id + strings.ToLower(filepath.Ext(preview.OriginalName))
+	if err := s.checkSpace(filepath.Dir(s.dataPath), int64(len(record.Cover)+len(record.Sidecar))*2+(1<<20)); err != nil {
+		return Track{}, false, err
+	}
+	if err := s.checkSpace(s.mediaRoot, preview.Size+int64(len(record.Sidecar)+len(record.Cover))); err != nil {
+		return Track{}, false, err
+	}
 	source, err := root.Open(relative)
 	if err != nil {
 		return Track{}, false, err
@@ -346,7 +362,7 @@ func (s *Store) commitUploadStageWithMetadata(id string, fields map[string]strin
 	if err != nil {
 		return Track{}, false, err
 	}
-	_, copyErr := io.Copy(destination, source)
+	_, copyErr := io.Copy(storageWriter{s, s.mediaRoot, destination}, source)
 	syncErr := destination.Sync()
 	closeErr := destination.Close()
 	lyricsPath := strings.TrimSuffix(final, filepath.Ext(final)) + ".lrc"
@@ -420,6 +436,11 @@ func (s *Store) commitUploadStageWithMetadata(id string, fields map[string]strin
 		}
 	}
 	duplicate := false
+	// Media and SQLite may share a volume; recheck after publishing temporary
+	// copies and sidecars, before database assets consume the remaining headroom.
+	if err := s.checkSpace(filepath.Dir(s.dataPath), int64(len(record.Cover)+len(record.Sidecar))*2+(1<<20)); err != nil {
+		return Track{}, false, err
+	}
 	if err := s.transaction(func(tx *sql.Tx) error {
 		if err := checkActorOwner(tx, stageOwner, options); err != nil {
 			return err
@@ -444,6 +465,9 @@ func (s *Store) commitUploadStageWithMetadata(id string, fields map[string]strin
 		}
 		if removed > 0 {
 			return errors.New("this audio was removed; contact an administrator to restore it")
+		}
+		if err := s.checkAccountQuota(tx, stageOwner, track.Size); err != nil {
+			return err
 		}
 		if err := checkActorOwner(tx, stageOwner, options); err != nil {
 			return err

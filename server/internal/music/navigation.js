@@ -172,7 +172,7 @@ async function restoreWorkspaceRoute() {
   if(path[0]==='public'&&path[1]==='playlists'&&path.length===3)page='public';
   if(path[0]==='admin'&&path[1]==='users'&&path.length===3)page='users';
   if(path[0]==='admin'&&path[1]==='library'&&path.length===3&&['scan','missing','removed'].includes(path[2]))page='maintenance';
-  if(path[0]==='admin'&&path[1]==='settings'&&path.length===3&&['general','backup','update','audit'].includes(path[2]))page='settings';
+  if(path[0]==='admin'&&path[1]==='settings'&&path.length===3&&['general','storage','backup','update','audit'].includes(path[2]))page='settings';
   if(path[0]==='admin'&&path[1]==='stats'&&path.length===2)page='stats';
   try {
     if(!page || (adminPages.has(page)||path[0]==='admin')&&!isAdministrator())throw new Error('页面不存在或当前账户无权访问。');
