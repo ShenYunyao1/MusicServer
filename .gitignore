@@ -19,6 +19,7 @@
 .env
 .env.*
 __pycache__/
+/server/tests/node_modules/
 
 # Local screenshots from previous manual verification.
 /Docs/*.png

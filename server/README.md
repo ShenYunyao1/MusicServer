@@ -1,4 +1,4 @@
-# 音乐服务器 0.17.0
+# 音乐服务器 0.18.0
 
 Go 1.26+，SQLite schema 7，HTTP API `/api/v2`，内置中文管理页。支持 Windows 和 Linux。
 
@@ -363,7 +363,7 @@ node tests/management-ui.cjs
 
 账户与 Key 删除专项设置 `$env:MUSIC_SERVER_TEST_ACCOUNT_DELETE_ONLY='1'` 后运行 `node tests/management-ui.cjs`，与实时专项开关分开使用；完成后移除环境变量。覆盖删除 Key／全部删除／跨账户隔离、取消确认、停用及重新启用同 Key、账户资源约束、版本冲突、接管后从详情删除、保留歌单和刷新持久化。Go 专项为 `go test ./internal/music -run '^TestAccountDeletion|^TestKeyDeletion' -count=1`，另覆盖原始上传者、schema／外键、清理失败回滚及请求鉴权后操作者被删除的并发交错。创建／管理账户在事务内复核操作者身份，不能利用已开始的请求继续取得临时密码。完整浏览器回归也包含删除模块。
 
-个人中心专项浏览器验收使用相同环境变量运行 `node tests/personal-center-ui.cjs`，仅需 Playwright／Chromium，无需 Python 或音乐样本；测试自行建立本地端口、管理员和测试成员，测试数据及截图在忽略的 `build/personal-center-*` 目录。可选 `MUSIC_SERVER_BROWSER` 指定已安装 Chromium 的程序路径。覆盖昵称保存／持久化／冲突／同名分享、未保存输入、首次改密、单个及批量退出、改密后浏览器失效而 Key 保留、375px 移动布局。现有 Actions 运行 Go 回归与构建，浏览器专项须按上述命令另行运行。
+个人中心专项浏览器验收使用相同环境变量运行 `node tests/personal-center-ui.cjs`，仅需 Playwright／Chromium，无需 Python 或音乐样本；测试自行建立本地端口、管理员和测试成员，测试数据及截图在忽略的 `build/personal-center-*` 目录。可选 `MUSIC_SERVER_BROWSER` 指定已安装 Chromium 的程序路径。覆盖昵称保存／持久化／冲突／同名分享、未保存输入、首次改密、单个及批量退出、改密后浏览器失效而 Key 保留、375px 移动布局。Actions 已接入完整管理页、个人中心、实时刷新三项隔离浏览器回归，失败阻止发行；依赖由 `tests/package-lock.json` 固定。
 
 Windows 可另运行 `python tests/runtime-layout.py`（需要 pywinpty），用临时副本验证 `start.bat` 从其他工作目录启动时仍使用 `build/` 的程序、数据库和音乐，不扫描源码目录或在调用目录写入数据。
 

@@ -54,21 +54,149 @@ jobs:
       - name: Tests and vet
         run: |
           go test ./... -count=1 -timeout 180s
+          if [ "$?" -ne 0 ]; then exit 1; fi
           go vet ./...
+        shell: bash
         env:
           CGO_ENABLED: '0'
       - name: Linux race tests
         if: runner.os == 'Linux'
         run: |
           go test -race ./internal/update -count=1 -timeout 120s
-          go test -race ./internal/music -run '^TestRealtime|^TestAccountDeletion|^TestKeyDeletion' -count=1 -timeout 120s
+          go test -race ./internal/music -run '^TestRealtime|^TestAccountDeletion|^TestKeyDeletion|^TestStorage|^TestManagedBackup|^TestBackup' -count=1 -timeout 180s
       - name: Linux installation integration
         if: runner.os == 'Linux'
         run: sudo -E env PATH="$PATH" bash tests/update-systemd.sh
 
+  web:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [management, personal-center, realtime]
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache-dependency-path: server/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: server/tests/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated browser dependencies
+        run: |
+          python -m pip install pexpect==4.9.0
+          npm ci --prefix tests --ignore-scripts --no-audit --no-fund
+          cd tests
+          npx playwright install --with-deps chromium
+      - name: Install ffprobe
+        timeout-minutes: 8
+        run: |
+          if ! command -v ffprobe; then
+            for source_path in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources /etc/apt/apt-mirrors*.txt; do
+              if [ -f "$source_path" ]; then sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' "$source_path"; fi
+            done
+            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 update
+            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 install -y --no-install-recommends ffmpeg
+          fi
+      - name: Build isolated server
+        run: go build -trimpath -buildvcs=true -o build/musicserver ./cmd/musicserver
+        env:
+          CGO_ENABLED: '0'
+      - name: Real browser acceptance
+        run: |
+          mkdir -p build/browser-diagnostics
+          export TMPDIR="$PWD/build/browser-diagnostics"
+          export MUSIC_SERVER_TEST_BINARY="$PWD/build/musicserver"
+          if [ "$SUITE" = personal-center ]; then
+            node tests/personal-center-ui.cjs
+          elif [ "$SUITE" = realtime ]; then
+            MUSIC_SERVER_TEST_REALTIME_ONLY=1 node tests/management-ui.cjs
+          else
+            node tests/management-ui.cjs
+          fi
+        env:
+          SUITE: ${{ matrix.suite }}
+          MUSIC_SERVER_TEST_PYTHON: python
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: web-${{ matrix.suite }}-screenshots
+          # Only screenshots made by isolated fixtures; never archive test DBs,
+          # one-time tokens, runtime configs, audio or backup bundles.
+          path: |
+            server/build/browser-diagnostics/**/*.png
+            server/build/personal-center-*/*.png
+          if-no-files-found: ignore
+          retention-days: 7
+
+  player-compatibility:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: server-source
+      - name: Checkout accepted native player
+        uses: actions/checkout@v4
+        with:
+          repository: ShenYunyao1/MusicPlayer-for-Windows
+          ref: 33da837016e01419db3200bb0adcc58aae179c56
+          path: player
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache-dependency-path: server-source/server/go.sum
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install native integration dependencies
+        timeout-minutes: 5
+        run: |
+          python -m pip install pywinpty==2.0.15
+          if ($LASTEXITCODE -ne 0) { throw 'pywinpty installation failed' }
+          if (!(Get-Command ffprobe -ErrorAction SilentlyContinue)) {
+            choco install ffmpeg -y --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'ffmpeg installation failed' }
+          }
+      - name: Build this candidate server
+        id: candidate
+        working-directory: server-source/server
+        run: |
+          go build -trimpath -buildvcs=true -o build/musicserver.exe ./cmd/musicserver
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate server build failed' }
+          $candidateVersion = go run ./cmd/release -version
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot read candidate identity' }
+          "version=$candidateVersion" >> $env:GITHUB_OUTPUT
+          "server=$(git rev-parse HEAD)" >> $env:GITHUB_STEP_SUMMARY
+          "player=33da837016e01419db3200bb0adcc58aae179c56" >> $env:GITHUB_STEP_SUMMARY
+        env:
+          CGO_ENABLED: '0'
+      - name: Real WinHTTP TLS, cache and two-ended integration
+        working-directory: player
+        run: |
+          ./UnitTest/run-remote-library-cache-tests.ps1 -Python python `
+            -ServerBinary '../server-source/server/build/musicserver.exe' `
+            -ServerSource '../server-source/server' `
+            -ExpectedServerVersion '${{ steps.candidate.outputs.version }}' `
+            -ExpectedServerSchema 7
+
   package:
     timeout-minutes: 15
-    needs: test
+    needs: [test, web, player-compatibility]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     permissions:
