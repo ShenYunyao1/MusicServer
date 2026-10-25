@@ -5,6 +5,7 @@ const path = require('node:path');
 const net = require('node:net');
 const { spawn, spawnSync } = require('node:child_process');
 const { chromium } = require(process.env.MUSIC_SERVER_PLAYWRIGHT || 'playwright');
+const {waitForAsync}=require('./browser-wait.cjs');
 
 async function main() {
   const binary = process.env.MUSIC_SERVER_TEST_BINARY;
@@ -93,7 +94,8 @@ async function main() {
     await page.click('#loginButton');
     await page.waitForFunction(()=>state.user?.username==='admin');
     await page.waitForFunction(()=>document.querySelector('#status').textContent==='已登录');
-    await page.waitForFunction(async()=>{const scan=await api('admin/scan/status');return scan.id&&scan.state==='completed'},null,{polling:250});
+    await waitForAsync(page,async()=>{const scan=await api('admin/scan/status');return scan.id&&scan.state==='completed'},null,{interval:250});
+    assert.deepEqual(await page.evaluate(async()=>(await api('admin/scan/status')).errors),[],'Startup scan must complete without skipped fixtures');
     await page.evaluate(()=>refreshCore());
     try { await page.waitForFunction(() => state.tracks.length === 1); }
     catch(error){console.error('Initial library state: '+JSON.stringify(await page.evaluate(async()=>({tracks:state.tracks.length,apiTracks:(await api('tracks')).length,scan:await api('admin/scan/status'),user:state.user?.username,page:state.page,status:document.querySelector('#status').textContent,queued:requestQueue.length,active:requestActive}))));throw error}
@@ -167,7 +169,7 @@ async function main() {
     await page.click('[data-page="maintenance"]');await page.click('#scan');
     await page.waitForFunction(() => document.querySelector('#scanProgress').dataset.state==='completed');
     await page.click('#fullScan');
-    await page.waitForFunction(async () => (await api('admin/scan/status')).state === 'completed');
+    await waitForAsync(page,async () => (await api('admin/scan/status')).state === 'completed');
     await page.click('[data-page="keys"]');
     await page.click('#newKey');
     await page.fill('#policyName', 'Browser player');

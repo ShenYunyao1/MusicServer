@@ -114,6 +114,7 @@ jobs:
           CGO_ENABLED: '0'
       - name: Real browser acceptance
         run: |
+          node --test tests/browser-wait-test.cjs
           mkdir -p build/browser-diagnostics
           export TMPDIR="$PWD/build/browser-diagnostics"
           export MUSIC_SERVER_TEST_BINARY="$PWD/build/musicserver"
