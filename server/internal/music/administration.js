@@ -123,5 +123,6 @@ function renderManagedUserPage(){
     const button=makeButton(source.textContent,()=>source.click(),source.className);button.dataset.accountAction=action;button.disabled=source.disabled;button.title=source.title;actions.append(button);
   }
   const stats=routeLink('查看此账户调用统计','admin/stats?user='+encodeURIComponent(user.id));stats.id='userStatsLink';actions.append(stats);
+  const quota=makeButton('调整容量额度',()=>run(()=>openStorageQuota(user.id)));quota.dataset.accountAction='quota';actions.append(quota);
   document.querySelectorAll('[data-resource-kind]').forEach(button=>button.classList.toggle('active',button.dataset.resourceKind===$('userResourceKind').value));
 }
