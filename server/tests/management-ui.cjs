@@ -96,7 +96,7 @@ async function main() {
     await page.waitForFunction(async()=>{const scan=await api('admin/scan/status');return scan.id&&scan.state==='completed'},null,{polling:250});
     await page.evaluate(()=>refreshCore());
     try { await page.waitForFunction(() => state.tracks.length === 1); }
-    catch(error){console.error('Initial library state: '+JSON.stringify(await page.evaluate(()=>({tracks:state.tracks.length,user:state.user?.username,page:state.page,status:document.querySelector('#status').textContent,queued:requestQueue.length,active:requestActive}))));throw error}
+    catch(error){console.error('Initial library state: '+JSON.stringify(await page.evaluate(async()=>({tracks:state.tracks.length,apiTracks:(await api('tracks')).length,scan:await api('admin/scan/status'),user:state.user?.username,page:state.page,status:document.querySelector('#status').textContent,queued:requestQueue.length,active:requestActive}))));throw error}
     await page.reload();
     await page.waitForFunction(() => state.user?.username === 'admin' && state.tracks.length === 1);
     await page.waitForFunction(() => document.querySelector('#status').textContent === '已登录');
