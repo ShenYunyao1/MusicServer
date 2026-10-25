@@ -46,10 +46,7 @@ func readExternalCover(root *os.Root, relativeAudioPath string) (data []byte, mi
 	return readExternalCoverForMetadata(root, relativeAudioPath, audioMetadata{})
 }
 
-func readExternalCoverForMetadata(root *os.Root, relativeAudioPath string, metadata audioMetadata) (data []byte, mime, source string) {
-	if root == nil {
-		return nil, "", ""
-	}
+func externalCoverNamesForMetadata(relativeAudioPath string, metadata audioMetadata) []string {
 	candidates := externalCoverNames(relativeAudioPath)
 	// Download tools may name artwork "AlbumCover - artist - album.jpg".
 	// Only exact tag matches qualify; prefixes alone are unsafe in mixed folders.
@@ -66,6 +63,14 @@ func readExternalCoverForMetadata(root *os.Root, relativeAudioPath string, metad
 		}
 		candidates = append(append(append([]string{}, candidates[:5]...), albumNames...), candidates[5:]...)
 	}
+	return candidates
+}
+
+func readExternalCoverForMetadata(root *os.Root, relativeAudioPath string, metadata audioMetadata) (data []byte, mime, source string) {
+	if root == nil {
+		return nil, "", ""
+	}
+	candidates := externalCoverNamesForMetadata(relativeAudioPath, metadata)
 	for _, candidate := range candidates {
 		for _, actual := range []string{candidate, findCaseInsensitive(root, candidate)} {
 			if actual == "" {

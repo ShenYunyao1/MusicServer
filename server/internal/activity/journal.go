@@ -55,7 +55,8 @@ type eventInfo struct{ category, level, message string }
 var events = map[string]eventInfo{
 	"server.start": {"server", "info", "服务器启动"}, "server.stop": {"server", "info", "服务器停止"},
 	"server.cleanup_failed": {"server", "error", "清理过期暂存失败"},
-	"request.completed":     {"http", "info", "请求处理完成"}, "request.slow": {"http", "warn", "请求处理时间较长"}, "request.failed": {"http", "error", "请求处理失败"},
+	"server.backup_started": {"server", "info", "开始创建备份"}, "server.backup_completed": {"server", "info", "备份创建完成"}, "server.backup_failed": {"server", "error", "备份失败或取消"},
+	"request.completed": {"http", "info", "请求处理完成"}, "request.slow": {"http", "warn", "请求处理时间较长"}, "request.failed": {"http", "error", "请求处理失败"},
 	"request.denied":   {"http", "warn", "请求被拒绝"},
 	"upload.receiving": {"upload", "info", "开始接收上传文件"}, "upload.received": {"upload", "info", "上传文件已接收，开始校验"},
 	"upload.probing": {"upload", "info", "开始音频流校验"}, "upload.ready": {"upload", "info", "校验完成，等待确认入库"},

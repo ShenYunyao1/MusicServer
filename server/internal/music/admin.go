@@ -1,6 +1,7 @@
 package music
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"github.com/google/uuid"
@@ -41,7 +42,12 @@ func (s *Store) Audit(limit int, before int64) ([]AuditEntry, error) {
 	return result, rows.Err()
 }
 func (s *Store) Backup() (string, error) {
-	s.writeMu.Lock()
+	return s.backupSnapshot(context.Background())
+}
+func (s *Store) backupSnapshot(ctx context.Context) (string, error) {
+	if err := backupAcquire(ctx, s.writeMu.TryLock); err != nil {
+		return "", err
+	}
 	defer s.writeMu.Unlock()
 	directory := filepath.Join(filepath.Dir(s.dataPath), "backups")
 	if err := os.MkdirAll(directory, 0700); err != nil {
@@ -57,7 +63,7 @@ func (s *Store) Backup() (string, error) {
 			_ = os.Remove(absolute)
 		}
 	}()
-	if _, err := s.db.Exec("VACUUM INTO ?", absolute); err != nil {
+	if _, err := s.db.ExecContext(ctx, "VACUUM INTO ?", absolute); err != nil {
 		return "", err
 	}
 	if err := os.Chmod(absolute, 0600); err != nil {
@@ -69,7 +75,7 @@ func (s *Store) Backup() (string, error) {
 	}
 	defer db.Close()
 	var integrity string
-	if err := db.QueryRow("PRAGMA integrity_check").Scan(&integrity); err != nil {
+	if err := db.QueryRowContext(ctx, "PRAGMA integrity_check").Scan(&integrity); err != nil {
 		return "", err
 	}
 	if integrity != "ok" {

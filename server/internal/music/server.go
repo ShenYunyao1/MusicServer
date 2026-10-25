@@ -32,7 +32,7 @@ var accountPageScript []byte
 //go:embed users.js
 var usersPageScript []byte
 
-//go:embed management.css management.js navigation.js feedback.js library.js administration.js playlist-ui.js community.js sharing.js updater-ui.js setup.js upload-progress.js system-logs.js profile.js profile.css community-realtime.js
+//go:embed management.css management.js navigation.js feedback.js library.js administration.js playlist-ui.js community.js sharing.js updater-ui.js setup.js upload-progress.js system-logs.js profile.js profile.css community-realtime.js backup-ui.js
 var workspaceAssets embed.FS
 
 type API struct {
@@ -162,6 +162,7 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		}
 		assets := map[string]string{"/assets/management.css": "text/css; charset=utf-8", "/assets/management.js": "text/javascript; charset=utf-8", "/assets/navigation.js": "text/javascript; charset=utf-8", "/assets/feedback.js": "text/javascript; charset=utf-8", "/assets/library.js": "text/javascript; charset=utf-8", "/assets/administration.js": "text/javascript; charset=utf-8", "/assets/playlist-ui.js": "text/javascript; charset=utf-8", "/assets/community.js": "text/javascript; charset=utf-8", "/assets/sharing.js": "text/javascript; charset=utf-8"}
 		assets["/assets/profile.js"] = "text/javascript; charset=utf-8"
+		assets["/assets/backup-ui.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/community-realtime.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/profile.css"] = "text/css; charset=utf-8"
 		if contentType, ok := assets[request.URL.Path]; ok {
@@ -262,6 +263,10 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	}
 	if sharingEndpoint(request.URL.Path) {
 		a.sharing(response, request)
+		return
+	}
+	if request.URL.Path == "/api/v2/admin/backups" || strings.HasPrefix(request.URL.Path, "/api/v2/admin/backups/") {
+		a.backups(response, request)
 		return
 	}
 	if request.URL.Path == "/api/v2/admin/logs" {

@@ -27,7 +27,7 @@ module.exports=async function({page,directory,accounts}){
  await page.fill('[data-setting="max_upload_bytes"]',previous);await page.click('#saveSettings');await page.waitForFunction(value=>state.settings.max_upload_bytes===Number(value)*1048576,previous);
  await page.locator('#settingsTabs a[href="#/admin/settings/update"]').click();await page.locator('#updateSource input').waitFor({state:'visible'});
  assert.equal(await page.locator('#settingsForm').isVisible(),false);
- await page.locator('#settingsTabs a[href="#/admin/settings/backup"]').click();await page.click('#createBackup');await page.waitForFunction(()=>document.querySelector('#backupResult').textContent.includes('.sqlite'));const backupText=await page.locator('#backupResult').textContent();
+ await page.locator('#settingsTabs a[href="#/admin/settings/backup"]').click();await page.click('#createBackup');await page.waitForFunction(()=>document.querySelector('#backupResult').textContent.includes('.tar.gz'));const backupText=await page.locator('#backupResult').textContent();
  await page.locator('#settingsTabs a[href="#/admin/settings/audit"]').click();await page.waitForFunction(()=>document.querySelectorAll('#auditResults details').length>0);assert.equal(await page.locator('#auditResults details[open]').count(),0);
  assert.ok(await page.locator('#auditResults details').count()<=15);
  const nextAudit=page.locator('#auditResults button').filter({hasText:'下一页'});if(await nextAudit.isEnabled()){const first=await page.locator('#auditResults summary').first().textContent();await nextAudit.click();assert.notEqual(await page.locator('#auditResults summary').first().textContent(),first)}

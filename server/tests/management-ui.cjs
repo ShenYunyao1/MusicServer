@@ -92,14 +92,17 @@ async function main() {
     await page.fill('#password', password);
     await page.click('#loginButton');
     await page.waitForFunction(()=>state.user?.username==='admin');
+    await page.waitForFunction(()=>document.querySelector('#status').textContent==='已登录');
     await page.waitForFunction(async()=>{const scan=await api('admin/scan/status');return scan.id&&scan.state==='completed'},null,{polling:250});
     await page.evaluate(()=>refreshCore());
-    await page.waitForFunction(() => state.tracks.length === 1);
+    try { await page.waitForFunction(() => state.tracks.length === 1); }
+    catch(error){console.error('Initial library state: '+JSON.stringify(await page.evaluate(()=>({tracks:state.tracks.length,user:state.user?.username,page:state.page,status:document.querySelector('#status').textContent,queued:requestQueue.length,active:requestActive}))));throw error}
     await page.reload();
     await page.waitForFunction(() => state.user?.username === 'admin' && state.tracks.length === 1);
     await page.waitForFunction(() => document.querySelector('#status').textContent === '已登录');
     if(process.env.MUSIC_SERVER_TEST_REALTIME_ONLY==='1'){await require('./community-realtime-ui.cjs')({page,browser,base,directory});return}
     if(process.env.MUSIC_SERVER_TEST_ACCOUNT_DELETE_ONLY==='1'){await require('./account-delete-ui.cjs')({page,browser,base,directory});return}
+    if(process.env.MUSIC_SERVER_TEST_BACKUP_ONLY==='1'){await require('./backup-ui.cjs')({page,browser,base,directory});return}
     await require('./playlist-create-ui.cjs')({page,directory});
     if(process.env.MUSIC_SERVER_TEST_PLAYLIST_CREATE_ONLY==='1')return;
     await require('./track-actions-ui.cjs')({page});
@@ -157,7 +160,7 @@ async function main() {
     await page.waitForFunction(() => state.tracks.length === 1);
     assert.equal(await page.evaluate(() => state.playlists.find(playlist => playlist.name === 'Browser playlist').track_notes[state.tracks[0].id]), 'Browser cue');
     await page.click('[data-page="settings"]');await page.locator('#settingsTabs a[href="#/admin/settings/backup"]').click();await page.click('#createBackup');
-    await page.waitForFunction(() => document.querySelector('#backupResult').textContent.includes('.sqlite'));
+    await page.waitForFunction(() => document.querySelector('#backupResult').textContent.includes('.tar.gz'));
     await page.locator('#settingsTabs a[href="#/admin/settings/audit"]').click();await page.click('#viewAudit');
     await page.waitForFunction(() => document.querySelectorAll('#auditResults details').length > 0);
     await page.click('[data-page="maintenance"]');await page.click('#scan');
@@ -254,6 +257,7 @@ async function main() {
     await require('./community-ui.cjs')({page,browser,base,directory});
     await require('./sharing-ui.cjs')({page,browser,base,directory});
     await require('./account-delete-ui.cjs')({page,browser,base,directory});
+    await require('./backup-ui.cjs')({page,browser,base,directory});
     await page.locator('#accountMenu summary').click();
     await page.click('#logout');
     await page.waitForFunction(() => !state.user);

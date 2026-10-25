@@ -30,9 +30,7 @@ function setupAdministration(){
   $('page-maintenance').querySelector('.page-intro').after(tabs);
 
   const settings=$('page-settings'),general=settings.querySelector('.panel'),update=$('updateStatus').closest('.panel');general.dataset.settingsPane='general';update.dataset.settingsPane='update';update.hidden=true;
-  const backup=document.createElement('section');backup.className='panel';backup.dataset.settingsPane='backup';backup.hidden=true;backup.innerHTML='<h3>数据库备份</h3><p class="notice">备份包含数据库中的账户、曲目记录和歌单。音频文件需单独备份；此页不提供在线恢复。</p><div id="backupResult" class="task-result"></div>';
-  // These buttons were removed with the old shared maintenance container.
-  const backupButton=makeButton('创建数据库备份',()=>run(createDatabaseBackup),'btn primary');backupButton.id='createBackup';backup.querySelector('#backupResult').before(backupButton);
+  const backup=document.createElement('section');backup.className='panel';backup.dataset.settingsPane='backup';backup.hidden=true;settings.append(backup);setupBackupPane(backup);
   const audit=document.createElement('section');audit.className='panel';audit.dataset.settingsPane='audit';audit.hidden=true;audit.innerHTML='<h3>操作记录</h3><p class="status">最近 100 条记录；展开查看变更详情。</p><div id="auditResults"></div>';
   const auditButton=makeButton('刷新操作记录',()=>run(loadAuditEntries));auditButton.id='viewAudit';audit.querySelector('#auditResults').before(auditButton);
   settings.append(backup,audit);
@@ -83,6 +81,7 @@ async function showSettingsTab(tab){
   $('refreshSettings').hidden=!['general','update'].includes(tab);
   if(['general','update'].includes(tab))await loadSettings();
   if(tab==='update')await loadUpdate();
+  if(tab==='backup')await loadBackupManagement(true);
   if(tab==='audit')await loadAuditEntries();
 }
 async function loadRemovedTracks(){
@@ -92,10 +91,6 @@ async function loadRemovedTracks(){
     for(const track of tracks){const item=document.createElement('div');item.className='resource-item';const label=document.createElement('span');label.textContent=(track.title||track.id)+' · '+track.path;
       const button=makeButton('恢复',()=>run(async()=>{button.disabled=true;try{await api('admin/removed/'+track.id,'POST',undefined,undefined,track.version);await refreshCore();await loadRemovedTracks();setStatus('曲目已恢复','ok')}finally{button.disabled=false}}),'btn small');item.append(label,button);container.append(item)}
   }catch(error){container.textContent='读取失败：'+error.message;throw error}
-}
-async function createDatabaseBackup(){
-  const button=$('createBackup');if(button.disabled)return;button.disabled=true;$('backupResult').textContent='正在创建并验证备份…';
-  try{const result=await api('admin/backups','POST');$('backupResult').textContent='备份已创建并验证：'+result.path+'。音频文件需单独备份。'}catch(error){$('backupResult').textContent='备份失败：'+error.message;throw error}finally{button.disabled=false}
 }
 async function loadAuditEntries(){
   const container=$('auditResults');container.textContent='正在读取操作记录…';

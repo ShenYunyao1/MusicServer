@@ -23,6 +23,12 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	if len(os.Args) > 1 && os.Args[1] == "backup" {
+		if err := backupCommand(os.Args[2:]); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "admin" {
 		if err := adminCommand(os.Args[2:]); err != nil {
 			log.Fatal(err)
@@ -83,6 +89,8 @@ func main() {
 		return !os.IsNotExist(err)
 	}
 	backgroundBlocked := func() bool { return handler.SetupPending() || maintenance() }
+	stopBackups := store.StartBackupScheduler(backgroundBlocked)
+	defer stopBackups()
 	if err := func() error {
 		if backgroundBlocked() {
 			return nil

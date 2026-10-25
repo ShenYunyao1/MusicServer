@@ -34,6 +34,11 @@ var errVersionConflict = errors.New("record changed; refresh before editing")
 var errTrackInUse = errors.New("this track is used by another account's playlist; contact an administrator")
 
 type Store struct {
+	backupBundleMu sync.Mutex
+	backupMu       sync.Mutex
+	backupJob      BackupJob
+	backupCancel   context.CancelFunc
+	backupReaders  map[string]int
 	changeMu       sync.Mutex
 	changeSignal   chan struct{}
 	changeStamp    string

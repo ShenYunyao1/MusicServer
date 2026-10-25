@@ -66,6 +66,7 @@ func (s *Store) Close() error {
 		s.scanCancel()
 	}
 	s.scanMu.Unlock()
+	s.CancelBackup()
 	s.workers.Wait()
 	s.changeMu.Lock()
 	s.changeClosed = true

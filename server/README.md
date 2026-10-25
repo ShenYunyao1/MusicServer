@@ -325,9 +325,11 @@ Content-Type: application/json
 
 可选 `package-release.ps1` 复用统一构建入口，生成 `build/musicserver.exe`、`build/musicserver`、独立 `build/musicserver-updater` 和 `build/packages/` 的固定名称包。Windows 包包含程序、build.json 与说明；Linux 包另含独立更新器及部署模板，均不包含数据库、媒体、密码或实际运行配置。包名不随版本变化。本地打包不签名，正式签名包由 GitHub Actions 生成。
 
-管理页概览或备份接口使用 `VACUUM INTO` 生成一致的 SQLite 快照，运行 `integrity_check` 成功后才返回路径。文件位于数据库旁 `backups/`，包括曲目元数据、歌单、Key 哈希、覆盖、封面、审计等数据库内容；**不包含媒体和暂存文件**，这些目录须另外备份。未设置备份自动清理策略，应按实际容量归档或删除旧备份。
+系统设置 → 备份与恢复可创建完整或仅数据库备份，显示阶段、字节进度，支持取消、下载和删除。完整归档包含一致 SQLite 快照、已入库音频、相关歌词／封面和应用设置，逐文件记录大小及 SHA-256；已缺失文件在清单注明。归档位于数据库旁 `backups/backup-UUID.tar.gz`，不包含程序、暂存、日志、其他备份或未知文件。Nginx、systemd、TLS 私钥、证书及云凭证须独立备份。归档含密码哈希及私人内容，应妥善保管。
 
-恢复步骤：停止服务，保留当前数据库及媒体副本，将已校验的 schema 7 备份复制为启动 `-data` 指定的数据库，恢复匹配的媒体目录，再启动。启动会撤销旧会话；备份仍可能恢复旧密码和旧 Key，需核对并轮换。不要对运行中的数据库直接覆盖。schema 1–6 不能用于本版恢复，需配合原版本程序使用。
+自动备份默认关闭，可在网页启用；间隔 1–168 小时，保留 1–30 份。仅自动清理超量的自动归档，手工备份须显式删除；正在下载的归档受保护。失败不覆盖成功备份，至少一小时后重试。
+
+恢复到新的空目录：`musicserver backup restore --file /path/backup-UUID.tar.gz --destination /path/restored`（Windows 使用 `musicserver.exe`）。工具校验路径、类型、大小、摘要、schema 及数据库完整性，拒绝覆盖非空目录。输出 `restored/data/library.sqlite` 和原相对路径媒体；将程序放到 restored 根目录后可按默认路径启动，Linux 须重新配置部署路径和文件权限。恢复保留 UUID、账户、歌单及 Key，撤销旧会话、清除暂存记录、关闭自动备份并重定位媒体根目录。仅数据库备份需另行提供匹配音频。可能恢复旧密码及旧 Key，须核对并按需轮换。schema 1–6 不支持本版恢复，不可直接覆盖运行中的数据库。
 
 默认检查公开仓库 `ShenYunyao1/MusicServer`；`update_repository` 可指定检查来源。启动及每 6 小时只检查正式 Release 的签名元数据，不下载、不安装。Windows 支持检查与手工替换。Ubuntu 配置独立 systemd 更新器后，管理员可以显式选择兼容版本，自动完成验证签名与包哈希、停止服务、最终数据库备份、切换程序和重新启动；健康检查失败会恢复旧程序及数据库。跨 schema 更新拒绝自动安装。自动安装固定信任官方仓库与内置公钥，不能通过网页改为任意程序源。详细目录、权限、恢复和发布流程见 [Ubuntu 部署说明](deploy/README.md)。
 
