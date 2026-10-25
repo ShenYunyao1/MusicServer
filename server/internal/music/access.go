@@ -69,6 +69,9 @@ func hasScope(auth authContext, scope string) bool {
 // routes are left unscoped so handlers added later can decide their own policy
 // while the server still returns a normal NOT_FOUND response.
 func endpointScope(path, method string) string {
+	if path == "/api/v2/sync/tracks" && method == "POST" {
+		return ScopeLibraryRead
+	}
 	playlistRoute := path == "/api/v2/playlists" || strings.HasPrefix(path, "/api/v2/playlists/")
 	trackRoute := path == "/api/v2/tracks" || strings.HasPrefix(path, "/api/v2/tracks/")
 	if path == "/api/v2/sync" || playlistRoute || trackRoute {

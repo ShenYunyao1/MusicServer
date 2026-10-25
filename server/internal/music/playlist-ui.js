@@ -71,7 +71,7 @@ async function savePlaylistOrder(ids){
   if(state.playlistSortBusy)return;
   state.playlistSortBusy=true;
   const expected=ownPlaylists().map(p=>p.id);
-  try{await api('playlists/order','PUT',{order:ids,expected_order:expected});await refreshCore();setStatus('歌单顺序已保存','ok')}
+  try{if(typeof browseSavePlaylistOrder==='function'&&browseOwnPlaylistPage()?.total>browseOwnPlaylistPage()?.items.length)await browseSavePlaylistOrder(ids);else{await api('playlists/order','PUT',{order:ids,expected_order:expected});await refreshCore()}setStatus('歌单顺序已保存','ok')}
   catch(error){await refreshCore().catch(()=>{});setStatus('顺序保存失败：'+error.message,'error')}
   finally{state.playlistSortBusy=false}
 }
@@ -82,7 +82,7 @@ function playlistItemMenu(event,playlist,card){
 function playlistDuration(ms){if(!ms)return '—';const seconds=Math.floor(ms/1000);return Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0')}
 async function savePlaylistTrackOrder(p,ids,focusID){
   if(state.playlistTrackSortBusy)return;state.playlistTrackSortBusy=true;
-  try{await api('playlists/'+p.id+'/tracks/order','PUT',{track_ids:ids,expected_track_ids:[...members(p)]},undefined,p.version);await refreshCore();setStatus('歌单曲目顺序已保存','ok')}
+  try{if(p.members_complete===false||p.browse_page&&p.browse_page.total>p.browse_page.items.length)await browseSaveMemberOrder(p,ids,focusID);else{await api('playlists/'+p.id+'/tracks/order','PUT',{track_ids:ids,expected_track_ids:[...members(p)]},undefined,p.version);await refreshCore()}setStatus('歌单曲目顺序已保存','ok')}
   catch(error){await refreshCore().catch(()=>{});setStatus('顺序保存失败：'+error.message,'error')}
   finally{state.playlistTrackSortBusy=false;if(focusID)$('playlistDetail').querySelector('[data-track-id="'+CSS.escape(focusID)+'"]')?.focus()}
 }
@@ -103,8 +103,8 @@ function removePlaylistMember(p,track){
   if(!confirm('将“'+(track.title||'不可用曲目')+'”移出此歌单？'))return;
   run(async()=>{await api('playlists/'+p.id+'/tracks/'+track.id,'DELETE',undefined,undefined,p.version);await refreshCore();setStatus('曲目已移出歌单','ok')});
 }
-function openPlaylistTrackDetails(p,track,unavailable){
-  if(!unavailable)openTrackDetails(track);
+async function openPlaylistTrackDetails(p,track,unavailable){
+  if(!unavailable){if(await openTrackDetails(track)===false)return}
   else{$('trackDetails').querySelector('h3').textContent='不可用曲目';$('trackDetailsBody').replaceChildren();$('trackDetails').showModal()}
   const section=document.createElement('section');section.className='playlist-track-personal';
   const title=document.createElement('h3');title.textContent='此歌单的个人备注';const note=document.createElement('p');note.textContent=p.track_notes?.[track.id]||'暂无个人备注';note.className='notice';

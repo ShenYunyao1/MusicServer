@@ -22,7 +22,7 @@ module.exports=async function({page,browser,directory}){
   await page.fill('#playlistSearch','');
   const touch=await browser.newContext({viewport:{width:390,height:844},hasTouch:true,isMobile:true,storageState:await page.context().storageState()});
   try{
-    const mobile=await touch.newPage();await mobile.goto(page.url());await mobile.waitForFunction(()=>state.user&&document.querySelectorAll('.playlist-card').length===2);
+    const mobile=await touch.newPage();await mobile.goto(page.url());await mobile.waitForFunction(()=>state.user&&document.querySelector('#status').textContent==='已登录'&&!document.querySelector('#playlistBrowse').hidden&&document.querySelectorAll('.playlist-card').length===2);await mobile.locator('.playlist-card').first().waitFor({state:'visible'});
     const order=await mobile.evaluate(()=>state.playlists.filter(p=>!p.system).map(p=>p.id)),first=await mobile.locator('.playlist-card').first().boundingBox(),last=await mobile.locator('.playlist-card').last().boundingBox();
     const cdp=await touch.newCDPSession(mobile),point={x:Math.round(first.x+80),y:Math.round(first.y+25)};
     await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[point]});await mobile.waitForTimeout(400);

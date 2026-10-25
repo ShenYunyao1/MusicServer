@@ -33,6 +33,8 @@ const memberPlayer=document.createElement('audio');memberPlayer.id='memberPlayer
 function playTrack(track){if(track.missing || track.removed)return;memberPlayer.src='/api/v2/media/'+encodeURIComponent(track.id);memberPlayer.hidden=false;$('previewBar').hidden=false;$('previewTitle').textContent=track.title||'未命名曲目';memberPlayer.play().catch(error=>setStatus(error.message,'error'))}
 
 function setLoggedOut() {
+  if(typeof clearResumeWorkspace==='function')clearResumeWorkspace();
+  if(typeof clearBrowseWorkspace==='function')clearBrowseWorkspace();
   if(typeof clearBackupWorkspace==='function')clearBackupWorkspace();
   if(typeof clearStorageWorkspace==='function')clearStorageWorkspace();
   if(typeof clearProfileWorkspace==='function')clearProfileWorkspace();
@@ -101,6 +103,7 @@ async function enterAccount(identity) {
   $('loginScreen').hidden = true;
   setStatus('正在载入…');
   await connect();
+  await restoreResumeQueue();
   await restoreWorkspaceRoute();
   if (state.user) setStatus('已登录', 'ok');
 }

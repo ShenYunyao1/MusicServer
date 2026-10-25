@@ -445,8 +445,16 @@ func (s *Store) mutatePlaylist(id string, members bool, edit func(*Playlist) err
 	return s.mutatePlaylistAction(id, members, "playlist.update", edit, options...)
 }
 func (s *Store) mutatePlaylistAction(id string, members bool, action string, edit func(*Playlist) error, options ...MutationOptions) (Playlist, error) {
+	return s.mutatePlaylistActionGuarded(id, members, action, nil, edit, options...)
+}
+func (s *Store) mutatePlaylistActionGuarded(id string, members bool, action string, guard func(sqlReader) error, edit func(*Playlist) error, options ...MutationOptions) (Playlist, error) {
 	var result Playlist
 	err := s.transaction(func(tx *sql.Tx) error {
+		if guard != nil {
+			if err := guard(tx); err != nil {
+				return err
+			}
+		}
 		before, err := readPlaylistFrom(tx, id)
 		if errors.Is(err, sql.ErrNoRows) {
 			return errPlaylistNotFound

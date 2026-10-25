@@ -32,7 +32,7 @@ var accountPageScript []byte
 //go:embed users.js
 var usersPageScript []byte
 
-//go:embed management.css management.js navigation.js feedback.js library.js administration.js playlist-ui.js community.js sharing.js updater-ui.js setup.js upload-progress.js system-logs.js profile.js profile.css community-realtime.js backup-ui.js storage-ui.js storage-ui.css
+//go:embed management.css management.js navigation.js feedback.js library.js administration.js playlist-ui.js community.js sharing.js updater-ui.js setup.js upload-progress.js system-logs.js profile.js profile.css community-realtime.js backup-ui.js storage-ui.js storage-ui.css browse-ui.js browse-ui.css upload-resume.js
 var workspaceAssets embed.FS
 
 type API struct {
@@ -164,7 +164,10 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		assets["/assets/profile.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/backup-ui.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/storage-ui.js"] = "text/javascript; charset=utf-8"
+		assets["/assets/upload-resume.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/storage-ui.css"] = "text/css; charset=utf-8"
+		assets["/assets/browse-ui.js"] = "text/javascript; charset=utf-8"
+		assets["/assets/browse-ui.css"] = "text/css; charset=utf-8"
 		assets["/assets/community-realtime.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/profile.css"] = "text/css; charset=utf-8"
 		if contentType, ok := assets[request.URL.Path]; ok {
@@ -284,6 +287,14 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if a.resumableUploads(response, request) {
+		return
+	}
+	if strings.HasPrefix(request.URL.Path, "/api/v2/browse/") {
+		a.browse(response, request)
+		return
+	}
+	if request.URL.Path == "/api/v2/sync/tracks" {
+		a.objectSyncTracks(response, request)
 		return
 	}
 	if !a.authorizeResource(response, request) {
@@ -569,12 +580,9 @@ func (a *API) authenticate(request *http.Request) (authContext, bool) {
 	if !ok {
 		return authContext{}, false
 	}
+	// Session visibility is evaluated from owner IDs by each handler. Do not
+	// decode every private playlist (and its member arrays) for authentication.
 	allowed := map[string]bool{}
-	for _, playlist := range a.store.Playlists() {
-		if playlist.System || playlist.OwnerID == user.ID {
-			allowed[playlist.ID] = true
-		}
-	}
 	return authContext{role: user.Role, userID: user.ID, authVersion: user.AuthVersion, username: user.Username, session: true, mustChangePassword: user.MustChangePassword, csrf: csrfForToken(cookie.Value), allowedPlaylists: allowed, keyID: session.ID}, true
 }
 
@@ -591,6 +599,9 @@ func firstPasswordEndpoint(request *http.Request) bool {
 }
 
 func playerEndpoint(request *http.Request) bool {
+	if request.URL.Path == "/api/v2/sync/tracks" && request.Method == "POST" {
+		return true
+	}
 	if request.Method != "GET" && request.Method != "HEAD" {
 		return false
 	}
@@ -681,8 +692,17 @@ func (a *API) sync(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	limit, _ := strconv.Atoi(request.URL.Query().Get("limit"))
-	result, err := a.store.SyncPage(authFromRequest(request), request.URL.Query().Get("cursor"), limit)
+	var result SyncResponse
+	var err error
+	if request.URL.Query().Get("protocol") == "2" {
+		result, err = a.store.SyncObjectPage(authFromRequest(request), request.URL.Query().Get("cursor"), limit)
+	} else {
+		result, err = a.store.SyncPage(authFromRequest(request), request.URL.Query().Get("cursor"), limit)
+	}
 	if err != nil {
+		if writeObjectSyncError(response, err) {
+			return
+		}
 		if errors.Is(err, errSyncRestart) {
 			writeError(response, 409, "SYNC_RESTART", err.Error())
 		} else {

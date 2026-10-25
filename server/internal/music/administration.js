@@ -52,10 +52,10 @@ function setupAdministration(){
   detail.querySelector('.toolbar').before(resourceTabs);$('userResourceKind').hidden=true;
 }
 function renderOverview(){
-  $('metricTracks').textContent=state.tracks.length;
+  $('metricTracks').textContent=state.browseSummary?.total??state.tracks.length;
   $('metricPlaylists').textContent=(state.users||[]).length;
-  $('metricKeys').textContent=state.tracks.filter(t=>t.missing).length;
-  $('metricRevision').textContent=state.playlists.filter(p=>!p.system&&!p.read_only).length;
+  $('metricKeys').textContent=state.browseSummary?.missing??state.tracks.filter(t=>t.missing).length;
+  $('metricRevision').textContent=state.browseSummary?.playlist_count??state.playlists.filter(p=>!p.system&&!p.read_only).length;
   $('overviewNotice').textContent='曲库统计包含当前可见曲目；私人歌单计数仅属于本人。账户 '+(state.users||[]).filter(u=>u.enabled).length+' 个已启用。服务修订版本 '+(state.revision??'—')+'。';
 }
 async function loadOverviewSummary(){
@@ -71,10 +71,17 @@ async function showMaintenanceTab(tab){
   if(tab==='scan')await pollScan();
   if(tab==='removed')await loadRemovedTracks();
   if(tab==='missing'){
-    await refreshCore();const container=$('missingResults');container.replaceChildren();const missing=state.tracks.filter(t=>t.missing);
-    if(!missing.length)container.textContent='暂无缺失文件。';
-    for(const track of missing){const item=document.createElement('p');item.className='resource-item';item.textContent=(track.title||track.id)+' · '+track.path;container.append(item)}
+    await loadMissingTracks(0);
   }
+}
+async function loadMissingTracks(offset=0){
+  const epoch=browseState.epoch,container=$('missingResults');
+  const page=await api('browse/tracks?'+new URLSearchParams({filter:'missing',offset:String(offset),limit:'50'}));
+  if(epoch!==browseState.epoch||!isAdministrator()||state.page!=='maintenance'||!location.hash.startsWith('#/admin/library/missing'))return;
+  container.replaceChildren();
+  if(!page.items.length)container.textContent='暂无缺失文件。';
+  for(const track of page.items){const item=document.createElement('p');item.className='resource-item';item.textContent=(track.title||track.id)+' · '+track.path;container.append(item)}
+  browseRenderPager(container,'browseMissingPager',page,next=>run(()=>loadMissingTracks(next)));
 }
 async function showSettingsTab(tab){
   document.querySelectorAll('[data-settings-pane]').forEach(el=>el.hidden=el.dataset.settingsPane!==tab);

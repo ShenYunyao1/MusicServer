@@ -36,6 +36,10 @@ func canSyncPlaylist(auth authContext, p Playlist) bool {
 }
 
 func syncBinding(auth authContext, playlists []Playlist) string {
+	return syncProtocolBinding(auth, playlists, false)
+}
+
+func syncProtocolBinding(auth authContext, playlists []Playlist, objects bool) string {
 	grants := []string{}
 	for id, allowed := range auth.allowedPlaylists {
 		if allowed {
@@ -51,8 +55,10 @@ func syncBinding(auth authContext, playlists []Playlist) string {
 		for _, playlist := range playlists {
 			if canSyncPlaylist(auth, playlist) {
 				visiblePlaylists = append(visiblePlaylists, playlist.ID+":"+playlist.SubscriptionStatus+":"+playlist.SubscriptionReason+":"+playlist.OwnerID)
-				for _, id := range playlist.TrackIDs {
-					visible[id] = true
+				if !objects && !auth.session {
+					for _, id := range playlist.TrackIDs {
+						visible[id] = true
+					}
 				}
 			}
 		}
@@ -63,10 +69,13 @@ func syncBinding(auth authContext, playlists []Playlist) string {
 	}
 	sort.Strings(members)
 	sort.Strings(visiblePlaylists)
-	if auth.session {
+	if auth.session || objects {
 		members = nil
 	}
 	encoded, _ := json.Marshal([]any{auth.userID, auth.authVersion, auth.keyID, auth.role, auth.session, grants, scopes, members, visiblePlaylists})
+	if objects {
+		encoded = append(encoded, []byte("/objects-v2")...)
+	}
 	return hashBytes(encoded)
 }
 func signCursor(cursor syncCursor, secret string) string {
@@ -118,7 +127,15 @@ func visiblePlaylist(playlist Playlist, auth authContext, tracks map[string]bool
 	return result
 }
 func (s *Store) SyncPage(auth authContext, token string, limit int) (SyncResponse, error) {
+	return s.syncPage(auth, token, limit, false)
+}
+
+func (s *Store) syncPage(auth authContext, token string, limit int, objects bool) (SyncResponse, error) {
 	result := SyncResponse{Changed: []Track{}, Playlists: []Playlist{}, DeletedTracks: []string{}, DeletedPlaylists: []string{}}
+	result.ObjectDelta = objects
+	if objects {
+		result.ChangedTrackIDs = []string{}
+	}
 	if limit < 1 || limit > 500 {
 		limit = 100
 	}
@@ -127,7 +144,12 @@ func (s *Store) SyncPage(auth authContext, token string, limit int) (SyncRespons
 		return result, err
 	}
 	defer tx.Rollback()
-	if !auth.session {
+	if objects {
+		auth, err = currentSyncObjectAuth(tx, auth)
+		if err != nil {
+			return result, err
+		}
+	} else if !auth.session {
 		auth, err = currentKeyAuth(tx, auth)
 		if err != nil {
 			return result, err
@@ -144,7 +166,7 @@ func (s *Store) SyncPage(auth authContext, token string, limit int) (SyncRespons
 	if err != nil {
 		return result, err
 	}
-	binding := syncBinding(auth, playlists)
+	binding := syncProtocolBinding(auth, playlists, objects)
 	cursor := syncCursor{Mode: "snapshot", Revision: result.Revision, Binding: binding, Expires: time.Now().Add(24 * time.Hour).Unix()}
 	result.Reset = token == ""
 	if token != "" {
@@ -154,7 +176,7 @@ func (s *Store) SyncPage(auth authContext, token string, limit int) (SyncRespons
 		}
 		if parsed.Binding == binding && parsed.Expires >= time.Now().Unix() {
 			cursor = parsed
-			if cursor.Mode == "snapshot" && cursor.Revision != result.Revision {
+			if (cursor.Mode == "snapshot" || objects && cursor.Last == "paging") && cursor.Revision != result.Revision {
 				return result, errSyncRestart
 			}
 			var earliest sql.NullInt64
@@ -218,6 +240,11 @@ func (s *Store) SyncPage(auth authContext, token string, limit int) (SyncRespons
 		for _, key := range keys[start:end] {
 			kind, id, _ := strings.Cut(key, "/")
 			if kind == "track" {
+				if objects {
+					result.ChangedTrackIDs = append(result.ChangedTrackIDs, id)
+					cursor.Last = key
+					continue
+				}
 				track, err := readTrackFrom(tx, id, false)
 				if err != nil {
 					return result, err
@@ -278,6 +305,10 @@ func (s *Store) SyncPage(auth authContext, token string, limit int) (SyncRespons
 				if !active[item.id] || item.deleted {
 					result.DeletedTracks = append(result.DeletedTracks, item.id)
 				} else {
+					if objects {
+						result.ChangedTrackIDs = append(result.ChangedTrackIDs, item.id)
+						continue
+					}
 					track, err := readTrackFrom(tx, item.id, false)
 					if err != nil {
 						return result, err
@@ -296,11 +327,19 @@ func (s *Store) SyncPage(auth authContext, token string, limit int) (SyncRespons
 		if len(changes) == 0 {
 			cursor.Position = result.Revision
 		}
+		if objects {
+			cursor.Revision = result.Revision
+			cursor.Last = ""
+			if result.HasMore {
+				cursor.Last = "paging"
+			}
+		}
 	} else {
 		return result, fmt.Errorf("unknown cursor mode %q", cursor.Mode)
 	}
 	slices.Sort(result.DeletedTracks)
 	slices.Sort(result.DeletedPlaylists)
+	slices.Sort(result.ChangedTrackIDs)
 	result.Cursor = signCursor(cursor, secret)
 	return result, tx.Commit()
 }

@@ -105,6 +105,7 @@ async function main() {
     if(process.env.MUSIC_SERVER_TEST_REALTIME_ONLY==='1'){await require('./community-realtime-ui.cjs')({page,browser,base,directory});return}
     if(process.env.MUSIC_SERVER_TEST_ACCOUNT_DELETE_ONLY==='1'){await require('./account-delete-ui.cjs')({page,browser,base,directory});return}
     if(process.env.MUSIC_SERVER_TEST_BACKUP_ONLY==='1'){await require('./backup-ui.cjs')({page,browser,base,directory});return}
+    if(process.env.MUSIC_SERVER_TEST_RESUMABLE_ONLY==='1'){await require('./resumable-ui.cjs')({page,directory});return}
     if(process.env.MUSIC_SERVER_TEST_STORAGE_ONLY==='1'){await require('./storage-ui.cjs')({page,directory});return}
     if(process.env.MUSIC_SERVER_TEST_SIDEBAR_ONLY==='1'){await require('./sidebar-ui.cjs')({page,directory});return}
     if(process.env.MUSIC_SERVER_TEST_MULTIUSER_ONLY==='1'){await require('./multiuser-ui.cjs')({browser,adminPage:page,base,audio,directory});return}
@@ -270,6 +271,7 @@ async function main() {
     await require('./account-delete-ui.cjs')({page,browser,base,directory});
     await require('./backup-ui.cjs')({page,browser,base,directory});
     await require('./storage-ui.cjs')({page,directory});
+    await require('./resumable-ui.cjs')({page,directory});
     await page.locator('#accountMenu summary').click();
     await page.click('#logout');
     await page.waitForFunction(() => !state.user);

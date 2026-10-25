@@ -8,7 +8,7 @@ module.exports=async function({page,directory}){
  await page.locator('#trackRows [data-track-id]').first().check();assert.equal(await page.locator('#trackBulkActions').count(),0);
  await page.fill('#trackSearch','no matching fixture');assert.equal(await page.locator('#trackBulkActions').count(),0);assert.equal(await page.evaluate(()=>state.selectedTrackIds.size),0);
  await page.reload();await page.waitForFunction(()=>state.user&&document.querySelector('#status').textContent==='已登录');assert.equal(await page.locator('#trackSearch').inputValue(),'no matching fixture');
- await page.fill('#trackSearch','');
+ await page.fill('#trackSearch','');await page.waitForFunction(()=>browseLibraryPage()?.query===''&&document.querySelectorAll('#trackRows [data-library-track]').length>0);
  await page.setViewportSize({width:390,height:844});await page.waitForFunction(()=>document.querySelector('.main').getBoundingClientRect().left<=1&&document.querySelector('#sidebar').getBoundingClientRect().right<=1);await page.screenshot({path:path.join(directory,'library-mobile.png'),fullPage:true});
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
  await require('./page-headings-ui.cjs').assertHeading(page,'全局曲库');

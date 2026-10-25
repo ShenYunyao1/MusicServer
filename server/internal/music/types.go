@@ -126,6 +126,8 @@ type APIKeyUpdateRequest struct {
 }
 
 type SyncResponse struct {
+	ObjectDelta      bool       `json:"object_delta,omitempty"`
+	ChangedTrackIDs  []string   `json:"changed_track_ids,omitempty"`
 	Revision         int64      `json:"revision"`
 	Changed          []Track    `json:"changed_tracks"`
 	Playlists        []Playlist `json:"playlists"`

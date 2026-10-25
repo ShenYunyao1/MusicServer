@@ -196,6 +196,7 @@ async function restoreWorkspaceRoute() {
       if(state.invitationsTab){renderPlaylists();await loadReceivedInvitations()}
       else {
       if(state.subscriptionsTab){await loadMySubscriptions();if(generation!==routeGeneration)return}
+      else {await loadBrowseView();if(generation!==routeGeneration)return}
       const target=state.playlists.find(p=>p.id===state.playlistDetailId&&!p.system);
       if(state.playlistEditing&&target?.read_only||!state.subscriptionsTab&&target?.read_only)throw new Error('请从“我订阅的”打开此歌单。');
       if(state.playlistDetailId&&!state.playlists.some(p=>p.id===state.playlistDetailId&&!p.system)){
@@ -208,9 +209,9 @@ async function restoreWorkspaceRoute() {
     if(page==='tracks'){
       const query=new URLSearchParams(location.hash.split('?')[1]||'');$('trackSearch').value=query.get('q')||'';
       state.trackFilter=['all','mine','managed','orphan'].includes(query.get('filter'))?query.get('filter'):'all';
-      document.querySelectorAll('[data-filter]').forEach(el=>el.classList.toggle('active',el.dataset.filter===state.trackFilter));renderTracks();
+      document.querySelectorAll('[data-filter]').forEach(el=>el.classList.toggle('active',el.dataset.filter===state.trackFilter));await loadBrowseView();if(generation!==routeGeneration)return;renderTracks();
     }
-    if(page==='keys')await loadKeys();
+    if(page==='keys'){await loadBrowseGrantPlaylists();if(generation!==routeGeneration)return;await loadKeys()}
     if(page==='logs')await loadSystemLogs();
     if(page==='stats')await loadStats();
     if(page==='overview'){await loadUsers();renderOverview();await loadOverviewSummary()}
