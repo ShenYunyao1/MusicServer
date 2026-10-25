@@ -69,7 +69,7 @@ module.exports=async function runMultiuserUI({browser,adminPage,base,audio,direc
   const alicePlaylist=await a.page.evaluate(()=>state.playlists.find(p=>p.name==='Alice private'));
   await a.page.locator('[data-playlist-check][value="'+alicePlaylist.id+'"]').check();await a.page.click('#saveModal');await a.page.locator('#secretDialog').waitFor({state:'visible'});const aliceSecret=await a.page.locator('#secretValue').textContent();await a.page.click('#doneSecret');
   assert.equal(await a.page.evaluate(async secret=>(await fetch('/api/v2/tracks',{headers:{'X-API-Key':secret}})).status,aliceSecret),200);
-  await a.page.click('[data-page="tracks"]');await a.page.click('[data-filter="mine"]');assert.equal(await a.page.locator('#trackRows tr').count(),1);
+  await a.page.click('[data-page="tracks"]');await a.page.click('[data-filter="mine"]');await a.page.waitForFunction(()=>browseLibraryPage()?.filter==='mine'&&browseLibraryPage().total===1);assert.equal(await a.page.locator('#trackRows tr').count(),1);
   await b.page.evaluate(()=>refreshCore());
   await b.page.click('[data-page="playlists"]');await b.page.click('#newPlaylist');await b.page.fill('#playlistEditName','Bob private');await b.page.click('#savePlaylistEdit');
   await b.page.waitForFunction(()=>state.playlists.some(p=>p.name==='Bob private'));
