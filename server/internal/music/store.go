@@ -78,6 +78,10 @@ func NewStore(dataPath, mediaRoot string) (*Store, error) {
 		}
 		return nil, err
 	}
+	if err := store.InitializeResumableUploads(); err != nil {
+		_ = store.db.Close()
+		return nil, err
+	}
 	return store, nil
 }
 func randomToken(count int) (string, error) {

@@ -140,6 +140,9 @@ func (s *Store) stageAudioWithAssetsContext(ctx context.Context, name string, re
 	if err != nil {
 		return UploadPreview{}, err
 	}
+	if resumeID, ok := ctx.Value(resumableStageIDKey{}).(string); ok && validResumeID(resumeID) {
+		id = resumeID
+	}
 	root, err := os.OpenRoot(s.mediaRoot)
 	if err != nil {
 		return UploadPreview{}, err
@@ -532,8 +535,12 @@ func (s *Store) deleteUploadStageLocked(id string) error {
 
 func (s *Store) CleanupUploadStages() error {
 	s.stageMu.Lock()
-	defer s.stageMu.Unlock()
-	return s.cleanupUploadStagesLocked()
+	err := s.cleanupUploadStagesLocked()
+	s.stageMu.Unlock()
+	if err != nil {
+		return err
+	}
+	return s.CleanupResumableUploads()
 }
 
 func (s *Store) cleanupUploadStagesLocked() error {

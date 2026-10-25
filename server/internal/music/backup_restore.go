@@ -269,6 +269,9 @@ func prepareRestoredDatabase(path, mediaRoot string) error {
 	if _, err := tx.Exec("DELETE FROM upload_staging"); err != nil {
 		return err
 	}
+	if _, err := tx.Exec("DELETE FROM meta WHERE key LIKE 'upload_resume/%'"); err != nil {
+		return err
+	}
 	if _, err := tx.Exec("UPDATE settings SET value=? WHERE key='server'", string(encoded)); err != nil {
 		return err
 	}

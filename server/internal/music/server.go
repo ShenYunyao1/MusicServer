@@ -283,6 +283,9 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		a.community(response, request)
 		return
 	}
+	if a.resumableUploads(response, request) {
+		return
+	}
 	if !a.authorizeResource(response, request) {
 		return
 	}
