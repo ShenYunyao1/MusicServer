@@ -16,7 +16,8 @@ module.exports=async function({page,directory}){
   await page.setInputFiles('#playlistCoverFile',{name:'cover.png',mimeType:'image/png',buffer:Buffer.from(image,'base64')});
   await page.locator('#playlistCrop').waitFor({state:'visible'});await page.click('#applyPlaylistCrop');await page.locator('#playlistCrop').waitFor({state:'hidden'});
   assert.equal(await page.evaluate(async()=> (await api('playlists')).length),before,'Drafts and crop previews must not create records');
-  page.once('dialog',d=>d.dismiss());await page.click('#playlistEditBack');
+  const discardDismissed=page.waitForEvent('dialog').then(d=>d.dismiss());await page.click('#playlistEditBack');await discardDismissed;
+  await page.waitForFunction(()=>playlistDraft&&location.hash===playlistDraft.route);
   assert.equal(await page.inputValue('#playlistEditName'),'Creation regression');
   // A failed save retains all metadata and the local artwork for a retry.
   await page.route('**/api/v2/playlists',route=>route.request().method()==='POST'?route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:{message:'creation retry fixture'}})}):route.continue());

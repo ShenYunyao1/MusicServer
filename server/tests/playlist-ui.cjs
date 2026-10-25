@@ -58,7 +58,10 @@ module.exports=async function({page,browser,directory}){
   const preview=await page.evaluate(async()=>{const bitmap=await createImageBitmap(playlistDraft.coverBlob),c=document.createElement('canvas');c.width=c.height=1;const ctx=c.getContext('2d');ctx.drawImage(bitmap,0,0,1,1);return {width:bitmap.width,height:bitmap.height,pixel:[...ctx.getImageData(0,0,1,1).data]}});
   assert.equal(preview.width,preview.height);assert.ok(preview.pixel[2]>preview.pixel[0],'Dragging the crop must change the selected source region');
   assert.equal(await page.evaluate(async id=>(await api('playlists/'+id)).playlist.version,original.id),original.version,'Preview must not persist anything');
-  page.once('dialog',dialog=>dialog.dismiss());await page.click('#playlistEditBack');assert.ok((await page.evaluate(()=>location.hash)).endsWith('/edit'),'Declining discard must keep the draft');
+  const discardDismissed=page.waitForEvent('dialog').then(dialog=>dialog.dismiss());
+  await page.click('#playlistEditBack');await discardDismissed;
+  await page.waitForFunction(()=>playlistDraft&&location.hash===playlistDraft.route);
+  assert.ok((await page.evaluate(()=>location.hash)).endsWith('/edit'),'Declining discard must keep the draft');
   await page.click('#savePlaylistEdit');await page.waitForFunction(()=>!playlistDraft&&state.playlists.some(p=>p.cover_id));
   const saved=await page.evaluate(id=>state.playlists.find(p=>p.id===id),original.id);assert.equal(saved.version,original.version+1);assert.equal(saved.description,'Unsaved draft');
   await page.reload();await page.waitForFunction(()=>state.user&&state.playlistDetailId);await page.click('[data-edit-playlist]');await page.locator('#playlistEditName').waitFor();

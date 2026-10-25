@@ -12,7 +12,8 @@ module.exports=async function({page,directory}){
   await page.fill('#backupInterval','12');await page.fill('#backupKeep','2');await page.click('#saveBackupPolicy');await page.waitForFunction(()=>!document.querySelector('#backupPolicyFields').disabled&&!backupPolicyDirty);
   await page.reload();await page.waitForFunction(()=>backupPolicyLoaded&&!backupLoading);assert.equal(await page.inputValue('#backupInterval'),'12');
   const expected=await page.evaluate(()=>({id:state.tracks[0].id,hash:state.tracks[0].content_hash,path:state.tracks[0].path}));
-  await page.click('#createBackup');await page.waitForFunction(()=>backupCurrentJob?.state==='completed',null,{timeout:20000});
+  const previousJob=await page.evaluate(()=>backupCurrentJob?.id||null);
+  await page.click('#createBackup');await page.waitForFunction(previous=>backupCurrentJob?.id!==previous&&backupCurrentJob?.state==='completed',previousJob,{timeout:20000});
   const archive=await page.evaluate(()=>backupCurrentJob.archive);assert.equal(archive.include_media,true);
   const row=page.locator('[data-backup-id="'+archive.id+'"]');await row.waitFor();
   const downloadEvent=page.waitForEvent('download');await row.locator('[data-backup-download]').click();const download=await downloadEvent;
