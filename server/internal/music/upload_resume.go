@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"musicserver/internal/activity"
 )
 
 const resumableChunkSize = 4 << 20
@@ -49,6 +51,7 @@ type resumableUpload struct {
 	StageID     string            `json:"stage_id,omitempty"`
 	Fields      map[string]string `json:"fields,omitempty"`
 	Attachments map[string]string `json:"attachments,omitempty"`
+	ReceiveMS   int64             `json:"receive_ms,omitempty"`
 	Preview     *UploadPreview    `json:"-"`
 }
 
@@ -72,6 +75,50 @@ var errResumeCorrupt = errors.New("upload checkpoint or file is damaged; cancel 
 var errResumeConflict = errors.New("upload offset, size or checksum conflicts with the confirmed checkpoint")
 var errResumeExpiredPreview = errors.New("upload preview expired; cancel this task and upload again")
 var errResumeLimit = errors.New("too many pending uploads (maximum 16 per account and 256 total)")
+var errResumeBusy = errors.New("too many active uploads; retry shortly")
+
+var resumableReceiveSlots = make(chan struct{}, 16)
+var resumableFinishSlots = make(chan struct{}, 2)
+var resumableAdmissionMu sync.Mutex
+var resumableOwners = map[resumableAdmissionOwner]int{}
+
+type resumableAdmissionOwner struct {
+	store *Store
+	owner string
+}
+
+// Reject excess bodies before allocating either a 4 MiB block or a finish JSON
+// payload. Separate finish slots also bound cover/lyrics JSON decoding memory.
+func (s *Store) admitResumeBody(owner string, finish bool) (func(), error) {
+	slots := resumableReceiveSlots
+	if finish {
+		slots = resumableFinishSlots
+	}
+	key := resumableAdmissionOwner{s, owner}
+	resumableAdmissionMu.Lock()
+	defer resumableAdmissionMu.Unlock()
+	if resumableOwners[key] >= 2 {
+		return nil, errResumeBusy
+	}
+	select {
+	case slots <- struct{}{}:
+	default:
+		return nil, errResumeBusy
+	}
+	resumableOwners[key]++
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			resumableAdmissionMu.Lock()
+			defer resumableAdmissionMu.Unlock()
+			resumableOwners[key]--
+			if resumableOwners[key] == 0 {
+				delete(resumableOwners, key)
+			}
+			<-slots
+		})
+	}, nil
+}
 
 func validResumeID(id string) bool {
 	if len(id) != 32 {
@@ -91,6 +138,14 @@ func resumeFilePath(id string) string { return ".staging/resume/" + id + ".part"
 func resumeActor(reader sqlReader, auth authContext) error {
 	u, err := readUser(reader, auth.userID)
 	if err != nil || !auth.session || !u.Enabled || u.DeletedAt != "" || u.MustChangePassword || u.AuthVersion != auth.authVersion {
+		return errResourceHidden
+	}
+	var valid bool
+	now := time.Now()
+	if err := reader.QueryRow("SELECT EXISTS(SELECT 1 FROM sessions WHERE id=? AND user_id=? AND auth_version=? AND revoked_at='' AND expires_at>? AND last_active_at>?)", auth.keyID, auth.userID, auth.authVersion, persistedTime(now), persistedTime(now.Add(-sessionIdle))).Scan(&valid); err != nil {
+		return err
+	}
+	if !valid {
 		return errResourceHidden
 	}
 	return nil
@@ -308,6 +363,7 @@ func (s *Store) createResume(auth authContext, name string, size int64, fields, 
 }
 
 func (s *Store) patchResume(ctx context.Context, auth authContext, task resumableUpload, offset int64, digest string, body io.Reader) (resumableUpload, error) {
+	started := time.Now()
 	if task.State != "uploading" {
 		return task, errResumeConflict
 	}
@@ -376,6 +432,7 @@ func (s *Store) patchResume(ctx context.Context, auth authContext, task resumabl
 		return task, err
 	}
 	next := task
+	next.ReceiveMS += time.Since(started).Milliseconds()
 	next.Offset += int64(len(data))
 	next.Chunks = append(append([]resumableChunk{}, task.Chunks...), resumableChunk{offset, int64(len(data)), digest})
 	if err := ctx.Err(); err != nil {
@@ -423,12 +480,16 @@ func (s *Store) finishResume(ctx context.Context, auth authContext, task resumab
 		if task.Preview == nil || !time.Now().Before(task.Preview.ExpiresAt) {
 			return UploadPreview{}, errResumeExpiredPreview
 		}
-		if _, exists, err := s.UploadStage(task.StageID); err != nil {
+		preview, exists, err := s.UploadStage(task.StageID)
+		if err != nil {
 			return UploadPreview{}, err
 		} else if !exists {
 			return UploadPreview{}, errResumeExpiredPreview
 		}
-		return *task.Preview, resumeActor(s.db, auth)
+		if preview.Track.OwnerID != auth.userID {
+			return UploadPreview{}, errResourceHidden
+		}
+		return preview, resumeActor(s.db, auth)
 	}
 	if task.Offset != task.Size {
 		return UploadPreview{}, errResumeConflict
@@ -464,6 +525,7 @@ func (s *Store) finishResume(ctx context.Context, auth authContext, task resumab
 			return UploadPreview{}, err
 		}
 		defer file.Close()
+		ctx = context.WithValue(ctx, uploadActivityKey{}, activity.Fields{UserID: auth.userID, Bytes: task.Size, Timings: map[string]int64{"receive_ms": task.ReceiveMS}})
 		preview, err = s.stageAudioWithAssetsContext(context.WithValue(ctx, resumableStageIDKey{}, task.ID), task.Name, file, fields, uploadAssets{Lyrics: input.Lyrics, Cover: input.Cover, CoverSource: input.CoverSource}, options)
 		if err != nil {
 			return UploadPreview{}, err
@@ -552,6 +614,9 @@ func writeResumeError(w http.ResponseWriter, err error) {
 		writeError(w, 507, "STORAGE_LOW", err.Error())
 	case errors.Is(err, errResumeLimit):
 		writeError(w, 429, "UPLOAD_TASK_LIMIT", err.Error())
+	case errors.Is(err, errResumeBusy):
+		w.Header().Set("Retry-After", "1")
+		writeError(w, 429, "UPLOAD_BUSY", err.Error())
 	case errors.Is(err, errResumeExpiredPreview):
 		writeError(w, 410, "UPLOAD_PREVIEW_EXPIRED", err.Error())
 	case errors.Is(err, errResumeConflict):
@@ -648,6 +713,19 @@ func (a *API) resumableUploads(w http.ResponseWriter, r *http.Request) bool {
 		return true
 	}
 	id := parts[0]
+	if r.Method == http.MethodPatch || len(parts) == 2 && r.Method == http.MethodPost {
+		// Preserve the same 404 for foreign and absent IDs even under load.
+		if _, err := a.store.resumeOwned(id, auth); err != nil {
+			writeResumeError(w, err)
+			return true
+		}
+		release, err := a.store.admitResumeBody(auth.userID, len(parts) == 2)
+		if err != nil {
+			writeResumeError(w, err)
+			return true
+		}
+		defer release()
+	}
 	lock := resumableLock(id)
 	lock.Lock()
 	defer lock.Unlock()

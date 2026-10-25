@@ -23,7 +23,9 @@ import (
 
 func resumeCall(api *API, user User, method, path string, body []byte, offset string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(method, "/api/v2/uploads/resumable"+path, bytes.NewReader(body))
-	r = r.WithContext(withAuth(r.Context(), authContext{session: true, userID: user.ID, authVersion: user.AuthVersion, role: user.Role}))
+	var sessionID string
+	_ = api.store.db.QueryRow("SELECT id FROM sessions WHERE user_id=? ORDER BY last_active_at DESC LIMIT 1", user.ID).Scan(&sessionID)
+	r = r.WithContext(withAuth(r.Context(), authContext{session: true, userID: user.ID, keyID: sessionID, authVersion: user.AuthVersion, role: user.Role}))
 	if method == "PATCH" {
 		hash := sha256.Sum256(body)
 		r.Header.Set("Content-Type", "application/octet-stream")
@@ -266,10 +268,10 @@ func (r *resumeReadHook) Read(p []byte) (int, error) {
 }
 
 func TestResumableActorRevocationAndCancellationDuringBody(t *testing.T) {
-	for _, action := range []string{"disable", "delete", "force_password", "auth_version", "cancel_context"} {
+	for _, action := range []string{"disable", "delete", "force_password", "auth_version", "session_revoke", "session_expire", "session_idle", "session_version", "cancel_context"} {
 		t.Run(action, func(t *testing.T) {
 			api, root := testAPI(t)
-			user, _, _ := loginTestAccount(t, api.store, "admin")
+			user, session, _ := loginTestAccount(t, api.store, "admin")
 			task := resumeCreate(t, api, user, 6)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -284,6 +286,14 @@ func TestResumableActorRevocationAndCancellationDuringBody(t *testing.T) {
 					_, err = api.store.db.Exec("UPDATE users SET must_change_password=1 WHERE id=?", user.ID)
 				case "auth_version":
 					_, err = api.store.db.Exec("UPDATE users SET auth_version=auth_version+1 WHERE id=?", user.ID)
+				case "session_revoke":
+					err = api.store.RevokeSession(user.ID, session.ID)
+				case "session_expire":
+					_, err = api.store.db.Exec("UPDATE sessions SET expires_at=? WHERE id=?", persistedTime(time.Now().Add(-time.Minute)), session.ID)
+				case "session_idle":
+					_, err = api.store.db.Exec("UPDATE sessions SET last_active_at=? WHERE id=?", persistedTime(time.Now().Add(-sessionIdle-time.Minute)), session.ID)
+				case "session_version":
+					_, err = api.store.db.Exec("UPDATE sessions SET auth_version=auth_version+1 WHERE id=?", session.ID)
 				case "cancel_context":
 					cancel()
 				}
@@ -292,7 +302,7 @@ func TestResumableActorRevocationAndCancellationDuringBody(t *testing.T) {
 				}
 			}}
 			r := httptest.NewRequest("PATCH", resumableAPIPath+"/"+task.ID, body)
-			r = r.WithContext(withAuth(ctx, authContext{session: true, userID: user.ID, authVersion: user.AuthVersion}))
+			r = r.WithContext(withAuth(ctx, authContext{session: true, userID: user.ID, keyID: session.ID, authVersion: user.AuthVersion}))
 			r.Header.Set("Upload-Offset", "0")
 			r.Header.Set("Upload-Checksum", "sha256 "+hashSecret("abc"))
 			w := httptest.NewRecorder()
@@ -465,5 +475,86 @@ func TestResumableHTTPAuthenticationCSRFAndFinish(t *testing.T) {
 	api.ServeHTTP(w, r)
 	if w.Code != 403 {
 		t.Fatalf("API key accepted for uploads: %d %s", w.Code, w.Body)
+	}
+}
+
+func TestResumableAdmissionBoundsConcurrentBodyMemory(t *testing.T) {
+	api, _ := testAPI(t)
+	user, _, _ := loginTestAccount(t, api.store, "admin")
+	task := resumeCreate(t, api, user, 6)
+	releaseFirst, err := api.store.admitResumeBody(user.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseFirst()
+	releaseSecond, err := api.store.admitResumeBody(user.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseSecond()
+	w := resumeCall(api, user, "PATCH", "/"+task.ID, []byte("abc"), "0")
+	if w.Code != 429 || w.Header().Get("Retry-After") == "" {
+		t.Fatalf("unbounded owner receive: %d %s", w.Code, w.Body)
+	}
+	releaseFirst()
+	releaseSecond()
+	var releases []func()
+	defer func() {
+		for _, release := range releases {
+			release()
+		}
+	}()
+	for i := 0; i < 16; i++ {
+		release, err := api.store.admitResumeBody(fmt.Sprintf("owner-%d", i), false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		releases = append(releases, release)
+	}
+	if release, err := api.store.admitResumeBody("overflow-owner", false); !errors.Is(err, errResumeBusy) {
+		if release != nil {
+			release()
+		}
+		t.Fatalf("global receive admission bypassed: %v", err)
+	}
+	for _, release := range releases {
+		release()
+	}
+	releases = nil
+	for i := 0; i < 2; i++ {
+		release, err := api.store.admitResumeBody(fmt.Sprintf("finish-owner-%d", i), true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		releases = append(releases, release)
+	}
+	if release, err := api.store.admitResumeBody("overflow-finish", true); !errors.Is(err, errResumeBusy) {
+		if release != nil {
+			release()
+		}
+		t.Fatalf("global finish admission bypassed: %v", err)
+	}
+}
+
+func TestResumableFinishReflectsLaterStageCover(t *testing.T) {
+	api, _ := testAPI(t)
+	user, _, _ := loginTestAccount(t, api.store, "admin")
+	audio := validTestAudio(t)
+	task := resumeCreate(t, api, user, len(audio))
+	if w := resumeCall(api, user, "PATCH", "/"+task.ID, audio, "0"); w.Code != 200 {
+		t.Fatal(w.Body)
+	}
+	if w := resumeCall(api, user, "POST", "/"+task.ID+"/finish", []byte(`{}`), ""); w.Code != 200 {
+		t.Fatal(w.Body)
+	}
+	checkpoint, _ := readResume(api.store.db, task.ID)
+	if _, err := api.store.updateStageCover(checkpoint.StageID, tinyPNG(), "external", MutationOptions{UserID: user.ID}); err != nil {
+		t.Fatal(err)
+	}
+	w := resumeCall(api, user, "POST", "/"+task.ID+"/finish", []byte(`{}`), "")
+	var preview UploadPreview
+	_ = json.Unmarshal(w.Body.Bytes(), &preview)
+	if w.Code != 200 || preview.Track.CoverSource != "external" || preview.Track.CoverID == "" {
+		t.Fatalf("refresh lost late matched cover: %d %s", w.Code, w.Body)
 	}
 }
