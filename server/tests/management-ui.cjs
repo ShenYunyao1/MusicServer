@@ -106,6 +106,7 @@ async function main() {
     if(process.env.MUSIC_SERVER_TEST_ACCOUNT_DELETE_ONLY==='1'){await require('./account-delete-ui.cjs')({page,browser,base,directory});return}
     if(process.env.MUSIC_SERVER_TEST_BACKUP_ONLY==='1'){await require('./backup-ui.cjs')({page,browser,base,directory});return}
     if(process.env.MUSIC_SERVER_TEST_STORAGE_ONLY==='1'){await require('./storage-ui.cjs')({page,directory});return}
+    if(process.env.MUSIC_SERVER_TEST_SIDEBAR_ONLY==='1'){await require('./sidebar-ui.cjs')({page,directory});return}
     await require('./playlist-create-ui.cjs')({page,directory});
     if(process.env.MUSIC_SERVER_TEST_PLAYLIST_CREATE_ONLY==='1')return;
     await require('./track-actions-ui.cjs')({page});

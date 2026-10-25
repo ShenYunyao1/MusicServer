@@ -60,7 +60,9 @@ module.exports=async function({page,directory}){
  assert.equal(await page.evaluate(()=>localStorage.getItem('musicserver.sidebarCollapsed')),preference,'Closing the mobile drawer must not change desktop preference');
  await page.click('#menuToggle');
  assert.equal(Math.round((await logo()).width),32);
- await page.locator('.nav [data-page="tracks"]').click();assert.equal(await page.locator('#menuToggle').getAttribute('aria-expanded'),'false');
+  await page.locator('.nav [data-page="tracks"]').click();
+  await page.waitForFunction(()=>state.page==='tracks'&&document.querySelector('#menuToggle').getAttribute('aria-expanded')==='false');
+  assert.equal(await page.locator('#menuToggle').getAttribute('aria-expanded'),'false');
  await page.setViewportSize({width:1440,height:1100});await page.waitForFunction(()=>document.querySelector('#sidebar').getBoundingClientRect().width<=73);
  await page.locator('#brandToggle').focus();await page.keyboard.press('Enter');await page.waitForFunction(()=>document.querySelector('.main').getBoundingClientRect().left>=231);
  await page.keyboard.press('Space');await page.waitForFunction(()=>document.querySelector('#sidebar').getBoundingClientRect().width<=73);
