@@ -3,6 +3,9 @@ const path=require('node:path');
 
 module.exports=async function({page,browser,base,directory}){
   const errors=[],onError=e=>errors.push(e.message);page.on('pageerror',onError);
+  // A select's intrinsic width includes its longest option, even when admin is
+  // selected. Exercise the actual long-display-name layout on every platform.
+  await page.evaluate(()=>api('admin/users','POST',{username:'mobile-transfer-target',display_name:'Long target '.repeat(9).trim()}));
   const account=await page.evaluate(()=>api('admin/users','POST',{username:'Delete.User'}));
   const context=await browser.newContext({viewport:{width:1440,height:1000}});
   try{
@@ -49,7 +52,9 @@ module.exports=async function({page,browser,base,directory}){
     await page.waitForFunction(id=>state.playlists.some(p=>p.id===id&&p.owner_id===state.user.id),resources.playlist.id);
     await page.screenshot({path:path.join(directory,'account-delete-ready.png'),fullPage:true});
     await page.setViewportSize({width:390,height:844});await page.waitForTimeout(250);
-    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'Account deletion detail must fit a mobile viewport');
+    const overflow=await page.evaluate(()=>[...document.querySelectorAll('#page-users *')].filter(el=>{const r=el.getBoundingClientRect();return r.width&&r.right>innerWidth+1}).map(el=>({id:el.id,tag:el.tagName,width:el.getBoundingClientRect().width})).slice(0,8));
+    await page.screenshot({path:path.join(directory,'account-delete-mobile.png'),fullPage:true});
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'Account deletion detail must fit a mobile viewport: '+JSON.stringify(overflow));
     assert.equal(await page.locator('[data-account-action="delete"]').isVisible(),true);
     await page.screenshot({path:path.join(directory,'account-delete-mobile.png'),fullPage:true});await page.setViewportSize({width:1440,height:1100});
     page.once('dialog',d=>d.accept());await page.locator('[data-account-action="delete"]').click();
