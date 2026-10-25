@@ -7,8 +7,11 @@ module.exports=async function({page,browser,directory}){
   await card.click();await page.waitForFunction(id=>state.playlistDetailId===id,id);
   const back=await page.locator('[data-back-playlists]').boundingBox(),title=await page.locator('#playlistDetail h1').boundingBox();
   assert.ok(back.y<title.y,'Back belongs above the detail heading at the left');
-  await page.click('[data-back-playlists]');await page.locator('.playlist-card').first().focus();await page.keyboard.press('Enter');
+  await page.click('[data-back-playlists]');
+  await page.locator('.playlist-card').first().waitFor({state:'visible'});
+  await page.locator('.playlist-card').first().focus();await page.keyboard.press('Enter');
   await page.waitForFunction(id=>state.playlistDetailId===id,id);await page.click('[data-back-playlists]');
+  await page.locator('.playlist-card').first().waitFor({state:'visible'});
   const fixture=await page.evaluate(async()=>{const p=await api('playlists','POST',{id:browserUUID(),name:'Sort fixture',track_ids:[]});await refreshCore();return p});
   const before=await page.evaluate(()=>state.playlists.filter(p=>!p.system).map(p=>p.id));
   const source=await page.locator('.playlist-card').first().boundingBox(),target=await page.locator('.playlist-card').last().boundingBox();
