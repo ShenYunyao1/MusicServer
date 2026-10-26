@@ -10,8 +10,8 @@ import (
 
 func TestStageCoverUpdatePreservesAudioAndEnforcesOwnership(t *testing.T) {
 	api, _ := testAPI(t)
-	user, _, _ := loginTestAccount(t, api.store, "admin")
-	options := MutationOptions{UserID: user.ID, ActorType: "session", Actor: user.Username}
+	user, session, _ := loginTestAccount(t, api.store, "admin")
+	options := MutationOptions{UserID: user.ID, ActorType: "session", Actor: user.Username, CredentialID: session.ID}
 	preview, err := api.store.StageAudio("attachment.wav", bytes.NewReader(validTestAudio(t)), nil, options)
 	if err != nil {
 		t.Fatal(err)

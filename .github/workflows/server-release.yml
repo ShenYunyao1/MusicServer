@@ -63,7 +63,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           go test -race ./internal/update -count=1 -timeout 120s
-          go test -race ./internal/music -run '^TestRealtime|^TestAccountDeletion|^TestKeyDeletion|^TestStorage|^TestManagedBackup|^TestBackup|^TestResumable|^TestBrowse|^TestObjectSync' -count=1 -timeout 240s
+          go test -race ./internal/music -run '^TestRealtime|^TestAccountDeletion|^TestKeyDeletion|^TestStorage|^TestManagedBackup|^TestBackup|^TestResumable|^TestBrowse|^TestObjectSync|^TestMail|^TestEmail|^TestRegistration|^TestAccountStorage|^TestUploadEmailPolicy' -count=1 -timeout 240s
       - name: Linux installation integration
         if: runner.os == 'Linux'
         run: sudo -E env PATH="$PATH" bash tests/update-systemd.sh
@@ -74,7 +74,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [management, personal-center, realtime, browse]
+        suite: [management, personal-center, realtime, browse, email]
     defaults:
       run:
         working-directory: server
@@ -124,6 +124,9 @@ jobs:
             MUSIC_SERVER_TEST_REALTIME_ONLY=1 node tests/management-ui.cjs
           elif [ "$SUITE" = browse ]; then
             node tests/browse-ui.cjs
+          elif [ "$SUITE" = email ]; then
+            CGO_ENABLED=0 go test -c -o build/email-browser-fixture ./internal/music
+            MUSIC_SERVER_TEST_EMAIL_BINARY="$PWD/build/email-browser-fixture" node tests/registration-email-ui.cjs
           else
             node tests/management-ui.cjs
           fi
@@ -163,6 +166,19 @@ jobs:
           ref: ${{ matrix.player }}
           path: player
           persist-credentials: false
+      - name: Checkout administrator provisioning fixture
+        uses: actions/checkout@v4
+        with:
+          repository: ShenYunyao1/MusicPlayer-for-Windows
+          ref: 917f43c4b2ca95c34f5e65816c25fcd6d1ab6b2c
+          path: player-fixture
+          sparse-checkout: UnitTest/remote_server_integration.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Use current account provisioning with the pinned native code
+        run: |
+          Copy-Item -LiteralPath 'player-fixture/UnitTest/remote_server_integration.py' -Destination 'player/UnitTest/remote_server_integration.py'
+          "fixture=917f43c4b2ca95c34f5e65816c25fcd6d1ab6b2c" >> $env:GITHUB_STEP_SUMMARY
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26.x'

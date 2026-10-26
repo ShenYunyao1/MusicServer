@@ -39,6 +39,7 @@ function setupProfileWorkspace() {
       <p id="accountSessionError" class="form-error" role="alert" hidden></p><p id="accountSessionStatus" class="status" role="status"></p><div id="accountSessionList"></div>
     </section>`;
   document.querySelector('.content').append(page);
+  setupEmailProfile();
   const entry=makeButton('个人中心',()=>navigatePage('account'));entry.id='personalCenter';
   entry.addEventListener('click',()=>accountMenu.open=false);accountActions.prepend(entry);
   $('changePassword').onclick=()=>location.hash='#/account/security';
@@ -60,7 +61,7 @@ const personalPasswordFields=['accountOldPassword','accountNewPassword','account
 function personalError(id,message='') {$(id).textContent=message;$(id).hidden=!message;}
 function personalDirty() {
   if(!state.user||!personalRoute||state.page!=='account')return false;
-  return personalRoute==='#/account/profile' ? $('profileName').value!==personalOriginalName :
+  return personalRoute==='#/account/profile' ? $('profileName').value!==personalOriginalName||emailProfileDirty() :
     personalRoute==='#/account/security' && personalPasswordFields.some(id=>$(id).value!=='');
 }
 function confirmPersonalExit() {
@@ -138,6 +139,7 @@ async function loadPersonalProfile(force=false) {
     if(identity.user.must_change_password){await enterAccount(identity);return}
     applyPersonalIdentity(identity);
     if(force||!personalDirty())fillPersonalProfile(identity.user);
+    await loadEmailProfile();
     personalError('profileError');
   }catch(error){if(generation===personalGeneration&&state.user?.id===userID)personalError('profileError',error.message)}
   finally{if(force&&state.user?.id===userID)setPersonalBusy(false)}

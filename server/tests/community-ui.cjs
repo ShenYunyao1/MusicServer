@@ -17,7 +17,7 @@ module.exports=async function({page,browser,base,directory}){
   const contexts=[],errors=[];
   try{
     for(const username of ['community-reader','community-observer']){
-      const created=await page.evaluate(username=>api('admin/users','POST',{username,display_name:username}),username);
+      const created=await page.evaluate(username=>api('admin/users','POST',{username,display_name:username,quota_bytes:0,email_verification_required:false}),username);
       const context=await browser.newContext({viewport:{width:1440,height:1000}}),reader=await context.newPage();contexts.push({context,page:reader});reader.on('pageerror',e=>errors.push(e.message));
       await reader.goto(base+'/#/public/playlists/'+source.id);
       await reader.fill('#username',username);await reader.fill('#password',created.temporary_password);await reader.click('#loginButton');

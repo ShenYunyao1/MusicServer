@@ -8,7 +8,7 @@ import (
 
 func TestUsernameCasePreservedAcrossAccountOperations(t *testing.T) {
 	api, _ := testAPI(t)
-	response := callAPI(api, "POST", "/api/v2/admin/users", `{"username":"  AbC.Def_12  "}`)
+	response := callAPI(api, "POST", "/api/v2/admin/users", `{"quota_bytes":0,"username":"  AbC.Def_12  "}`)
 	if response.Code != 201 {
 		t.Fatalf("create: %d", response.Code)
 	}
@@ -31,7 +31,7 @@ func TestUsernameCasePreservedAcrossAccountOperations(t *testing.T) {
 		if me.Code != 200 || json.Unmarshal(me.Body.Bytes(), &identity) != nil || identity.User.Username != "AbC.Def_12" {
 			t.Fatalf("session identity lost username case: %d", me.Code)
 		}
-		duplicate := callAPI(api, "POST", "/api/v2/admin/users", `{"username":"`+name+`"}`)
+		duplicate := callAPI(api, "POST", "/api/v2/admin/users", `{"quota_bytes":0,"username":"`+name+`"}`)
 		if duplicate.Code != 409 {
 			t.Fatalf("duplicate %q: %d", name, duplicate.Code)
 		}

@@ -5,7 +5,7 @@ module.exports=async function({page,browser,base,directory}){
   const contexts=[],playlists=[],errors=[];
   page.on('pageerror',e=>errors.push(e.message));
   async function member(username){
-    const account=await page.evaluate(username=>api('admin/users','POST',{username}),username);
+    const account=await page.evaluate(username=>api('admin/users','POST',{username,quota_bytes:0,email_verification_required:false}),username);
     const context=await browser.newContext({viewport:{width:1440,height:1000}});contexts.push(context);
     const p=await context.newPage();p.on('pageerror',e=>errors.push(e.message));p.setDefaultTimeout(10000);
     await p.goto(base+'/#/invitations');await p.fill('#username',username);await p.fill('#password',account.temporary_password);await p.click('#loginButton');

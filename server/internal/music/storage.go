@@ -90,6 +90,9 @@ func (s *Store) SetStorageQuota(id string, limit, expected int64, options Mutati
 		if err := requireAdminActor(tx, []MutationOptions{options}); err != nil {
 			return err
 		}
+		if err := validateAccountMutationSession(tx, options); err != nil {
+			return err
+		}
 		user, err := readUser(tx, id)
 		if err != nil {
 			return err
@@ -106,6 +109,14 @@ func (s *Store) SetStorageQuota(id string, limit, expected int64, options Mutati
 		}
 		encoded, _ := json.Marshal(quota)
 		if _, err := tx.Exec("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", "storage_quota/"+id, string(encoded)); err != nil {
+			return err
+		}
+		email, err := readAccountEmail(tx, id)
+		if err != nil {
+			return err
+		}
+		email.QuotaSource = "administrator"
+		if err := writeAccountEmail(tx, id, email); err != nil {
 			return err
 		}
 		return auditMutation(tx, "storage.quota", id, current, quota, []MutationOptions{options})

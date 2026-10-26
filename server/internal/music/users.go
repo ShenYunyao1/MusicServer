@@ -11,13 +11,14 @@ import (
 var errUsernameTaken = errors.New("username already exists")
 
 type AccountPatch struct {
-	DisplayName *string `json:"display_name"`
-	Enabled     *bool   `json:"enabled"`
+	DisplayName               *string `json:"display_name"`
+	Enabled                   *bool   `json:"enabled"`
+	EmailVerificationRequired *bool   `json:"email_verification_required"`
 }
 
 func (s *Store) UpdateUser(id string, patch AccountPatch, options MutationOptions) (User, error) {
 	var user User
-	if patch.DisplayName == nil && patch.Enabled == nil {
+	if patch.DisplayName == nil && patch.Enabled == nil && patch.EmailVerificationRequired == nil {
 		return user, errors.New("no account changes supplied")
 	}
 	if patch.DisplayName != nil {
@@ -28,6 +29,14 @@ func (s *Store) UpdateUser(id string, patch AccountPatch, options MutationOption
 		patch.DisplayName = &v
 	}
 	err := s.transaction(func(tx *sql.Tx) error {
+		if err := validateAccountMutationSession(tx, options); err != nil {
+			return err
+		}
+		if patch.EmailVerificationRequired != nil {
+			if err := requireAdminActor(tx, []MutationOptions{options}); err != nil {
+				return err
+			}
+		}
 		if options.UserID != "" && options.ActorType != "console" {
 			if patch.Enabled != nil || options.UserID != id {
 				if err := requireAdminActor(tx, []MutationOptions{options}); err != nil {
@@ -49,6 +58,11 @@ func (s *Store) UpdateUser(id string, patch AccountPatch, options MutationOption
 			return err
 		}
 		before := user
+		emailState, err := readAccountEmail(tx, id)
+		if err != nil {
+			return err
+		}
+		emailChanged := patch.EmailVerificationRequired != nil && *patch.EmailVerificationRequired != emailState.Required
 		stateChanged := patch.Enabled != nil && *patch.Enabled != user.Enabled
 		if stateChanged && !*patch.Enabled && user.Role == "admin" {
 			var count int
@@ -65,7 +79,14 @@ func (s *Store) UpdateUser(id string, patch AccountPatch, options MutationOption
 		if patch.DisplayName != nil {
 			user.DisplayName = *patch.DisplayName
 		}
-		if user.Enabled == before.Enabled && user.DisplayName == before.DisplayName {
+		if emailChanged {
+			emailState.Required = *patch.EmailVerificationRequired
+			if err := writeAccountEmail(tx, id, emailState); err != nil {
+				return err
+			}
+		}
+		applyAccountEmail(&user, emailState)
+		if user.Enabled == before.Enabled && user.DisplayName == before.DisplayName && !emailChanged {
 			return nil
 		}
 		user.Version++
@@ -124,18 +145,53 @@ type TemporaryAccount struct {
 }
 
 func (s *Store) CreateMember(username, display string, options ...MutationOptions) (TemporaryAccount, error) {
+	return s.CreateMemberWithPolicy(AdminMemberCreate{Username: username, DisplayName: display}, options...)
+}
+
+type AdminMemberCreate struct {
+	Username                  string `json:"username"`
+	DisplayName               string `json:"display_name,omitempty"`
+	QuotaBytes                *int64 `json:"quota_bytes,omitempty"`
+	EmailVerificationRequired *bool  `json:"email_verification_required,omitempty"`
+}
+
+func (s *Store) CreateMemberWithPolicy(input AdminMemberCreate, options ...MutationOptions) (TemporaryAccount, error) {
+	limit := int64(0)
+	if input.QuotaBytes != nil {
+		limit = *input.QuotaBytes
+	}
+	if err := validateQuotaBytes(limit); err != nil {
+		return TemporaryAccount{}, err
+	}
+	required := true
+	if input.EmailVerificationRequired != nil {
+		required = *input.EmailVerificationRequired
+	}
 	password, err := randomToken(18)
 	if err != nil {
 		return TemporaryAccount{}, err
 	}
-	user, err := s.createUserRecord(username, password, "member", display, true, false, options)
+	user, err := s.createUserRecordInitialized(input.Username, password, "member", input.DisplayName, true, false, options, func(tx *sql.Tx, user *User) error {
+		if len(options) > 0 {
+			if err := validateAccountMutationSession(tx, options[0]); err != nil {
+				return err
+			}
+		}
+		if err := writeAccountEmail(tx, user.ID, AccountEmailState{Required: required, QuotaSource: "administrator"}); err != nil {
+			return err
+		}
+		if input.QuotaBytes != nil {
+			return writeNewAccountQuota(tx, user.ID, limit)
+		}
+		return nil
+	})
 	if err != nil {
 		return TemporaryAccount{}, err
 	}
 	return TemporaryAccount{user, password}, nil
 }
 func (s *Store) Users() ([]User, error) {
-	rows, err := s.db.Query("SELECT id,username,display_name,role,enabled,auth_version,version,created_at,must_change_password FROM users WHERE NOT EXISTS(SELECT 1 FROM meta WHERE key='deleted_user/'||users.id) ORDER BY username")
+	rows, err := s.db.Query("SELECT id,username,display_name,role,enabled,auth_version,version,created_at,must_change_password,COALESCE((SELECT value FROM meta WHERE key='account_email/'||users.id),'') FROM users WHERE NOT EXISTS(SELECT 1 FROM meta WHERE key='deleted_user/'||users.id) ORDER BY username")
 	if err != nil {
 		return nil, err
 	}
@@ -143,11 +199,16 @@ func (s *Store) Users() ([]User, error) {
 	result := []User{}
 	for rows.Next() {
 		var u User
-		var created string
-		if err := rows.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Role, &u.Enabled, &u.AuthVersion, &u.Version, &created, &u.MustChangePassword); err != nil {
+		var created, raw string
+		if err := rows.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Role, &u.Enabled, &u.AuthVersion, &u.Version, &created, &u.MustChangePassword, &raw); err != nil {
 			return nil, err
 		}
 		u.CreatedAt, _ = parsePersistedTime(created)
+		state, err := decodeAccountEmail(raw)
+		if err != nil {
+			return nil, err
+		}
+		applyAccountEmail(&u, state)
 		result = append(result, u)
 	}
 	return result, rows.Err()
@@ -191,6 +252,7 @@ func (s *Store) ResetMemberPassword(id string, revoke bool, options MutationOpti
 			}
 		}
 		user.MustChangePassword = true
+		user.UploadAllowed = false
 		user.Version++
 		user.AuthVersion++
 		return auditMutation(tx, "account.reset_password", id, nil, map[string]bool{"must_change_password": true, "revoke_keys": revoke}, []MutationOptions{options})

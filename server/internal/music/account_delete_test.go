@@ -133,7 +133,7 @@ func TestAccountDeletionLifecycleAndReferences(t *testing.T) {
 	if r := callAPIWithKey(api, "GET", "/api/v2/playlists", "", key.Secret); r.Code != 401 {
 		t.Fatalf("deleted key authenticated: %d", r.Code)
 	}
-	if r := callAPI(api, "POST", "/api/v2/admin/users", `{"username":"PUBLIC-READER"}`); r.Code != 409 {
+	if r := callAPI(api, "POST", "/api/v2/admin/users", `{"quota_bytes":0,"username":"PUBLIC-READER"}`); r.Code != 409 {
 		t.Fatalf("deleted login name reused: %d", r.Code)
 	}
 	keptTrack, ok := api.store.Track(track.ID)

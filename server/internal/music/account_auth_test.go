@@ -171,6 +171,7 @@ func TestAccountsIsolateKeysPlaylistsStagesAndMedia(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	setEmailTestRequirement(t, api.store, member.ID, false)
 	_, _, memberToken := loginTestAccount(t, api.store, "member")
 	track := api.store.Tracks()[0]
 	if err := api.store.SetTrackCover(track.ID, tinyPNG()); err != nil {

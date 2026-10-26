@@ -288,7 +288,7 @@ func (s *Store) createResume(auth authContext, name string, size int64, fields, 
 	// File creation and the bounded counter are coordinated, never chunk bodies.
 	resumableCreateMu.Lock()
 	defer resumableCreateMu.Unlock()
-	if err := resumeActor(s.db, auth); err != nil {
+	if err := checkResumeUploadActor(s.db, auth); err != nil {
 		return resumableUpload{}, err
 	}
 	if err := s.checkSpace(s.mediaRoot, 0); err != nil {
@@ -324,7 +324,7 @@ func (s *Store) createResume(auth authContext, name string, size int64, fields, 
 		return resumableUpload{}, err
 	}
 	err = s.transaction(func(tx *sql.Tx) error {
-		if err := resumeActor(tx, auth); err != nil {
+		if err := checkResumeUploadActor(tx, auth); err != nil {
 			return err
 		}
 		rows, err := tx.Query("SELECT value FROM meta WHERE key LIKE 'upload_resume/%'")
@@ -384,7 +384,7 @@ func (s *Store) patchResume(ctx context.Context, auth authContext, task resumabl
 	if offset < task.Offset {
 		for _, chunk := range task.Chunks {
 			if chunk.Offset == offset && chunk.Size == int64(len(data)) && chunk.SHA256 == digest {
-				return task, resumeActor(s.db, auth)
+				return task, checkResumeUploadActor(s.db, auth)
 			}
 		}
 		return task, errResumeConflict
@@ -395,7 +395,7 @@ func (s *Store) patchResume(ctx context.Context, auth authContext, task resumabl
 	if err := ctx.Err(); err != nil {
 		return task, err
 	}
-	if err := resumeActor(s.db, auth); err != nil {
+	if err := checkResumeUploadActor(s.db, auth); err != nil {
 		return task, err
 	}
 	if err := s.checkSpace(filepath.Dir(s.dataPath), 1<<20+int64(len(task.Chunks))*256); err != nil {
@@ -441,7 +441,7 @@ func (s *Store) patchResume(ctx context.Context, auth authContext, task resumabl
 	// A disabled/deleted actor cannot advance a checkpoint, even if its HTTP
 	// authentication completed before the administrator's mutation.
 	err = s.transaction(func(tx *sql.Tx) error {
-		if err := resumeActor(tx, auth); err != nil {
+		if err := checkResumeUploadActor(tx, auth); err != nil {
 			return err
 		}
 		current, err := readResume(tx, task.ID)
@@ -489,7 +489,7 @@ func (s *Store) finishResume(ctx context.Context, auth authContext, task resumab
 		if preview.Track.OwnerID != auth.userID {
 			return UploadPreview{}, errResourceHidden
 		}
-		return preview, resumeActor(s.db, auth)
+		return preview, checkResumeUploadActor(s.db, auth)
 	}
 	if task.Offset != task.Size {
 		return UploadPreview{}, errResumeConflict
@@ -497,7 +497,7 @@ func (s *Store) finishResume(ctx context.Context, auth authContext, task resumab
 	if err := s.recoverResume(task, true); err != nil {
 		return UploadPreview{}, err
 	}
-	if err := resumeActor(s.db, auth); err != nil {
+	if err := checkResumeUploadActor(s.db, auth); err != nil {
 		return UploadPreview{}, err
 	}
 	preview, exists, err := s.UploadStage(task.ID)
@@ -539,7 +539,7 @@ func (s *Store) finishResume(ctx context.Context, auth authContext, task resumab
 	next.StageID = preview.ID
 	next.Preview = &preview
 	err = s.transaction(func(tx *sql.Tx) error {
-		if err := resumeActor(tx, auth); err != nil {
+		if err := checkResumeUploadActor(tx, auth); err != nil {
 			return err
 		}
 		return saveResume(tx, next)
@@ -607,6 +607,9 @@ func (s *Store) removeResumeStage(task resumableUpload) error {
 }
 
 func writeResumeError(w http.ResponseWriter, err error) {
+	if writeStorageError(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, errResourceHidden), errors.Is(err, os.ErrNotExist):
 		writeError(w, 404, "NOT_FOUND", "resource not found")
@@ -656,6 +659,12 @@ func (a *API) resumableUploads(w http.ResponseWriter, r *http.Request) bool {
 	if err := resumeActor(a.store.db, auth); err != nil {
 		writeResumeError(w, err)
 		return true
+	}
+	if r.Method == http.MethodPost || r.Method == http.MethodPatch || r.Method == http.MethodPut {
+		if err := checkUploadEmailPolicy(a.store.db, auth.userID); err != nil {
+			writeResumeError(w, err)
+			return true
+		}
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	if r.URL.Path == resumableAPIPath {

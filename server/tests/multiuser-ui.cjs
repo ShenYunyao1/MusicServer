@@ -8,7 +8,7 @@ module.exports=async function runMultiuserUI({browser,adminPage,base,audio,direc
  const accounts=[];
  try {
   for(const username of ['browser-alice','browser-bob']) {
-   const result=await adminPage.evaluate(username=>api('admin/users','POST',{username,display_name:username}),username);
+   const result=await adminPage.evaluate(username=>api('admin/users','POST',{username,display_name:username,quota_bytes:0,email_verification_required:false}),username);
    const context=await browser.newContext({viewport:{width:1440,height:1100}});const page=await context.newPage();page.on('pageerror',error=>errors.push(error.message));
    await page.goto(base);await page.fill('#username',username);await page.fill('#password',result.temporary_password);await page.click('#loginButton');
    await page.locator('#firstPasswordScreen').waitFor({state:'visible'});

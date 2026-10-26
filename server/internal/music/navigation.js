@@ -160,6 +160,7 @@ async function restoreWorkspaceRoute() {
   if(!state.user || state.user.must_change_password)return;
   if(!permitPersonalNavigation(location.hash))return;
   if(!permitPlaylistNavigation(location.hash))return;
+  if(!permitEmailNavigation(location.hash))return;
   const generation=++routeGeneration;
   if(!location.hash || location.hash==='#/') {history.replaceState(null,'','#/'+pageRoutes[isAdministrator()?'overview':'tracks']);}
   const path=location.hash.slice(2).split('?')[0].split('/');
@@ -172,7 +173,7 @@ async function restoreWorkspaceRoute() {
   if(path[0]==='public'&&path[1]==='playlists'&&path.length===3)page='public';
   if(path[0]==='admin'&&path[1]==='users'&&path.length===3)page='users';
   if(path[0]==='admin'&&path[1]==='library'&&path.length===3&&['scan','missing','removed'].includes(path[2]))page='maintenance';
-  if(path[0]==='admin'&&path[1]==='settings'&&path.length===3&&['general','storage','backup','update','audit'].includes(path[2]))page='settings';
+  if(path[0]==='admin'&&path[1]==='settings'&&path.length===3&&['general','storage','backup','update','audit','registration','mail'].includes(path[2]))page='settings';
   if(path[0]==='admin'&&path[1]==='stats'&&path.length===2)page='stats';
   try {
     if(!page || (adminPages.has(page)||path[0]==='admin')&&!isAdministrator())throw new Error('页面不存在或当前账户无权访问。');
@@ -238,4 +239,4 @@ window.addEventListener('hashchange',()=>restoreWorkspaceRoute());
 // The layout must be ready before restoring a browser login.
 setupAdministration();
 // Deferred personal-center script runs after the existing classic scripts.
-window.addEventListener('DOMContentLoaded',()=>{setupProfileWorkspace();initializeAccountScreen()});
+window.addEventListener('DOMContentLoaded',()=>{setupProfileWorkspace();setupEmailWorkspace();initializeAccountScreen()});

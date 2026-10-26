@@ -1,6 +1,7 @@
 package music
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -28,7 +29,7 @@ func (s *Store) updateStageCover(id string, data []byte, source string, options 
 	if len(options) > 0 && options[0].UserID != "" && options[0].UserID != owner {
 		return UploadPreview{}, errResourceHidden
 	}
-	if err := checkActorOwner(s.db, owner, options); err != nil {
+	if err := checkStageUploadActor(s.db, owner, options); err != nil {
 		return UploadPreview{}, err
 	}
 	if source == "external" && record.Track.CoverSource == "embedded" {
@@ -42,7 +43,13 @@ func (s *Store) updateStageCover(id string, data []byte, source string, options 
 	if err != nil {
 		return UploadPreview{}, err
 	}
-	if _, err := s.db.Exec("UPDATE upload_staging SET track_json=? WHERE id=?", string(encoded), id); err != nil {
+	if err := s.transaction(func(tx *sql.Tx) error {
+		if err := checkStageUploadActor(tx, owner, options); err != nil {
+			return err
+		}
+		_, err := tx.Exec("UPDATE upload_staging SET track_json=? WHERE id=?", string(encoded), id)
+		return err
+	}); err != nil {
 		return UploadPreview{}, err
 	}
 	return s.previewLocked(id, preview.OriginalName, record, preview.CreatedAt, preview.ExpiresAt), nil

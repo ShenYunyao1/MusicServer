@@ -16,15 +16,18 @@ type memberFixture struct {
 
 func createMemberFixture(t *testing.T, api *API, name string) memberFixture {
 	t.Helper()
-	w := callAPI(api, "POST", "/api/v2/admin/users", `{"username":"`+name+`","display_name":"成员"}`)
-	if w.Code != 201 {
-		t.Fatalf("member create: %d %s", w.Code, w.Body)
-	}
-	var result memberFixture
-	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+	var adminID string
+	if err := api.store.db.QueryRow("SELECT id FROM users WHERE role='admin' AND enabled=1 LIMIT 1").Scan(&adminID); err != nil {
 		t.Fatal(err)
 	}
-	return result
+	exempt := false
+	// Legacy account fixtures intentionally start without a quota row. HTTP
+	// creation with an explicit quota is covered by the policy/API regressions.
+	created, err := api.store.CreateMemberWithPolicy(AdminMemberCreate{Username: name, DisplayName: "成员", EmailVerificationRequired: &exempt}, MutationOptions{UserID: adminID, ActorType: "console"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return memberFixture{User: created.User, Password: created.TemporaryPassword}
 }
 func adminVersionRequest(api *API, method, path, body string, version int64) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -47,10 +50,10 @@ func TestUsersAdminCreatesListsAndResets(t *testing.T) {
 	if list.Code != 200 || !strings.Contains(list.Body.String(), "Alice") || strings.Contains(list.Body.String(), a.Password) || strings.Contains(list.Body.String(), "password_hash") {
 		t.Fatalf("user list: %d %s", list.Code, list.Body)
 	}
-	if w := callAPI(api, "POST", "/api/v2/admin/users", `{"username":"ALICE"}`); w.Code != 409 {
+	if w := callAPI(api, "POST", "/api/v2/admin/users", `{"quota_bytes":0,"username":"ALICE"}`); w.Code != 409 {
 		t.Fatalf("duplicate: %d %s", w.Code, w.Body)
 	}
-	if w := callAPI(api, "POST", "/api/v2/admin/users", `{"username":"evil","role":"admin"}`); w.Code != 400 {
+	if w := callAPI(api, "POST", "/api/v2/admin/users", `{"quota_bytes":0,"username":"evil","role":"admin"}`); w.Code != 400 {
 		t.Fatalf("role injection: %d", w.Code)
 	}
 	path := "/api/v2/admin/users/" + a.User.ID + "/reset-password"
@@ -108,7 +111,7 @@ func TestUsersConcurrentDuplicateCreation(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			codes <- callAPI(api, "POST", "/api/v2/admin/users", `{"username":"`+username+`"}`).Code
+			codes <- callAPI(api, "POST", "/api/v2/admin/users", `{"quota_bytes":0,"username":"`+username+`"}`).Code
 		}()
 	}
 	wg.Wait()

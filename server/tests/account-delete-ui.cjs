@@ -5,8 +5,8 @@ module.exports=async function({page,browser,base,directory}){
   const errors=[],onError=e=>errors.push(e.message);page.on('pageerror',onError);
   // A select's intrinsic width includes its longest option, even when admin is
   // selected. Exercise the actual long-display-name layout on every platform.
-  await page.evaluate(()=>api('admin/users','POST',{username:'mobile-transfer-target',display_name:'Long target '.repeat(9).trim()}));
-  const account=await page.evaluate(()=>api('admin/users','POST',{username:'Delete.User'}));
+  await page.evaluate(()=>api('admin/users','POST',{username:'mobile-transfer-target',quota_bytes:0,email_verification_required:false,display_name:'Long target '.repeat(9).trim()}));
+  const account=await page.evaluate(()=>api('admin/users','POST',{username:'Delete.User',quota_bytes:0,email_verification_required:false}));
   const context=await browser.newContext({viewport:{width:1440,height:1000}});
   try{
     const member=await context.newPage();member.on('pageerror',onError);member.setDefaultTimeout(10000);

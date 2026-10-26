@@ -29,7 +29,7 @@ async function initializeAccountScreen(){
   $('setupForm').reset();
   await enterAccount(await api('auth/me'));
  }catch(error){setLoggedOut();if(error.status!==401)$('loginError').textContent=error.message}
- finally{loginFields.forEach(field=>field.disabled=false);$('loginForm').removeAttribute('aria-busy');$('loginButton').textContent='登录'}
+ finally{if(typeof loadRegistrationConfiguration==='function')void loadRegistrationConfiguration();loginFields.forEach(field=>field.disabled=false);$('loginForm').removeAttribute('aria-busy');$('loginButton').textContent='登录'}
 }
 $('setupForm').onsubmit=async event=>{
  event.preventDefault();$('setupError').textContent='';$('setupSubmit').disabled=true;

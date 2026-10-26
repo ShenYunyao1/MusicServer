@@ -17,16 +17,20 @@ import (
 )
 
 type User struct {
-	ID                 string    `json:"id"`
-	Username           string    `json:"username"`
-	DisplayName        string    `json:"display_name"`
-	Role               string    `json:"role"`
-	Enabled            bool      `json:"enabled"`
-	MustChangePassword bool      `json:"must_change_password"`
-	AuthVersion        int64     `json:"-"`
-	Version            int64     `json:"version"`
-	CreatedAt          time.Time `json:"created_at"`
-	DeletedAt          string    `json:"deleted_at,omitempty"`
+	ID                        string    `json:"id"`
+	Username                  string    `json:"username"`
+	DisplayName               string    `json:"display_name"`
+	Role                      string    `json:"role"`
+	Enabled                   bool      `json:"enabled"`
+	MustChangePassword        bool      `json:"must_change_password"`
+	AuthVersion               int64     `json:"-"`
+	Version                   int64     `json:"version"`
+	CreatedAt                 time.Time `json:"created_at"`
+	DeletedAt                 string    `json:"deleted_at,omitempty"`
+	Email                     string    `json:"email,omitempty"`
+	EmailVerified             bool      `json:"email_verified"`
+	EmailVerificationRequired bool      `json:"email_verification_required"`
+	UploadAllowed             bool      `json:"upload_allowed"`
 }
 
 type Session struct {
@@ -82,6 +86,13 @@ func readUser(reader sqlReader, id string) (User, error) {
 	if err == nil {
 		user.CreatedAt, err = parsePersistedTime(created)
 	}
+	if err == nil {
+		var state AccountEmailState
+		state, err = readAccountEmail(reader, id)
+		if err == nil {
+			applyAccountEmail(&user, state)
+		}
+	}
 	return user, err
 }
 func internalOwner(tx *sql.Tx, options []MutationOptions) (string, error) {
@@ -99,6 +110,9 @@ func (s *Store) createUser(username, password, role string, bootstrap bool) (Use
 	return s.createUserRecord(username, password, role, "", false, bootstrap, nil)
 }
 func (s *Store) createUserRecord(username, password, role, display string, mustChange, bootstrap bool, options []MutationOptions) (User, error) {
+	return s.createUserRecordInitialized(username, password, role, display, mustChange, bootstrap, options, nil)
+}
+func (s *Store) createUserRecordInitialized(username, password, role, display string, mustChange, bootstrap bool, options []MutationOptions, initialize func(*sql.Tx, *User) error) (User, error) {
 	username = strings.TrimSpace(username)
 	if !usernamePattern.MatchString(username) || (role != "admin" && role != "member") {
 		return User{}, errors.New("invalid username or role (username: 3-64 ASCII letters, digits, dot, dash or underscore)")
@@ -141,13 +155,30 @@ func (s *Store) createUserRecord(username, password, role, display string, mustC
 		if _, err := tx.Exec("INSERT INTO users(id,username,display_name,password_hash,role,enabled,auth_version,version,created_at,updated_at,must_change_password) VALUES(?,?,?,?,?,1,1,1,?,?,?)", user.ID, username, user.DisplayName, encoded, role, persistedTime(now), persistedTime(now), mustChange); err != nil {
 			return err
 		}
+		if err := writeAccountEmail(tx, user.ID, AccountEmailState{Required: true, QuotaSource: "administrator"}); err != nil {
+			return err
+		}
+		if initialize != nil {
+			if err := initialize(tx, &user); err != nil {
+				return err
+			}
+		}
+		state, err := readAccountEmail(tx, user.ID)
+		if err != nil {
+			return err
+		}
+		applyAccountEmail(&user, state)
 		if bootstrap {
 			if _, err := tx.Exec("INSERT INTO meta(key,value) VALUES('scan_owner_id',?)", user.ID); err != nil {
 				return err
 			}
 		}
 		if len(options) == 0 {
-			options = []MutationOptions{{Actor: "local-console", ActorType: "console", UserID: user.ID}}
+			actor, kind := "local-console", "console"
+			if state.QuotaSource == "registration" {
+				actor, kind = user.Username, "registration"
+			}
+			options = []MutationOptions{{Actor: actor, ActorType: kind, UserID: user.ID}}
 		}
 		return auditMutation(tx, "account.create", user.ID, nil, user, options)
 	})

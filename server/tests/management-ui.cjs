@@ -94,6 +94,7 @@ async function main() {
     await page.click('#loginButton');
     await page.waitForFunction(()=>state.user?.username==='admin');
     await page.waitForFunction(()=>document.querySelector('#status').textContent==='已登录');
+    await page.evaluate(async()=>{const current=(await api('auth/me')).user;state.user=await api('admin/users/'+current.id,'PATCH',{email_verification_required:false},undefined,current.version);renderUploads()});
     await waitForAsync(page,async()=>{const scan=await api('admin/scan/status');return scan.id&&scan.state==='completed'},null,{interval:250});
     assert.deepEqual(await page.evaluate(async()=>(await api('admin/scan/status')).errors),[],'Startup scan must complete without skipped fixtures');
     await page.evaluate(()=>refreshCore());

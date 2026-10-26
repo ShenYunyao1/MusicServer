@@ -6,7 +6,7 @@ module.exports=async function({page,browser,base,directory}){
   const contexts=[],errors=[];
   try{
     const accounts=[];
-    for(const username of ['share-reader','share-stranger'])accounts.push(await page.evaluate(username=>api('admin/users','POST',{username,display_name:username}),username));
+    for(const username of ['share-reader','share-stranger'])accounts.push(await page.evaluate(username=>api('admin/users','POST',{username,display_name:username,quota_bytes:0,email_verification_required:false}),username));
     await page.evaluate(id=>location.hash='#/playlists/'+id,source.id);await page.locator('#playlistDetail [data-edit-playlist]').click();await page.selectOption('#playlistEditVisibility','shared');await page.click('#savePlaylistEdit');
     await page.waitForFunction(id=>!state.playlistEditing&&state.playlists.find(p=>p.id===id)?.visibility==='shared',source.id);
     await page.locator('[data-manage-sharing="'+source.id+'"]').click();await page.locator('#sharingDialog').waitFor({state:'visible'});

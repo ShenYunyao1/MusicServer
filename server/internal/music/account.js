@@ -6,6 +6,12 @@ firstPasswordScreen.innerHTML='<form id="firstPasswordForm" class="panel login-c
 document.body.append(firstPasswordScreen);
 function isAdministrator(){return state.user?.role==='admin'}
 function canManageTrack(track){return isAdministrator() || track.owner_id===state.user?.id}
+function renderUploadEmailNotice(){
+ let notice=$('uploadEmailNotice');
+ if(!notice){notice=document.createElement('p');notice.id='uploadEmailNotice';notice.className='notice';notice.setAttribute('role','status');$('uploadZone').before(notice)}
+ notice.replaceChildren();notice.hidden=state.user?.upload_allowed!==false;
+ if(!notice.hidden){notice.append(document.createTextNode('上传暂未开放：请先完成邮箱验证。原有配额和曲目保留，已有上传任务仍可取消。 '));const link=document.createElement('a');link.href='#/account/profile';link.textContent='前往个人中心验证邮箱';notice.append(link)}
+}
 for(const [filter,label] of [['mine','我的上传'],['managed','我管理的曲目']]){
  const button=document.createElement('button');button.dataset.filter=filter;button.textContent=label;
  button.onclick=()=>{state.trackFilter=filter;document.querySelectorAll('[data-filter]').forEach(el=>el.classList.toggle('active',el===button));renderTracks()};document.querySelector('#page-tracks .filter-tabs').append(button);
@@ -33,6 +39,7 @@ const memberPlayer=document.createElement('audio');memberPlayer.id='memberPlayer
 function playTrack(track){if(track.missing || track.removed)return;memberPlayer.src='/api/v2/media/'+encodeURIComponent(track.id);memberPlayer.hidden=false;$('previewBar').hidden=false;$('previewTitle').textContent=track.title||'未命名曲目';memberPlayer.play().catch(error=>setStatus(error.message,'error'))}
 
 function setLoggedOut() {
+  if(typeof clearEmailWorkspace==='function')clearEmailWorkspace();
   if(typeof clearResumeWorkspace==='function')clearResumeWorkspace();
   if(typeof clearBrowseWorkspace==='function')clearBrowseWorkspace();
   if(typeof clearBackupWorkspace==='function')clearBackupWorkspace();
@@ -85,6 +92,7 @@ function setLoggedOut() {
   renderUploads();
   renderTracks();
   renderPlaylists();
+  if(typeof loadRegistrationConfiguration==='function'&&$('registrationScreen'))void loadRegistrationConfiguration();
 }
 
 async function enterAccount(identity) {

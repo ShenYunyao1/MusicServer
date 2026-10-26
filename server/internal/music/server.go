@@ -32,7 +32,7 @@ var accountPageScript []byte
 //go:embed users.js
 var usersPageScript []byte
 
-//go:embed management.css management.js navigation.js feedback.js library.js administration.js playlist-ui.js community.js sharing.js updater-ui.js setup.js upload-progress.js system-logs.js profile.js profile.css community-realtime.js backup-ui.js storage-ui.js storage-ui.css browse-ui.js browse-ui.css upload-resume.js
+//go:embed management.css management.js navigation.js feedback.js library.js administration.js playlist-ui.js community.js sharing.js updater-ui.js setup.js upload-progress.js system-logs.js profile.js profile.css community-realtime.js backup-ui.js storage-ui.js storage-ui.css browse-ui.js browse-ui.css upload-resume.js email-ui.js email-ui.css
 var workspaceAssets embed.FS
 
 type API struct {
@@ -165,6 +165,8 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		assets["/assets/backup-ui.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/storage-ui.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/upload-resume.js"] = "text/javascript; charset=utf-8"
+		assets["/assets/email-ui.js"] = "text/javascript; charset=utf-8"
+		assets["/assets/email-ui.css"] = "text/css; charset=utf-8"
 		assets["/assets/storage-ui.css"] = "text/css; charset=utf-8"
 		assets["/assets/browse-ui.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/browse-ui.css"] = "text/css; charset=utf-8"
@@ -214,6 +216,10 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		a.accountAuth(response, request)
 		return
 	}
+	if request.URL.Path == "/api/v2/registration" || strings.HasPrefix(request.URL.Path, "/api/v2/registration/") {
+		a.registration(response, request)
+		return
+	}
 	if request.URL.Path != "/api/v2/health" {
 		var ok bool
 		auth, ok = a.authenticate(request)
@@ -254,6 +260,18 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 			}
 		}
 	}
+	if request.URL.Path == "/api/v2/admin/registration" {
+		a.registration(response, request)
+		return
+	}
+	if request.URL.Path == "/api/v2/auth/email" || strings.HasPrefix(request.URL.Path, "/api/v2/auth/email/") || request.URL.Path == "/api/v2/admin/mail" || strings.HasPrefix(request.URL.Path, "/api/v2/admin/mail/") || strings.HasPrefix(request.URL.Path, "/api/v2/admin/users/") && strings.HasSuffix(request.URL.Path, "/release-email") {
+		a.emailHTTP(response, request)
+		return
+	}
+	if request.URL.Path == "/api/v2/auth/storage" {
+		a.accountStorage(response, request)
+		return
+	}
 	if strings.HasPrefix(request.URL.Path, "/api/v2/auth/") && !strings.HasPrefix(request.URL.Path, "/api/v2/auth/keys") {
 		a.accountAuth(response, request)
 		return
@@ -284,6 +302,9 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	}
 	if strings.HasPrefix(request.URL.Path, "/api/v2/public/") || request.URL.Path == "/api/v2/subscriptions" || strings.HasPrefix(request.URL.Path, "/api/v2/subscriptions/") {
 		a.community(response, request)
+		return
+	}
+	if !a.requireUploadEmail(response, request) {
 		return
 	}
 	if a.resumableUploads(response, request) {
@@ -1053,16 +1074,26 @@ func (a *API) trackResource(response http.ResponseWriter, request *http.Request,
 		writeError(response, http.StatusBadRequest, "INVALID_RESOURCE", "resource file is required or exceeds the limit")
 		return
 	}
+	auth := authFromRequest(request)
+	guard := func(reader sqlReader) error {
+		if err := validateAccountSession(reader, auth); err != nil {
+			return err
+		}
+		return checkUploadEmailPolicy(reader, auth.userID)
+	}
 	if kind == "cover" {
-		err = a.store.SetTrackCover(id, data, mutationOptions(request))
+		err = a.store.setTrackCoverGuarded(id, data, guard, mutationOptions(request))
 	} else {
 		var text string
 		text, err = decodeLyricsFile(data)
 		if err == nil {
-			err = a.store.UpdateTrack(id, map[string]string{"lyrics": text}, mutationOptions(request))
+			err = a.store.updateTrackGuarded(id, map[string]string{"lyrics": text}, guard, mutationOptions(request))
 		}
 	}
 	if err != nil {
+		if writeStorageError(response, err) {
+			return
+		}
 		writeError(response, http.StatusBadRequest, "INVALID_RESOURCE", err.Error())
 		return
 	}

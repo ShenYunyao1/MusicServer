@@ -35,6 +35,7 @@ var errVersionConflict = errors.New("record changed; refresh before editing")
 var errTrackInUse = errors.New("this track is used by another account's playlist; contact an administrator")
 
 type Store struct {
+	mail           mailRuntime
 	storageWriteMu sync.Mutex
 	spaceProbe     func(string) (diskspace.Space, error)
 	backupBundleMu sync.Mutex
@@ -79,6 +80,14 @@ func NewStore(dataPath, mediaRoot string) (*Store, error) {
 		return nil, err
 	}
 	if err := store.InitializeResumableUploads(); err != nil {
+		_ = store.db.Close()
+		return nil, err
+	}
+	if err := store.InitializeEmailPolicy(); err != nil {
+		_ = store.db.Close()
+		return nil, err
+	}
+	if err := store.InitMail(); err != nil {
 		_ = store.db.Close()
 		return nil, err
 	}
@@ -754,10 +763,19 @@ func applyMetadata(track *Track, values map[string]string) {
 	}
 }
 func (s *Store) UpdateTrack(id string, fields map[string]string, options ...MutationOptions) error {
+	return s.updateTrackGuarded(id, fields, nil, options...)
+}
+
+func (s *Store) updateTrackGuarded(id string, fields map[string]string, guard func(sqlReader) error, options ...MutationOptions) error {
 	if err := validMetadataFields(fields); err != nil {
 		return err
 	}
 	return s.transaction(func(tx *sql.Tx) error {
+		if guard != nil {
+			if err := guard(tx); err != nil {
+				return err
+			}
+		}
 		before, err := readTrackFrom(tx, id, false)
 		if err != nil {
 			return err

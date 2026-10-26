@@ -18,6 +18,7 @@
 *.db
 .env
 .env.*
+.mail-secrets/
 __pycache__/
 /server/tests/node_modules/
 

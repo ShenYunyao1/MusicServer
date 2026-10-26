@@ -118,6 +118,18 @@ func (s *Store) stageAudioWithAssetsContext(ctx context.Context, name string, re
 			return UploadPreview{}, errors.New("invalid cover (JPEG, PNG, GIF, WebP; maximum 8 MiB and 20 MP)")
 		}
 	}
+	owner := ""
+	if len(options) > 0 {
+		owner = options[0].UserID
+	}
+	if owner == "" {
+		if err := s.db.QueryRow("SELECT id FROM users WHERE role='admin' AND enabled=1 ORDER BY created_at,id LIMIT 1").Scan(&owner); err != nil {
+			return UploadPreview{}, err
+		}
+	}
+	if err := checkStageUploadActor(s.db, owner, options); err != nil {
+		return UploadPreview{}, err
+	}
 	waitStarted := time.Now()
 	select {
 	case s.stageSlots <- struct{}{}:
@@ -218,17 +230,7 @@ func (s *Store) stageAudioWithAssetsContext(ctx context.Context, name string, re
 	applyMetadata(&record.Track, fields)
 	created := time.Now().UTC()
 	expires := created.Add(uploadStageTTL)
-	owner := ""
-	if len(options) > 0 {
-		owner = options[0].UserID
-	}
-	if owner == "" {
-		if err := s.db.QueryRow("SELECT id FROM users WHERE role='admin' AND enabled=1 ORDER BY created_at,id LIMIT 1").Scan(&owner); err != nil {
-			_ = root.Remove(relative)
-			return UploadPreview{}, err
-		}
-	}
-	if err := checkActorOwner(s.db, owner, options); err != nil {
+	if err := checkStageUploadActor(s.db, owner, options); err != nil {
 		_ = root.Remove(relative)
 		return UploadPreview{}, err
 	}
@@ -243,7 +245,13 @@ func (s *Store) stageAudioWithAssetsContext(ctx context.Context, name string, re
 		_ = root.Remove(relative)
 		return UploadPreview{}, err
 	}
-	if _, err := s.db.Exec(`INSERT INTO upload_staging (id,original_name,size,content_hash,temp_path,track_json,created_at,expires_at,user_id) VALUES (?,?,?,?,?,?,?,?,?)`, id, filepath.Base(name), count, track.ContentHash, relative, string(encoded), persistedTime(created), persistedTime(expires), owner); err != nil {
+	if err := s.transaction(func(tx *sql.Tx) error {
+		if err := checkStageUploadActor(tx, owner, options); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`INSERT INTO upload_staging (id,original_name,size,content_hash,temp_path,track_json,created_at,expires_at,user_id) VALUES (?,?,?,?,?,?,?,?,?)`, id, filepath.Base(name), count, track.ContentHash, relative, string(encoded), persistedTime(created), persistedTime(expires), owner)
+		return err
+	}); err != nil {
 		_ = root.Remove(relative)
 		return UploadPreview{}, err
 	}
@@ -336,7 +344,7 @@ func (s *Store) commitUploadStageWithMetadata(id string, fields map[string]strin
 	if len(options) > 0 && options[0].UserID != "" && options[0].UserID != stageOwner {
 		return Track{}, false, errResourceHidden
 	}
-	if err := checkActorOwner(s.db, stageOwner, options); err != nil {
+	if err := checkStageUploadActor(s.db, stageOwner, options); err != nil {
 		return Track{}, false, err
 	}
 	s.mediaMu.Lock()
@@ -445,7 +453,7 @@ func (s *Store) commitUploadStageWithMetadata(id string, fields map[string]strin
 		return Track{}, false, err
 	}
 	if err := s.transaction(func(tx *sql.Tx) error {
-		if err := checkActorOwner(tx, stageOwner, options); err != nil {
+		if err := checkStageUploadActor(tx, stageOwner, options); err != nil {
 			return err
 		}
 		var existingID string
@@ -472,7 +480,7 @@ func (s *Store) commitUploadStageWithMetadata(id string, fields map[string]strin
 		if err := s.checkAccountQuota(tx, stageOwner, track.Size); err != nil {
 			return err
 		}
-		if err := checkActorOwner(tx, stageOwner, options); err != nil {
+		if err := checkStageUploadActor(tx, stageOwner, options); err != nil {
 			return err
 		}
 		if err := saveCover(tx, record.Cover, track.CoverMIME); err != nil {

@@ -128,10 +128,7 @@ func TestBrowsePlaylistSummaryPrivacyAndUnavailableMembers(t *testing.T) {
 	if w := browseTestRequest(api, bob, "GET", "/api/v2/browse/playlists/large/tracks", "", 0); w.Code != 404 {
 		t.Fatal(w.Code, w.Body)
 	}
-	admin, err := readUser(api.store.db, api.store.Tracks()[0].OwnerID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	admin, _, _ := loginTestAccount(t, api.store, "admin")
 	page = browseTestPage(t, browseTestRequest(api, admin, "GET", "/api/v2/browse/playlists", "", 0))
 	if page["total"] != float64(0) {
 		t.Fatal("admin list exposed another owner's private collection", page)

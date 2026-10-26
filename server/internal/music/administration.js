@@ -32,18 +32,19 @@ function setupAdministration(){
   const settings=$('page-settings'),general=settings.querySelector('.panel'),update=$('updateStatus').closest('.panel');general.dataset.settingsPane='general';update.dataset.settingsPane='update';update.hidden=true;
   const backup=document.createElement('section');backup.className='panel';backup.dataset.settingsPane='backup';backup.hidden=true;settings.append(backup);setupBackupPane(backup);
   const storage=document.createElement('section');storage.className='panel';storage.dataset.settingsPane='storage';storage.hidden=true;settings.append(storage);setupStoragePane(storage);
+  const registration=document.createElement('section'),mail=document.createElement('section');for(const[pane,name]of [[registration,'registration'],[mail,'mail']]){pane.className='panel email-settings-panel';pane.dataset.settingsPane=name;pane.hidden=true;settings.append(pane)}setupEmailSettings(registration,mail);
   const audit=document.createElement('section');audit.className='panel';audit.dataset.settingsPane='audit';audit.hidden=true;audit.innerHTML='<h3>操作记录</h3><p class="status">最近 100 条记录；展开查看变更详情。</p><div id="auditResults"></div>';
   const auditButton=makeButton('刷新操作记录',()=>run(loadAuditEntries));auditButton.id='viewAudit';audit.querySelector('#auditResults').before(auditButton);
   settings.append(backup,audit);
   const settingsTabs=document.createElement('nav');settingsTabs.className='page-tabs';settingsTabs.id='settingsTabs';
-  for(const [tab,label] of [['general','常规'],['storage','容量与额度'],['backup','备份与恢复'],['update','程序更新'],['audit','操作记录']])settingsTabs.append(routeLink(label,'admin/settings/'+tab));settings.querySelector('.page-intro').after(settingsTabs);
+  for(const [tab,label] of [['general','常规'],['storage','容量'],['registration','注册与账户'],['mail','邮件服务'],['backup','备份与恢复'],['update','程序更新'],['audit','操作记录']])settingsTabs.append(routeLink(label,'admin/settings/'+tab));settings.querySelector('.page-intro').after(settingsTabs);
   const updateSource=document.createElement('div');updateSource.id='updateSource';updateSource.className='field';update.querySelector('#updateStatus').before(updateSource);
   const saveUpdate=makeButton('保存更新来源',()=>run(()=>saveSettings('update')),'btn primary');updateSource.after(saveUpdate);
   $('saveSettings').onclick=()=>run(()=>saveSettings('general'));
   $('viewRemoved').onclick=()=>run(loadRemovedTracks);
 
   const users=$('page-users'),detail=$('userResourcesPanel');detail.id='userResourcesPanel';
-  const heading=document.createElement('div');heading.id='userDetailHeader';heading.hidden=true;heading.innerHTML='<p class="status">用户管理 / 账户详情</p><h1 id="managedUserName"></h1><p id="managedUserStatus" class="notice"></p><div id="userDetailActions" class="actions"></div>';
+  const heading=document.createElement('div');heading.id='userDetailHeader';heading.hidden=true;heading.innerHTML='<p class="status">用户管理 / 账户详情</p><h1 id="managedUserName"></h1><p id="managedUserStatus" class="notice"></p><p id="managedUserStorage" class="status"></p><div id="userDetailActions" class="actions"></div>';
   const back=routeLink('返回用户管理','admin/users');back.id='backUsers';heading.prepend(back);detail.before(heading);
   const resourceTabs=document.createElement('nav');resourceTabs.id='resourceTabs';resourceTabs.className='page-tabs';
   for(const [kind,label] of [['owned','当前管理曲目'],['uploaded','原始上传曲目'],['playlists','私人歌单'],['keys','API Key']]){
@@ -91,6 +92,8 @@ async function showSettingsTab(tab){
   if(tab==='update')await loadUpdate();
   if(tab==='backup')await loadBackupManagement(true);
   if(tab==='storage')await loadStorage();
+  if(tab==='registration')await loadRegistrationSettings();
+  if(tab==='mail')await loadMailSettings();
   if(tab==='audit')await loadAuditEntries();
 }
 async function loadRemovedTracks(){
@@ -119,16 +122,18 @@ function renderManagedUserPage(){
   const user=managedUser(),detail=Boolean(user);$('userDetailHeader').hidden=!detail;$('userResourcesPanel').hidden=!detail;
   const intro=$('page-users').querySelector(':scope > .page-intro');intro.hidden=detail;
   (detail?$('userDetailActions'):intro.querySelector('.actions')).append($('refreshUsers'));
-  $('userList').closest('.panel').hidden=detail;$('createUser').hidden=detail;
+  $('userList').closest('.panel').hidden=detail;$('createUser').hidden=detail;$('storageDeleted').hidden=detail;
   if(!user){if(state.page==='users')document.title='用户管理 · 音乐服务器';return}
   if(state.page==='users')document.title=(user.display_name||user.username)+' · 用户管理 · 音乐服务器';$('managedUserName').textContent=user.display_name||user.username;
-  $('managedUserStatus').textContent='登录名：'+user.username+' · '+(user.enabled?'已启用':'已停用')+(user.must_change_password?' · 首次登录需改密':'');
+  $('managedUserStatus').textContent='登录名：'+user.username+' · '+(user.enabled?'已启用':'已停用')+(user.must_change_password?' · 首次登录需改密':'')+' · '+emailRequirementLabel(user)+(user.email?' · '+user.email:'');
+  const storage=accountStorageCache.get(user.id);$('managedUserStorage').textContent=storage?'已用 '+storageBytes(storage.used_bytes)+' / '+(storage.limit_bytes?storageBytes(storage.limit_bytes):'不限额')+' · 按原始上传者统计':'正在读取账户容量…';
   const actions=$('userDetailActions');actions.replaceChildren($('refreshUsers'));
-  const row=[...$('userList').children].find(el=>el.dataset.userId===user.id);
+  const row=[...$('userList').children].find(el=>el.dataset.userId===user.id)||createUserRow(user);
   for(const action of ['display','reset','enabled','delete']){
     const source=row?.querySelector('[data-user-action="'+action+'"]');if(!source)continue;
     const button=makeButton(source.textContent,()=>source.click(),source.className);button.dataset.accountAction=action;button.disabled=source.disabled;button.title=source.title;actions.append(button);
   }
+  const verifyLabel=document.createElement('label');verifyLabel.className='email-toggle';const verify=document.createElement('input');verify.id='managedRequireEmail';verify.type='checkbox';verify.checked=user.email_verification_required!==false;verify.onchange=()=>run(async()=>{const required=verify.checked,epoch=usersEpoch,owner=state.user?.id;verify.disabled=true;try{const changed=await api('admin/users/'+user.id,'PATCH',{email_verification_required:required},undefined,user.version);if(epoch!==usersEpoch||owner!==state.user?.id)return;state.users=state.users.map(item=>item.id===changed.id?changed:item);if(changed.id===state.user.id){state.user=changed;renderUploads()}renderUsers();renderManagedUserPage();setStatus(required?'该账户需要验证邮箱后上传':'该账户已明确免除邮箱验证','ok')}catch(error){if(epoch===usersEpoch&&owner===state.user?.id&&verify.isConnected){verify.checked=!required;verify.disabled=false}throw error}});verifyLabel.append(verify,document.createTextNode('需要验证邮箱后上传'));actions.append(verifyLabel);
   const stats=routeLink('查看此账户调用统计','admin/stats?user='+encodeURIComponent(user.id));stats.id='userStatsLink';actions.append(stats);
   const quota=makeButton('调整容量额度',()=>run(()=>openStorageQuota(user.id)));quota.dataset.accountAction='quota';actions.append(quota);
   document.querySelectorAll('[data-resource-kind]').forEach(button=>button.classList.toggle('active',button.dataset.resourceKind===$('userResourceKind').value));

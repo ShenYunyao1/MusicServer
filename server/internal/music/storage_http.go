@@ -11,6 +11,10 @@ import (
 )
 
 func writeStorageError(w http.ResponseWriter, err error) bool {
+	if errors.Is(err, errEmailVerificationRequired) {
+		writeError(w, 403, "EMAIL_VERIFICATION_REQUIRED", err.Error())
+		return true
+	}
 	if errors.Is(err, errStorageLow) {
 		writeError(w, 507, "STORAGE_LOW", err.Error())
 		return true
@@ -63,6 +67,10 @@ func (a *API) protectUpload(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 func (a *API) storage(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/api/v2/admin/storage/accounts" {
+		a.accountStorage(w, r)
+		return
+	}
 	if !a.requireAdmin(w, r) {
 		return
 	}

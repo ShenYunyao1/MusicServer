@@ -272,6 +272,17 @@ func prepareRestoredDatabase(path, mediaRoot string) error {
 	if _, err := tx.Exec("DELETE FROM meta WHERE key LIKE 'upload_resume/%'"); err != nil {
 		return err
 	}
+	// Mail secrets are deliberately not included in a backup. Pending challenges
+	// and encrypted outbox jobs cannot be resumed at the restored destination.
+	if _, err := tx.Exec("DELETE FROM meta WHERE key LIKE 'email_challenge/%' OR key LIKE 'mail_job/%' OR key LIKE 'mail_limit/%'"); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("UPDATE settings SET value=json_set(value,'$.tested',json('false')) WHERE key='mail_settings'"); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("UPDATE settings SET value=json_set(value,'$.enabled',json('false')) WHERE key='registration_policy'"); err != nil {
+		return err
+	}
 	if _, err := tx.Exec("UPDATE settings SET value=? WHERE key='server'", string(encoded)); err != nil {
 		return err
 	}

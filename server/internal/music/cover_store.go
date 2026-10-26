@@ -200,11 +200,20 @@ func saveCover(tx *sql.Tx, data []byte, mime string) error {
 	return err
 }
 func (s *Store) SetTrackCover(id string, data []byte, options ...MutationOptions) error {
+	return s.setTrackCoverGuarded(id, data, nil, options...)
+}
+
+func (s *Store) setTrackCoverGuarded(id string, data []byte, guard func(sqlReader) error, options ...MutationOptions) error {
 	validated, mime, ok := validateCover(data, "")
 	if !ok {
 		return errors.New("invalid cover (maximum 8 MiB and 20 MP)")
 	}
 	return s.transaction(func(tx *sql.Tx) error {
+		if guard != nil {
+			if err := guard(tx); err != nil {
+				return err
+			}
+		}
 		before, err := readTrackFrom(tx, id, false)
 		if err != nil {
 			return err

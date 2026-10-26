@@ -97,7 +97,7 @@ async function main() {
     await page.fill('#profileName','并发更新');await page.click('#saveProfile');await page.waitForFunction(()=>state.user.display_name==='并发更新');
 
     await page.goto(base+'/#/admin/users');await page.locator('#createUser').click();
-    await page.fill('[data-field="username"]','Profile-Member');await page.click('#saveModal');
+    await page.fill('#editor-field-username','Profile-Member');await page.check('[name="createQuotaMode"][value="unlimited"]');await page.click('#saveModal');
     await page.locator('#temporaryPasswordDialog').waitFor({state:'visible'});
     assert.equal(await page.locator('#temporaryPasswordAccount').textContent(),'账号：Profile-Member');
     const created={user:await page.evaluate(()=>state.users.find(user=>user.username==='Profile-Member')),temporary_password:await page.locator('#temporaryPasswordValue').textContent()};
@@ -126,7 +126,7 @@ async function main() {
     await member.locator('#receivedInvitations').filter({hasText:'并发更新 (@admin)'}).waitFor();
     await page.goto(base+'/#/admin/users');
     const memberRow=page.locator('[data-user-id="'+created.user.id+'"]');await memberRow.waitFor();
-    assert.equal(await memberRow.locator('strong').textContent(),'并发更新');
+    assert.equal(await memberRow.locator('td').first().locator('strong').textContent(),'并发更新');
     assert.match(await memberRow.textContent(),/@Profile-Member/);
     await page.goto(base+'/#/account/profile');await page.locator('#profileName').waitFor();
 

@@ -27,9 +27,13 @@ func testAPI(t *testing.T) (*API, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	if _, err := store.InitializeAdmin("admin", "test administrator password"); err != nil {
+	admin, err := store.InitializeAdmin("admin", "test administrator password")
+	if err != nil {
 		t.Fatal(err)
 	}
+	// Existing upload regressions use an explicitly exempt test administrator.
+	// Policy tests create or mark required accounts themselves.
+	setEmailTestRequirement(t, store, admin.ID, false)
 	if _, err := store.Scan(); err != nil {
 		t.Fatal(err)
 	}

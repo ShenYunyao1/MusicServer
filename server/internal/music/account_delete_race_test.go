@@ -36,7 +36,7 @@ func TestAccountDeletionRejectsPreviouslyAuthenticatedAdminWrites(t *testing.T) 
 				t.Fatal(err)
 			}
 			target, _ := readyMember(t, api, "retained-member")
-			method, path, body := "POST", "/api/v2/admin/users", `{"username":"late-created-member"}`
+			method, path, body := "POST", "/api/v2/admin/users", `{"quota_bytes":0,"username":"late-created-member"}`
 			if action == "update" {
 				method, path, body = "PATCH", "/api/v2/admin/users/"+target.ID, `{"display_name":"Unauthorized late change"}`
 			} else if action == "reset" {

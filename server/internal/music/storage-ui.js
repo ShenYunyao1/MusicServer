@@ -1,9 +1,10 @@
 'use strict';
 let storageGeneration=0,storageLoading=false,storageDirty=false,storageView=null,storageLoadJob=null,quotaDraft=null;
+const accountStorageCache=new Map();let deletedStoragePage=null;
 function storageBytes(bytes){const value=Number(bytes)||0;for(const[unit,size]of [['GiB',1073741824],['MiB',1048576],['KiB',1024]])if(value>=size)return Number((value/size).toFixed(2)).toLocaleString()+' '+unit;return value+' B'}
 function setupStoragePane(pane){
  pane.classList.remove('panel');pane.classList.add('storage-workspace');
- pane.innerHTML='<section class="panel storage-section"><div class="storage-section-head"><h2>磁盘空间</h2><button id="refreshStorage" class="btn">刷新容量</button></div><p id="storageResult" class="status" role="status"></p><div id="storageSummary" class="storage-volumes"></div><p class="storage-caption">数据卷与媒体卷可能位于同一磁盘，可用空间不相加。</p></section><section class="panel storage-section"><h2>存储分类</h2><div id="storageBreakdown" class="storage-breakdown"></div></section><section class="panel storage-section"><h2>空间保护</h2><p class="storage-caption">为系统运行保留余量，空间不足时暂停新增上传与备份。</p><form id="storagePolicyForm" class="storage-policy"><div class="field"><label for="storageReserve">磁盘预留空间（MiB）</label><input id="storageReserve" type="number" min="0" max="1048576" step="1" required></div><button id="saveStoragePolicy" class="btn primary" type="submit">保存预留空间</button></form><p id="storagePolicyResult" class="status" role="status"></p></section><section class="panel storage-section"><div class="storage-section-head"><h2>账户音频额度</h2><span id="storageAccountCount" class="storage-caption"></span></div><p class="storage-caption">按原始上传者统计音频占用，默认不限额。</p><details class="storage-rules"><summary>统计规则</summary><p>仅统计实际存在的已入库音频。接管不转移占用，重复复用不重复计费，下架保留文件仍占空间。降低额度不会删除已有文件；超额账户仍可浏览和复用歌曲。管理员目录扫描不受账户额度限制。</p></details><div id="storageAccounts"></div><details id="storageDeleted" class="storage-deleted" hidden><summary></summary><div id="storageDeletedAccounts"></div></details></section><section class="panel storage-section storage-cleanup"><h2>安全清理</h2><p class="storage-caption">仅清理程序管理的旧更新下载包，保留当前、待更新及回退版本。媒体、已安装程序和未知文件保持原样。备份可在“备份与恢复”逐份删除。</p><button id="cleanUpdateCache" class="btn danger">清理旧更新缓存</button></section>';
+ pane.innerHTML='<section class="panel storage-section"><div class="storage-section-head"><h2>磁盘空间</h2><button id="refreshStorage" class="btn">刷新容量</button></div><p id="storageResult" class="status" role="status"></p><div id="storageSummary" class="storage-volumes"></div><p class="storage-caption">数据卷与媒体卷可能位于同一磁盘，可用空间不相加。</p></section><section class="panel storage-section"><h2>存储分类</h2><div id="storageBreakdown" class="storage-breakdown"></div></section><section class="panel storage-section"><h2>空间保护</h2><p class="storage-caption">为系统运行保留余量，空间不足时暂停新增上传与备份。</p><form id="storagePolicyForm" class="storage-policy"><div class="field"><label for="storageReserve">磁盘预留空间（MiB）</label><input id="storageReserve" type="number" min="0" max="1048576" step="1" required></div><button id="saveStoragePolicy" class="btn primary" type="submit">保存预留空间</button></form><p id="storagePolicyResult" class="status" role="status"></p></section><section class="panel storage-section"><h2>账户存储额度</h2><p class="storage-caption">账户额度、上传资格和历史占用集中在用户管理中设置。</p><a class="btn" href="#/admin/users">前往用户管理</a></section><section class="panel storage-section storage-cleanup"><h2>安全清理</h2><p class="storage-caption">仅清理程序管理的旧更新下载包，保留当前、待更新及回退版本。媒体、已安装程序和未知文件保持原样。备份可在“备份与恢复”逐份删除。</p><button id="cleanUpdateCache" class="btn danger">清理旧更新缓存</button></section>';
  const dialog=document.createElement('dialog');dialog.id='quotaEditor';dialog.className='modal quota-dialog';dialog.setAttribute('aria-labelledby','quotaTitle');
  dialog.innerHTML='<form id="quotaForm"><div class="quota-head"><h2 id="quotaTitle">调整容量额度</h2><button id="closeQuota" type="button" class="btn icon-button" aria-label="关闭额度设置">×</button></div><div class="quota-body"><p id="quotaAccount" class="quota-account"></p><p id="quotaUsed" class="storage-caption"></p><fieldset class="quota-modes"><legend>容量上限</legend><label><input type="radio" name="quotaMode" value="unlimited"> 不限额</label><label><input type="radio" name="quotaMode" value="limited"> 限制额度</label></fieldset><div id="quotaLimited" class="quota-amount"><div class="field"><label for="quotaLimit">容量数值</label><input id="quotaLimit" type="number" min="0" step="any" required></div><div class="field"><label for="quotaUnit">单位</label><select id="quotaUnit"><option value="MiB">MiB</option><option value="GiB">GiB</option></select></div></div><p id="quotaEffect" class="storage-caption"></p><p id="quotaError" class="notice" role="alert" hidden></p></div><div class="quota-footer"><button id="cancelQuota" type="button" class="btn">取消</button><button id="saveQuota" type="submit" class="btn primary">保存修改</button></div></form>';document.body.append(dialog);
  $('refreshStorage').onclick=()=>run(()=>loadStorage());
@@ -32,8 +33,8 @@ function updateQuotaEditor(){
 }
 async function openStorageQuota(id){
  if(!state.user||!isAdministrator())return;if(quotaDraft){if(quotaDraft.id===id)return;if(quotaChanged()&&!confirm('放弃当前未保存的额度修改？'))return;$('quotaEditor').close()}
- const generation=storageGeneration;await loadStorage();if(generation!==storageGeneration)return;
- const account=storageView?.accounts.find(a=>a.id===id&&!a.deleted);if(!account)throw new Error('该账户不可设置额度');
+ const generation=storageGeneration;await loadAccountStorage([id]);if(generation!==storageGeneration)return;
+ const account=accountStorageCache.get(id);if(!account)throw new Error('该账户不可设置额度');
  const unit=account.limit_bytes&&account.limit_bytes<1073741824?'MiB':'GiB',size=unit==='GiB'?1073741824:1048576;
  quotaDraft={id,username:account.username,version:account.version,used:account.used_bytes,limitBytes:account.limit_bytes,mode:account.limit_bytes?'limited':'unlimited',unit,amount:String(account.limit_bytes?account.limit_bytes/size:Math.max(1,Math.ceil(account.used_bytes/1073741824))),saving:false};
  $('quotaAccount').textContent='@'+account.username;$('quotaUsed').textContent='当前已用 '+storageBytes(account.used_bytes);
@@ -44,7 +45,7 @@ async function saveStorageQuota(){
  if(!quotaDraft||quotaDraft.saving||$('saveQuota').disabled)return;
  const draft=quotaDraft,generation=storageGeneration,bytes=quotaDraftBytes();draft.saving=true;updateQuotaEditor();$('quotaError').hidden=true;
  try{await api('admin/storage/quotas/'+draft.id,'PUT',{limit_bytes:bytes,version:draft.version});if(generation!==storageGeneration||quotaDraft!==draft)return;
-  const account=storageView?.accounts.find(a=>a.id===draft.id);if(account){account.limit_bytes=bytes;account.version=draft.version+1}renderStorageAccounts();$('quotaEditor').close();setStatus('账户额度已保存','ok');
+  const account=accountStorageCache.get(draft.id);if(account){account.limit_bytes=bytes;account.version=draft.version+1}if(typeof renderUsers==='function')renderUsers();if(typeof renderManagedUserPage==='function')renderManagedUserPage();$('quotaEditor').close();setStatus('账户额度已保存','ok');
  }catch(error){if(generation===storageGeneration&&quotaDraft===draft){$('quotaError').hidden=false;$('quotaError').textContent=error.message}}
  finally{if(generation===storageGeneration&&quotaDraft===draft){draft.saving=false;updateQuotaEditor()}}
 }
@@ -80,29 +81,46 @@ function storageAccountTable(accounts,deleted){
   else if(!account.limit_bytes){usage.textContent='未设上限';usage.className='storage-unlimited'}
   else{const percent=account.used_bytes/account.limit_bytes*100,bar=document.createElement('progress'),caption=document.createElement('span');bar.max=100;bar.value=Math.min(100,percent);bar.setAttribute('aria-label',account.username+' 已用额度');caption.textContent=Number(percent.toFixed(1))+'%'+(percent>100?' · 已超额':percent>=90?' · 接近上限':'');usage.className='storage-usage'+(percent>100?' exceeded':percent>=90?' near':'');usage.append(bar,caption)}
   const action=document.createElement('td');action.dataset.label=labels[4];
-  if(deleted)action.textContent='只读';else{const button=makeButton('调整额度',()=>run(()=>openStorageQuota(account.id)),'btn small');button.dataset.editQuota=account.id;action.append(button)}
+  if(deleted){action.textContent='只读';if(account.email&&account.account_version){const release=makeButton('释放邮箱占用',()=>run(async()=>{if(!confirm('释放此已删除账户的邮箱占用？历史账户和上传溯源将保留。'))return;await api('admin/users/'+account.id+'/release-email','POST',{},undefined,account.account_version);await loadDeletedAccountStorage(deletedStoragePage?.offset||0);setStatus('邮箱占用已释放','ok')}),'btn small');release.dataset.releaseEmail=account.id;action.append(release)}}else{const button=makeButton('调整额度',()=>run(()=>openStorageQuota(account.id)),'btn small');button.dataset.editQuota=account.id;action.append(button)}
   row.append(usage,action);body.append(row);
  }
  return table;
 }
-function renderStorageAccounts(){
- if(!storageView)return;const active=storageView.accounts.filter(a=>!a.deleted),deleted=storageView.accounts.filter(a=>a.deleted);
- $('storageAccounts').replaceChildren(storageAccountTable(active,false));$('storageAccountCount').textContent='共 '+active.length+' 个账户';
- $('storageDeleted').hidden=!deleted.length;$('storageDeleted summary')?.removeAttribute('aria-hidden');
- $('storageDeleted').querySelector('summary').textContent='已删除账户占用（'+deleted.length+'） · 合计 '+storageBytes(deleted.reduce((sum,a)=>sum+a.used_bytes,0));
- $('storageDeletedAccounts').replaceChildren(storageAccountTable(deleted,true));
+async function loadAccountStorage(ids){
+ if(!state.user||!isAdministrator()||!ids.length)return [];
+ const generation=storageGeneration,userID=state.user.id,unique=[...new Set(ids)].slice(0,100);
+ const page=await api('admin/storage/accounts?'+new URLSearchParams({ids:unique.join(',')}));
+ if(generation!==storageGeneration||state.user?.id!==userID)return [];
+ if(accountStorageCache.size>200)accountStorageCache.clear();
+ for(const account of page.items||[])accountStorageCache.set(account.id,account);
+ return page.items||[];
+}
+async function loadDeletedAccountStorage(offset=0){
+ if(!state.user||!isAdministrator()||!$('storageDeleted'))return;
+ const generation=storageGeneration,userID=state.user.id;
+ const page=await api('admin/storage/accounts?'+new URLSearchParams({deleted:'true',offset:String(offset),limit:'50'}));
+ if(generation!==storageGeneration||state.user?.id!==userID)return;
+ deletedStoragePage=page;
+ const total=page.used_bytes_total,amount=typeof total==='number'?total:(page.items||[]).reduce((sum,a)=>sum+a.used_bytes,0);
+ $('storageDeleted').querySelector('summary').textContent='已删除账户占用（'+page.total+'） · '+(typeof total==='number'?'合计 ':'本页 ')+storageBytes(amount);
+ const host=$('storageDeletedAccounts');host.replaceChildren(storageAccountTable(page.items||[],true));
+ if(!page.items?.length)host.textContent='暂无已删除账户的历史占用。';
+ const nav=document.createElement('div');nav.className='browse-pager';
+ const previous=makeButton('上一页',()=>run(()=>loadDeletedAccountStorage(Math.max(0,page.offset-50)))),next=makeButton('下一页',()=>run(()=>loadDeletedAccountStorage(page.offset+50)));
+ previous.disabled=page.offset===0;next.disabled=page.offset+(page.items||[]).length>=page.total;
+ const status=document.createElement('span');status.textContent=page.total?(page.offset+1)+'–'+(page.offset+page.items.length)+' / '+page.total:'0 / 0';nav.append(previous,status,next);nav.hidden=page.total<=50;host.append(nav);
 }
 async function loadStorage(){
  if(!state.user||!isAdministrator())return;if(storageLoadJob)return storageLoadJob;
  const generation=storageGeneration,userID=state.user.id;storageLoading=true;
  const job=(async()=>{try{const data=await api('admin/storage');if(generation!==storageGeneration||state.user?.id!==userID)return;
-  storageView=data;if(!storageDirty)$('storageReserve').value=data.policy.reserve_bytes/1048576;renderStorageVolumes();renderStorageAccounts();
+  storageView=data;if(!storageDirty)$('storageReserve').value=data.policy.reserve_bytes/1048576;renderStorageVolumes();
  }finally{if(generation===storageGeneration){storageLoading=false;storageLoadJob=null}}})();
  storageLoadJob=job;return job;
 }
 function clearStorageWorkspace(){
- ++storageGeneration;storageLoading=false;storageDirty=false;storageView=null;storageLoadJob=null;quotaDraft=null;
+ ++storageGeneration;storageLoading=false;storageDirty=false;storageView=null;storageLoadJob=null;quotaDraft=null;accountStorageCache.clear();deletedStoragePage=null;
  if($('quotaEditor')?.open)$('quotaEditor').close();
  for(const id of ['storageSummary','storageBreakdown','storageAccounts','storageDeletedAccounts','storageResult','storagePolicyResult'])if($(id))$(id).replaceChildren();
- if($('storageDeleted'))$('storageDeleted').hidden=true;
+ if($('storageDeleted')){$('storageDeleted').open=false;$('storageDeleted').querySelector('summary').textContent='已删除账户占用';}
 }

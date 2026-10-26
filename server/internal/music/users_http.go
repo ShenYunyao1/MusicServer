@@ -65,19 +65,16 @@ func (a *API) adminUsers(response http.ResponseWriter, request *http.Request) {
 			}
 			writeJSON(response, 200, users)
 		case "POST":
-			var body struct {
-				Username    string `json:"username"`
-				DisplayName string `json:"display_name"`
-			}
-			if decodeStrict(request, &body) != nil {
-				writeError(response, 400, "INVALID_USER", "invalid account request")
+			var body AdminMemberCreate
+			if decodeStrict(request, &body) != nil || body.QuotaBytes == nil {
+				writeError(response, 400, "INVALID_USER", "请明确设置账户额度；0 表示不限额")
 				return
 			}
 			if !a.userHashSlot(response) {
 				return
 			}
 			defer func() { <-a.hashSlots }()
-			created, err := a.store.CreateMember(body.Username, body.DisplayName, mutationOptions(request))
+			created, err := a.store.CreateMemberWithPolicy(body, mutationOptions(request))
 			if err != nil {
 				writeUserError(response, err)
 				return
