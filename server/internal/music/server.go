@@ -272,6 +272,9 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		a.accountStorage(response, request)
 		return
 	}
+	if a.trackTagsHTTP(response, request) {
+		return
+	}
 	if strings.HasPrefix(request.URL.Path, "/api/v2/auth/") && !strings.HasPrefix(request.URL.Path, "/api/v2/auth/keys") {
 		a.accountAuth(response, request)
 		return

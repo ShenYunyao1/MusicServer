@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -21,12 +22,18 @@ func migrationSnapshot(t *testing.T, db *sql.DB) map[string][]string {
 		t.Fatal(err)
 	}
 	var names []string
+	legacyTables := map[string]bool{"sqlite_sequence": true}
+	for _, match := range regexp.MustCompile(`CREATE TABLE (\w+)`).FindAllStringSubmatch(sqliteSchema, -1) {
+		legacyTables[match[1]] = true
+	}
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {
 			t.Fatal(err)
 		}
-		names = append(names, name)
+		if legacyTables[name] {
+			names = append(names, name)
+		}
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)

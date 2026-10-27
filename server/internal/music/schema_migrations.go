@@ -107,9 +107,8 @@ func initializeSQLiteSchemaWithMigrations(db *sql.DB, target int, migrations []s
 	return tx.Commit()
 }
 
-// P01 rehearses the migration ledger only. P02 must finalize the tag DDL here
-// before version.Schema becomes 8; a schema 8 database is not emitted by the
-// current server's normal startup or restore entry points.
+// P02 adds the relational tag dictionary and links. Schema 8 is still private:
+// the current server's normal startup and restore entry points target schema 7.
 func migrateSQLite7To8(tx *sql.Tx) error {
 	_, err := tx.Exec(`CREATE TABLE schema_migrations (
 from_version INTEGER NOT NULL,
@@ -117,5 +116,9 @@ to_version INTEGER PRIMARY KEY,
 applied_at TEXT NOT NULL,
 CHECK(from_version < to_version));
 INSERT INTO schema_migrations VALUES(7,8,strftime('%Y-%m-%dT%H:%M:%fZ','now'));`)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(tagSchema)
 	return err
 }
