@@ -151,6 +151,10 @@ func (s *Store) backupDirectory() string { return filepath.Join(filepath.Dir(s.d
 // snapshot is copied. Application media writes publish new immutable paths, so
 // compression need not hold the publication lock after taking the snapshot.
 func (s *Store) CreateBackupBundle(ctx context.Context, includeMedia bool, progress func(string, int64, int64), automatic ...bool) (BackupArchive, error) {
+	return s.createBackupBundleForTarget(ctx, includeMedia, progress, version.Schema, automatic...)
+}
+
+func (s *Store) createBackupBundleForTarget(ctx context.Context, includeMedia bool, progress func(string, int64, int64), target int, automatic ...bool) (BackupArchive, error) {
 	if err := backupAcquire(ctx, s.backupBundleMu.TryLock); err != nil {
 		return BackupArchive{}, err
 	}
@@ -175,6 +179,13 @@ func (s *Store) CreateBackupBundle(ctx context.Context, includeMedia bool, progr
 		return BackupArchive{}, err
 	}
 	defer db.Close()
+	schema, err := sqliteSchemaIdentity(db)
+	if err != nil {
+		return BackupArchive{}, err
+	}
+	if !version.KnownSchema(target) || schema != target {
+		return BackupArchive{}, errors.New("backup database schema differs from target")
+	}
 	tracks, err := queryJSON[Track](db, "SELECT payload FROM tracks ORDER BY path")
 	if err != nil {
 		return BackupArchive{}, err
@@ -194,7 +205,7 @@ func (s *Store) CreateBackupBundle(ctx context.Context, includeMedia bool, progr
 	if writeErr != nil || closeErr != nil {
 		return BackupArchive{}, errors.Join(writeErr, closeErr)
 	}
-	manifest := BackupManifest{Format: 1, ID: uuid.NewString(), CreatedAt: time.Now().UTC(), Version: version.Version, Schema: version.Schema, IncludeMedia: includeMedia, Files: []BackupFile{}, MissingMedia: []string{}}
+	manifest := BackupManifest{Format: 1, ID: uuid.NewString(), CreatedAt: time.Now().UTC(), Version: version.Version, Schema: schema, IncludeMedia: includeMedia, Files: []BackupFile{}, MissingMedia: []string{}}
 	manifest.Automatic = len(automatic) > 0 && automatic[0]
 	inputs := []backupInput{{BackupFile: BackupFile{Path: "database.sqlite"}, Local: snapshot}, {BackupFile: BackupFile{Path: "config.json"}, Local: configPath}}
 	root, err := os.OpenRoot(s.mediaRoot)

@@ -30,11 +30,12 @@ type Package struct {
 	SHA256 string `json:"sha256"`
 }
 type Manifest struct {
-	Format   int       `json:"format"`
-	Version  string    `json:"version"`
-	Commit   string    `json:"commit"`
-	Schema   int       `json:"schema"`
-	Packages []Package `json:"packages"`
+	Format      int       `json:"format"`
+	Version     string    `json:"version"`
+	Commit      string    `json:"commit"`
+	Schema      int       `json:"schema"`
+	MigrateFrom []int     `json:"migrate_from,omitempty"`
+	Packages    []Package `json:"packages"`
 }
 
 func VerifyManifest(data, signature, key []byte) (Manifest, error) {
@@ -46,8 +47,11 @@ func VerifyManifest(data, signature, key []byte) (Manifest, error) {
 	if err = json.Unmarshal(data, &result); err != nil {
 		return result, err
 	}
-	if result.Format != 1 || !versionTag.MatchString(result.Version) || strings.HasPrefix(result.Version, "v") || !regexp.MustCompile(`^[a-f0-9]{40}$`).MatchString(result.Commit) || result.Schema < 1 {
+	if result.Format != 1 || !versionTag.MatchString(result.Version) || strings.HasPrefix(result.Version, "v") || !regexp.MustCompile(`^[a-f0-9]{40}$`).MatchString(result.Commit) || !version.KnownSchema(result.Schema) {
 		return result, errors.New("invalid release manifest identity")
+	}
+	if err := validateMigrations(result); err != nil {
+		return result, err
 	}
 	seen := map[string]bool{}
 	for _, p := range result.Packages {
@@ -133,4 +137,36 @@ func syncDir(path string) error {
 	defer d.Close()
 	return d.Sync()
 }
-func compatible(manifest Manifest) bool { return manifest.Schema == version.Schema }
+func validateMigrations(manifest Manifest) error {
+	if !version.KnownSchema(manifest.Schema) {
+		return errors.New("unknown database schema")
+	}
+	seen := map[int]bool{}
+	for _, source := range manifest.MigrateFrom {
+		if seen[source] || !version.KnownSchema(source) || !version.CanMigrateSchema(source, manifest.Schema) {
+			return errors.New("unsupported or duplicate release schema migration")
+		}
+		seen[source] = true
+	}
+	return nil
+}
+
+func compatibleFrom(manifest Manifest, source int) bool {
+	if !version.KnownSchema(source) || validateMigrations(manifest) != nil {
+		return false
+	}
+	if source == manifest.Schema {
+		return true
+	}
+	if !version.CanMigrateSchema(source, manifest.Schema) {
+		return false
+	}
+	for _, declared := range manifest.MigrateFrom {
+		if declared == source {
+			return true
+		}
+	}
+	return false
+}
+
+func compatible(manifest Manifest) bool { return compatibleFrom(manifest, version.Schema) }

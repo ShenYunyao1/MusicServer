@@ -26,7 +26,7 @@ func testReleaseArchive(t *testing.T, binary []byte, manifest Manifest) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, data := range map[string][]byte{"musicserver": binary, "build.json": identity} {
+	for name, data := range map[string][]byte{"musicserver": binary, "musicserver-updater": []byte("verified updater"), "build.json": identity} {
 		if err := tr.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeReg, Mode: 0777, Size: int64(len(data))}); err != nil {
 			t.Fatal(err)
 		}
@@ -63,7 +63,7 @@ func TestExtractReleaseWithRestrictedUmask(t *testing.T) {
 		if err := ExtractRelease(os.Getenv("MUSIC_EXTRACT_ARCHIVE"), dest, manifest); err != nil {
 			t.Fatal(err)
 		}
-		for name, mode := range map[string]os.FileMode{"musicserver": 0755, "build.json": 0644} {
+		for name, mode := range map[string]os.FileMode{"musicserver": 0755, "musicserver-updater": 0755, "build.json": 0644} {
 			info, err := os.Stat(filepath.Join(dest, name))
 			if err != nil {
 				t.Fatal(err)
@@ -71,6 +71,9 @@ func TestExtractReleaseWithRestrictedUmask(t *testing.T) {
 			if info.Mode().Perm() != mode {
 				t.Fatalf("%s mode=%04o, want %04o independent of worker umask", name, info.Mode().Perm(), mode)
 			}
+		}
+		if data, err := os.ReadFile(filepath.Join(dest, "musicserver-updater")); err != nil || string(data) != "verified updater" {
+			t.Fatalf("updater content differs: %q %v", data, err)
 		}
 		return
 	}

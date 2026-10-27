@@ -13,11 +13,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 
 	"golang.org/x/sys/unix"
 	_ "modernc.org/sqlite"
+	"musicserver/internal/version"
 )
 
 func LoadInstaller(configPath string) (*Installer, error) {
@@ -64,15 +66,22 @@ func LoadInstaller(configPath string) (*Installer, error) {
 	i.Restore = func(source string) error {
 		return restoreDatabase(source, config.Database)
 	}
+	i.CheckDatabase = verifyDatabaseSchema
 	i.Prepare = func(ctx context.Context, v string) (Manifest, string, error) {
+		_, current, err := i.previous()
+		if err != nil {
+			return Manifest{}, "", err
+		}
 		m := NewManager(filepath.Join(config.State, "downloads"), func() string { return Repository })
 		defer m.Close()
+		m.installedSchema = current.Schema
+		m.workerState = filepath.Join(config.State, "job.json")
 		status, err := m.checkRelease(ctx, Status{Repository: Repository}, strings.TrimPrefix(Repository, "https://github.com/"), "tags/v"+v, false)
 		if err != nil {
 			return Manifest{}, "", err
 		}
 		if !status.Compatible {
-			return Manifest{}, "", errors.New("database schema is incompatible")
+			return Manifest{}, "", errors.New(status.Message)
 		}
 		plan := m.plan
 		if plan == nil {
@@ -174,7 +183,10 @@ func backupDatabase(source, target string) error {
 	}
 	return verifyDatabase(target)
 }
-func verifyDatabase(path string) error {
+func verifyDatabase(path string) error { return verifyDatabaseSchema(path, 0) }
+
+// expected=0 still requires a finite known schema and matching PRAGMA/meta identity.
+func verifyDatabaseSchema(path string, expected int) error {
 	info, err := os.Lstat(path)
 	if err != nil {
 		return err
@@ -196,6 +208,20 @@ func verifyDatabase(path string) error {
 	}
 	if result != "ok" {
 		return errors.New("database backup integrity check failed")
+	}
+	var schema int
+	var metadata string
+	if err = db.QueryRow("PRAGMA user_version").Scan(&schema); err != nil {
+		return err
+	}
+	if !version.KnownSchema(schema) || expected != 0 && schema != expected {
+		return errors.New("database schema is unknown or differs from installed release")
+	}
+	if err = db.QueryRow("SELECT value FROM meta WHERE key='schema_version'").Scan(&metadata); err != nil {
+		return err
+	}
+	if metadata != strconv.Itoa(schema) {
+		return errors.New("database PRAGMA and metadata schema identity differ")
 	}
 	return nil
 }

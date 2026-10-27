@@ -19,6 +19,10 @@ import (
 )
 
 func readBackupManifest(archive *tar.Reader) (BackupManifest, error) {
+	return readBackupManifestForTarget(archive, version.Schema)
+}
+
+func readBackupManifestForTarget(archive *tar.Reader, target int) (BackupManifest, error) {
 	var manifest BackupManifest
 	header, err := archive.Next()
 	if err != nil || header.Name != "manifest.json" || header.Typeflag != tar.TypeReg || header.Size < 1 || header.Size > maxBackupManifest {
@@ -29,7 +33,8 @@ func readBackupManifest(archive *tar.Reader) (BackupManifest, error) {
 	if err := decoder.Decode(&manifest); err != nil {
 		return manifest, errors.New("invalid backup manifest JSON")
 	}
-	if decoder.Decode(new(any)) != io.EOF || manifest.Format != 1 || manifest.Schema != version.Schema || manifest.CreatedAt.IsZero() || len(manifest.Files) < 2 || len(manifest.Files) > maxBackupFiles {
+	compatible := version.KnownSchema(target) && version.KnownSchema(manifest.Schema) && (manifest.Schema == target || version.CanMigrateSchema(manifest.Schema, target))
+	if decoder.Decode(new(any)) != io.EOF || manifest.Format != 1 || !compatible || manifest.CreatedAt.IsZero() || len(manifest.Files) < 2 || len(manifest.Files) > maxBackupFiles {
 		return manifest, errors.New("invalid or incompatible backup manifest")
 	}
 	if _, err := backupArchiveName(manifest.ID); err != nil {
@@ -97,6 +102,10 @@ func (s *Store) BackupArchives() ([]BackupArchive, error) {
 // RestoreBackup never overwrites a running library: the destination must be a
 // new or empty directory. All extraction and verification happens in a sibling.
 func RestoreBackup(ctx context.Context, archivePath, destination string) (BackupManifest, error) {
+	return restoreBackupForTarget(ctx, archivePath, destination, version.Schema)
+}
+
+func restoreBackupForTarget(ctx context.Context, archivePath, destination string, targetSchema int) (BackupManifest, error) {
 	var manifest BackupManifest
 	target, err := filepath.Abs(destination)
 	if err != nil || strings.TrimSpace(destination) == "" {
@@ -124,7 +133,7 @@ func RestoreBackup(ctx context.Context, archivePath, destination string) (Backup
 	}
 	defer compressed.Close()
 	archive := tar.NewReader(compressed)
-	manifest, err = readBackupManifest(archive)
+	manifest, err = readBackupManifestForTarget(archive, targetSchema)
 	if err != nil {
 		return manifest, err
 	}
@@ -195,7 +204,7 @@ func RestoreBackup(ctx context.Context, archivePath, destination string) (Backup
 	if n, err := backupCopy(ctx, io.Discard, io.LimitReader(compressed, 1), nil); err != nil || n != 0 {
 		return manifest, errors.New("invalid backup compression checksum or trailing data")
 	}
-	if err := prepareRestoredDatabase(filepath.Join(temporary, "data/library.sqlite"), target); err != nil {
+	if err := prepareRestoredDatabaseForTarget(filepath.Join(temporary, "data/library.sqlite"), target, manifest.Schema, targetSchema); err != nil {
 		return manifest, err
 	}
 	if err := ctx.Err(); err != nil {
@@ -211,16 +220,25 @@ func RestoreBackup(ctx context.Context, archivePath, destination string) (Backup
 }
 
 func prepareRestoredDatabase(path, mediaRoot string) error {
+	return prepareRestoredDatabaseForTarget(path, mediaRoot, version.Schema, version.Schema)
+}
+
+func prepareRestoredDatabaseForTarget(path, mediaRoot string, declaredSchema, target int) error {
 	db, err := openSQLite(path)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	var schema int
-	if err := db.QueryRow("PRAGMA user_version").Scan(&schema); err != nil || schema != version.Schema {
-		return errors.New("restored database schema is incompatible")
+	// Verify the archive identity against both database declarations before any
+	// migration can overwrite them and hide a corrupt or misleading manifest.
+	schema, err := sqliteSchemaIdentity(db)
+	if err != nil {
+		return err
 	}
-	if err := initializeSQLiteSchema(db); err != nil {
+	if schema != declaredSchema {
+		return errors.New("restored database schema differs from backup manifest")
+	}
+	if err := initializeSQLiteSchemaForTarget(db, target); err != nil {
 		return err
 	}
 	var integrity string

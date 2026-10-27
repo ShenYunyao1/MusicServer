@@ -41,7 +41,7 @@ func TestArchiveRejectsTraversalLinksAndWrongIdentity(t *testing.T) {
 		name    string
 		kind    byte
 		content string
-	}{{"../outside", tar.TypeReg, "x"}, {"/etc/x", tar.TypeReg, "x"}, {"musicserver", tar.TypeSymlink, ""}, {"build.json", tar.TypeReg, `{"version":"0.0.0"}`}} {
+	}{{"../outside", tar.TypeReg, "x"}, {"/etc/x", tar.TypeReg, "x"}, {"musicserver", tar.TypeSymlink, ""}, {"musicserver-updater", tar.TypeSymlink, ""}, {"build.json", tar.TypeReg, `{"version":"0.0.0"}`}} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
 			path := filepath.Join(root, "package.tar.gz")
@@ -57,6 +57,69 @@ func TestArchiveRejectsTraversalLinksAndWrongIdentity(t *testing.T) {
 			os.Mkdir(dest, 0700)
 			if err := ExtractRelease(path, dest, Manifest{Version: "9.0.0"}); err == nil {
 				t.Fatal("unsafe archive accepted")
+			}
+		})
+	}
+}
+
+func TestArchiveRequiresSignedMigrationIdentityAndUniqueUpdater(t *testing.T) {
+	expected := Manifest{Version: "9.0.0", Commit: strings.Repeat("a", 40), Schema: 8, MigrateFrom: []int{7}}
+	for _, tc := range []struct {
+		name      string
+		from      []int
+		duplicate bool
+		valid     bool
+	}{
+		{"matching", []int{7}, false, true},
+		{"missing declaration", nil, false, false},
+		{"extra declaration", []int{7, 7}, false, false},
+		{"duplicate updater", []int{7}, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, "release.tar.gz")
+			f, err := os.Create(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			gz := gzip.NewWriter(f)
+			tr := tar.NewWriter(gz)
+			build := expected
+			build.MigrateFrom = tc.from
+			identity, _ := json.Marshal(build)
+			names := []string{"musicserver", "build.json", "musicserver-updater"}
+			if tc.duplicate {
+				names = append(names, "musicserver-updater")
+			}
+			for _, name := range names {
+				data := []byte("executable")
+				if name == "build.json" {
+					data = identity
+				}
+				if err = tr.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeReg, Size: int64(len(data))}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err = tr.Write(data); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, close := range []func() error{tr.Close, gz.Close, f.Close} {
+				if err = close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			dest := filepath.Join(root, "extract")
+			if err = os.Mkdir(dest, 0700); err != nil {
+				t.Fatal(err)
+			}
+			err = ExtractRelease(path, dest, expected)
+			if (err == nil) != tc.valid {
+				t.Fatalf("valid=%t error=%v", tc.valid, err)
+			}
+			if tc.valid {
+				if data, err := os.ReadFile(filepath.Join(dest, "musicserver-updater")); err != nil || string(data) != "executable" {
+					t.Fatalf("helper missing: %q %v", data, err)
+				}
 			}
 		})
 	}

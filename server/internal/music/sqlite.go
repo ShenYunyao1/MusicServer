@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 	"musicserver/internal/version"
@@ -124,45 +123,7 @@ func (s *Store) loadSQLite() error {
 	return err
 }
 func initializeSQLiteSchema(db *sql.DB) error {
-	var version, tables int
-	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
-		return err
-	}
-	if version == sqliteSchemaVersion {
-		var metadata string
-		if err := db.QueryRow("SELECT value FROM meta WHERE key='schema_version'").Scan(&metadata); err != nil {
-			return err
-		}
-		if metadata != strconv.Itoa(sqliteSchemaVersion) {
-			return errors.New("schema metadata mismatch")
-		}
-		return nil
-	}
-	if version != 0 {
-		return fmt.Errorf("unsupported SQLite schema version %d; use a new database for schema %d", version, sqliteSchemaVersion)
-	}
-	if err := db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").Scan(&tables); err != nil {
-		return err
-	}
-	if tables != 0 {
-		return errors.New("existing unversioned database refused; use a new database")
-	}
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err = tx.Exec(sqliteSchema); err != nil {
-		return err
-	}
-	secret, err := randomToken(32)
-	if err != nil {
-		return err
-	}
-	if _, err = tx.Exec("INSERT INTO meta VALUES('sync_secret',?)", secret); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return initializeSQLiteSchemaForTarget(db, sqliteSchemaVersion)
 }
 func persistedTime(value time.Time) string {
 	if value.IsZero() {

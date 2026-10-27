@@ -19,6 +19,14 @@ import (
 )
 
 func TestSystemdInstallAndRollback(t *testing.T) {
+	testSystemdInstallAndRollback(t, 7)
+}
+
+func TestSystemdSchemaMigrationAndRollback(t *testing.T) {
+	testSystemdInstallAndRollback(t, 8)
+}
+
+func testSystemdInstallAndRollback(t *testing.T, targetSchema int) {
 	if os.Getenv("MUSIC_SERVER_SYSTEMD_TEST") != "1" {
 		t.Skip("enable on an isolated Linux systemd runner")
 	}
@@ -86,7 +94,7 @@ func TestSystemdInstallAndRollback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.Exec("CREATE TABLE marker(value TEXT); INSERT INTO marker VALUES('original');")
+	_, err = db.Exec("PRAGMA user_version=7; CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT); INSERT INTO meta VALUES('schema_version','7'); CREATE TABLE marker(value TEXT); INSERT INTO marker VALUES('original');")
 	db.Close()
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +102,10 @@ func TestSystemdInstallAndRollback(t *testing.T) {
 	os.Chown(database, uid, gid)
 	old := Manifest{Version: "0.13.0", Commit: strings.Repeat("1", 40), Schema: 7}
 	prepare := func(_ context.Context, v string) (Manifest, string, error) {
-		manifest := Manifest{Version: v, Commit: strings.Repeat("2", 40), Schema: 7}
+		manifest := Manifest{Version: v, Commit: strings.Repeat("2", 40), Schema: targetSchema}
+		if targetSchema == 8 {
+			manifest.MigrateFrom = []int{7}
+		}
 		if v == old.Version {
 			manifest = old
 		}
@@ -121,7 +132,7 @@ func TestSystemdInstallAndRollback(t *testing.T) {
 	if out, err := exec.Command("systemctl", "daemon-reload").CombinedOutput(); err != nil {
 		t.Fatalf("daemon reload: %v %s", err, out)
 	}
-	i := Installer{Config: InstallConfig{Root: root, State: filepath.Join(root, "state"), Database: database}, Stop: command("stop"), Start: command("start"), Prepare: prepare, Backup: func(p string) error { return backupDatabase(database, p) }, Restore: func(p string) error { return restoreDatabase(p, database) }}
+	i := Installer{Config: InstallConfig{Root: root, State: filepath.Join(root, "state"), Database: database}, Stop: command("stop"), Start: command("start"), Prepare: prepare, Backup: func(p string) error { return backupDatabase(database, p) }, Restore: func(p string) error { return restoreDatabase(p, database) }, CheckDatabase: verifyDatabaseSchema}
 	i.Healthy = func(ctx context.Context, m Manifest) error {
 		ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		defer cancel()
@@ -134,6 +145,19 @@ func TestSystemdInstallAndRollback(t *testing.T) {
 	}
 	if err = i.Healthy(ctx, old); err != nil {
 		t.Fatal(err)
+	}
+	if targetSchema == 8 {
+		// Fail after the candidate has really migrated the database under a
+		// non-root systemd service, then verify old program + schema 7 recovery.
+		if err = i.Install(ctx, Request{ID: strings.Repeat("d", 32), Version: "10.0.0"}); err == nil {
+			t.Fatal("failed cross-schema startup was accepted")
+		}
+		if err := verifyDatabaseSchema(database, 7); err != nil {
+			t.Fatal("cross-schema rollback did not restore schema 7", err)
+		}
+		if err := i.Healthy(ctx, old); err != nil {
+			t.Fatal("old program was not restored after failed migration", err)
+		}
 	}
 	if err = i.Install(ctx, Request{ID: strings.Repeat("a", 32), Version: "9.0.0"}); err != nil {
 		t.Fatal(err)
@@ -158,6 +182,9 @@ func TestSystemdInstallAndRollback(t *testing.T) {
 	db.Close()
 	if err != nil || marker != "original" {
 		t.Fatalf("database rollback: %s %v", marker, err)
+	}
+	if err := verifyDatabaseSchema(database, targetSchema); err != nil {
+		t.Fatal("successful migration identity not retained after later rollback", err)
 	}
 	// Crash after switching: a fresh worker must restore the preceding program and database.
 	job.ID = strings.Repeat("c", 32)

@@ -36,7 +36,11 @@ func testManager(t *testing.T, tag, digest string, payload []byte, schemas ...in
 	if len(schemas) > 0 {
 		schema = schemas[0]
 	}
-	manifest, _ := json.Marshal(Manifest{Format: 1, Version: strings.TrimPrefix(tag, "v"), Commit: strings.Repeat("a", 40), Schema: schema, Packages: []Package{{Name: name, OS: runtime.GOOS, Arch: runtime.GOARCH, Size: int64(len(payload)), SHA256: strings.TrimPrefix(digest, "sha256:")}}})
+	var migrateFrom []int
+	if len(schemas) > 1 {
+		migrateFrom = schemas[1:]
+	}
+	manifest, _ := json.Marshal(Manifest{Format: 1, Version: strings.TrimPrefix(tag, "v"), Commit: strings.Repeat("a", 40), Schema: schema, MigrateFrom: migrateFrom, Packages: []Package{{Name: name, OS: runtime.GOOS, Arch: runtime.GOARCH, Size: int64(len(payload)), SHA256: strings.TrimPrefix(digest, "sha256:")}}})
 	signature := []byte(base64.StdEncoding.EncodeToString(ed25519.Sign(key, manifest)))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if os.Getenv("MUSIC_SERVER_GITHUB_TOKEN") != "" && r.Header.Get("Authorization") != "Bearer fixture-token" {
@@ -150,11 +154,11 @@ func TestRepositoryValidation(t *testing.T) {
 func TestCheckRefusesIncompatibleSchemaWithoutDownload(t *testing.T) {
 	sum := sha256.Sum256([]byte("future schema"))
 	m, _ := testManager(t, "9.0.0", "sha256:"+hex.EncodeToString(sum[:]), []byte("future schema"), 999)
-	if err := m.Check(context.Background()); err != nil {
-		t.Fatal(err)
+	if err := m.Check(context.Background()); err == nil {
+		t.Fatal("unknown manifest schema was accepted")
 	}
 	s := m.Status()
-	if s.State != "incompatible" || s.Compatible || s.PackagePath != "" {
+	if s.State != "error" || s.Compatible || s.PackagePath != "" {
 		t.Fatalf("incompatible update accepted: %+v", s)
 	}
 	if err := m.Prepare(context.Background()); err == nil {

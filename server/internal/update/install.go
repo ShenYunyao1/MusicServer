@@ -12,8 +12,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
+
+	"musicserver/internal/version"
 )
 
 var jobID = regexp.MustCompile(`^[a-f0-9]{32}$`)
@@ -49,13 +52,14 @@ type InstallConfig struct {
 	Service   string `json:"service"`
 }
 type Installer struct {
-	Config  InstallConfig
-	Stop    func(context.Context) error
-	Start   func(context.Context) error
-	Healthy func(context.Context, Manifest) error
-	Prepare func(context.Context, string) (Manifest, string, error)
-	Backup  func(string) error
-	Restore func(string) error
+	Config        InstallConfig
+	Stop          func(context.Context) error
+	Start         func(context.Context) error
+	Healthy       func(context.Context, Manifest) error
+	Prepare       func(context.Context, string) (Manifest, string, error)
+	Backup        func(string) error
+	Restore       func(string) error
+	CheckDatabase func(path string, schema int) error
 }
 
 func (i *Installer) loadJob() (Job, error) {
@@ -95,7 +99,7 @@ func (i *Installer) previous() (string, Manifest, error) {
 	if err == nil {
 		err = json.Unmarshal(data, &build)
 	}
-	if err == nil && (!versionTag.MatchString(build.Version) || build.Schema < 1) {
+	if err == nil && (!versionTag.MatchString(build.Version) || !version.KnownSchema(build.Schema)) {
 		err = errors.New("invalid installed build identity")
 	}
 	return current, build, err
@@ -140,8 +144,18 @@ func (i *Installer) Install(ctx context.Context, r Request) (err error) {
 	if err != nil {
 		return err
 	}
-	if manifest.Version != r.Version || manifest.Schema != current.Schema {
+	actualPrevious, actualCurrent, err := i.previous()
+	if err != nil {
+		return err
+	}
+	if actualPrevious != previous || actualCurrent.Version != current.Version || actualCurrent.Commit != current.Commit || actualCurrent.Schema != current.Schema || !slices.Equal(actualCurrent.MigrateFrom, current.MigrateFrom) {
+		return errors.New("installed release changed during update preparation")
+	}
+	if manifest.Version != r.Version || !compatibleFrom(manifest, current.Schema) {
 		return errors.New("release version or database schema is incompatible")
+	}
+	if manifest.Schema != current.Schema && i.CheckDatabase == nil {
+		return errors.New("database schema migration requires an explicit source database check")
 	}
 	order, err := compareVersions(manifest.Version, current.Version)
 	if err != nil || order <= 0 {
@@ -168,6 +182,11 @@ func (i *Installer) Install(ctx context.Context, r Request) (err error) {
 	}
 	if err = i.Backup(j.Backup); err != nil {
 		return fmt.Errorf("final database backup: %w", err)
+	}
+	if i.CheckDatabase != nil {
+		if err = i.CheckDatabase(j.Backup, current.Schema); err != nil {
+			return fmt.Errorf("source database backup identity: %w", err)
+		}
 	}
 	j.RestoreRequired = true
 	if err = i.save(&j, "switching", ""); err != nil {
@@ -212,6 +231,19 @@ func (i *Installer) rollback(ctx context.Context, j *Job, reason string) error {
 		return fail(err)
 	}
 	if restore {
+		var old Manifest
+		data, err := os.ReadFile(filepath.Join(j.Previous, "build.json"))
+		if err != nil {
+			return fail(err)
+		}
+		if err = json.Unmarshal(data, &old); err != nil || !version.KnownSchema(old.Schema) {
+			return fail(errors.New("invalid previous database schema"))
+		}
+		if i.CheckDatabase != nil {
+			if err = i.CheckDatabase(j.Backup, old.Schema); err != nil {
+				return fail(fmt.Errorf("rollback backup identity: %w", err))
+			}
+		}
 		if err := i.Restore(j.Backup); err != nil {
 			return fail(err)
 		}
@@ -398,11 +430,11 @@ func ExtractRelease(archive, dest string, expected Manifest) error {
 			return fmt.Errorf("unsafe release archive member %q", name)
 		}
 		seen[name] = true
-		if name != "musicserver" && name != "build.json" {
+		if name != "musicserver" && name != "musicserver-updater" && name != "build.json" {
 			continue
 		}
 		mode := os.FileMode(0644)
-		if name == "musicserver" {
+		if name == "musicserver" || name == "musicserver-updater" {
 			mode = 0755
 		}
 		out, e := os.OpenFile(filepath.Join(dest, name), os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
@@ -437,7 +469,7 @@ func ExtractRelease(archive, dest string, expected Manifest) error {
 	if err = json.Unmarshal(data, &build); err != nil {
 		return err
 	}
-	if build.Version != expected.Version || build.Commit != expected.Commit || build.Schema != expected.Schema {
+	if build.Version != expected.Version || build.Commit != expected.Commit || build.Schema != expected.Schema || !slices.Equal(build.MigrateFrom, expected.MigrateFrom) {
 		return errors.New("archive build identity differs from signed manifest")
 	}
 	return syncDir(dest)

@@ -62,21 +62,23 @@ type release struct {
 }
 
 type Manager struct {
-	mu          sync.Mutex
-	status      Status
-	dir         string
-	repository  func() string
-	client      *http.Client
-	apiBase     string
-	allowHTTP   bool // Test servers only; production URLs must use HTTPS.
-	publicKey   []byte
-	plan        *releasePlan
-	queueDir    string
-	workerState string
-	context     context.Context
-	cancel      context.CancelFunc
-	workers     sync.WaitGroup
-	closed      bool
+	mu               sync.Mutex
+	status           Status
+	dir              string
+	repository       func() string
+	client           *http.Client
+	apiBase          string
+	allowHTTP        bool // Test servers only; production URLs must use HTTPS.
+	publicKey        []byte
+	plan             *releasePlan
+	queueDir         string
+	workerState      string
+	installedSchema  int                                      // Worker uses the installed build identity, not its compiled schema.
+	readCapabilities func(string) (workerCapabilities, error) // Private test seam; production validates root ownership.
+	context          context.Context
+	cancel           context.CancelFunc
+	workers          sync.WaitGroup
+	closed           bool
 }
 
 func NewManager(dir string, repository func() string) *Manager {
@@ -139,7 +141,29 @@ func (m *Manager) Status() Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	status := m.status
-	status.CanInstall = runtime.GOOS == "linux" && m.queueDir != "" && m.workerState != "" && status.Repository == Repository
+	if m.plan == nil && status.Schema != 0 {
+		if err := m.workerCapabilityError(m.sourceSchema(), status.Schema); err != nil {
+			status.Compatible = false
+			if status.State == "available" || status.State == "incompatible" {
+				status.State, status.Message = "incompatible", err.Error()
+			}
+		}
+	}
+	if m.plan != nil && m.plan.Manifest.Version == status.LatestVersion && m.plan.Repository == status.Repository {
+		if err := m.compatibilityError(m.plan.Manifest); err != nil {
+			status.Compatible = false
+			status.CanInstall = false
+			if status.State == "available" || status.State == "incompatible" {
+				status.State, status.Message = "incompatible", err.Error()
+			}
+		} else {
+			status.Compatible = true
+			if status.State == "incompatible" {
+				status.State, status.Message = "available", ""
+			}
+		}
+	}
+	status.CanInstall = runtime.GOOS == "linux" && m.queueDir != "" && m.workerState != "" && status.Repository == Repository && status.Compatible && m.plan != nil
 	if status.JobID != "" && m.workerState != "" {
 		var job Job
 		if data, err := os.ReadFile(m.workerState); err == nil && json.Unmarshal(data, &job) == nil && job.ID == status.JobID {
@@ -354,7 +378,10 @@ func (m *Manager) checkRelease(ctx context.Context, status Status, path, ref str
 	if manifest.Version != status.LatestVersion {
 		return status, errors.New("manifest version differs from release tag")
 	}
-	status.Commit, status.Schema, status.Notes, status.Compatible = manifest.Commit, manifest.Schema, latest.Body, compatible(manifest)
+	m.mu.Lock()
+	compatibilityErr := m.compatibilityError(manifest)
+	m.mu.Unlock()
+	status.Commit, status.Schema, status.Notes, status.Compatible = manifest.Commit, manifest.Schema, latest.Body, compatibilityErr == nil
 	pkg, err := manifest.Platform(runtime.GOOS, runtime.GOARCH)
 	if err != nil {
 		return status, err
@@ -380,7 +407,7 @@ func (m *Manager) checkRelease(ctx context.Context, status Status, path, ref str
 		status.State = "available"
 		if !status.Compatible {
 			status.State = "incompatible"
-			status.Message = "database schema differs; manual upgrade required (data will not be cleared)"
+			status.Message = compatibilityErr.Error()
 		}
 		return status, nil
 	}
@@ -433,11 +460,15 @@ func (m *Manager) manifest(ctx context.Context, latest release) (Manifest, error
 // Prepare downloads a verified package without installing it. Checks never call this.
 func (m *Manager) Prepare(ctx context.Context) error {
 	m.mu.Lock()
-	if m.closed || m.status.State != "available" || m.plan == nil || m.plan.Repository != m.repository() {
+	if m.closed || (m.status.State != "available" && m.status.State != "incompatible") || m.plan == nil || m.plan.Repository != m.repository() {
 		m.mu.Unlock()
 		return errors.New("check a compatible release first")
 	}
 	plan := *m.plan
+	if err := m.compatibilityError(plan.Manifest); err != nil {
+		m.mu.Unlock()
+		return err
+	}
 	status := m.status
 	m.status.State = "downloading"
 	m.workers.Add(1)
@@ -477,7 +508,13 @@ func (m *Manager) Apply(expected string) error {
 	if m.closed || runtime.GOOS != "linux" || m.queueDir == "" || m.workerState == "" || m.repository() != Repository {
 		return errors.New("automatic installation requires the Ubuntu systemd updater; Windows supports release checks and manual installation")
 	}
-	if m.jobActiveLocked() || m.status.State != "available" || !m.status.Compatible || m.status.LatestVersion != expected || m.status.Repository != m.repository() {
+	if m.plan == nil {
+		return errors.New("check a verified compatible release first")
+	}
+	if err := m.compatibilityError(m.plan.Manifest); err != nil {
+		return err
+	}
+	if m.jobActiveLocked() || (m.status.State != "available" && m.status.State != "incompatible") || m.status.LatestVersion != expected || m.status.Repository != m.repository() || m.plan.Manifest.Version != expected || m.plan.Repository != m.repository() {
 		return errors.New("release changed or update is busy; check again")
 	}
 	token := make([]byte, 16)

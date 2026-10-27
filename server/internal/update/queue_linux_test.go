@@ -15,6 +15,7 @@ func TestApplyPersistsVersionOnlyRequestAndRejectsConcurrentApply(t *testing.T) 
 	defer m.Close()
 	m.ConfigureInstaller(filepath.Join(root, "queue"), filepath.Join(root, "job.json"))
 	m.status = Status{Repository: Repository, State: "available", Compatible: true, LatestVersion: "9.0.0"}
+	m.plan = &releasePlan{Manifest: Manifest{Version: "9.0.0", Schema: 7}, Repository: Repository}
 	if err := m.Apply("8.0.0"); err == nil {
 		t.Fatal("stale selection accepted")
 	}
