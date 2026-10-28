@@ -42,6 +42,8 @@ function harness() {
       }
     },
     crypto,
+    performance,
+    addEventListener() {},
     setTimeout,
     clearTimeout,
     document: {
@@ -72,10 +74,21 @@ function harness() {
       throw new Error('local preview unexpectedly requested the server');
     },
   });
+  vm.runInContext('globalThis.window = globalThis;', context);
   vm.runInContext(fs.readFileSync(vendorPath, 'utf8'), context, { filename: vendorPath });
   vm.runInContext(script.slice(0, eventOffset), context, { filename: htmlPath });
+  const resumePath = path.join(__dirname, '../internal/music/upload-resume.js');
+  vm.runInContext(fs.readFileSync(resumePath, 'utf8'), context, { filename: resumePath });
   vm.runInContext(
-    'renderUploads = () => {}; localDuration = async () => 0; globalThis.queueState = state;',
+    `renderUploads = () => {}; localDuration = async () => 0; globalThis.queueState = state;
+     state.user = {id:'local-preview-test'};
+     // Test the real staging/preview integration with transport and IDB isolated.
+     // Chunk transfer/checkpoint behavior has its own resumable-ui.cjs suite.
+     resumeQueueStorage.write = async () => {};
+     resumeJSON = async (suffix, method) => !suffix
+       ? {id:'0123456789abcdef0123456789abcdef',state:'ready',size:1,offset:1,chunks:[{offset:0,size:1,sha256:'6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d'}],stage_id:'stage-1'}
+       : api('uploads/resumable'+suffix, method);
+     uploadRequest = (...args) => api(...args);`,
     context,
   );
   return { context, state: context.queueState, urls, revoked, inputs, fetchCount: () => fetchCount };
@@ -141,7 +154,7 @@ function file(name, bytes = Buffer.alloc(0), relativePath = '') {
 
 function uploadFixture(context, name = 'test.mp3') {
   return {
-    ...context.describeFile(file(name), 1),
+    ...context.describeFile(file(name, Buffer.from([0])), 1),
     title: '', artist: '', album: '', genre: '', comment: '', lyrics: '',
     edits: {}, preview: null, localPreview: null, localPromise: null,
     localStatus: '', stageId: null, status: '待暂存',

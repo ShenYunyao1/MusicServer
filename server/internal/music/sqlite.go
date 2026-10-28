@@ -107,6 +107,9 @@ func (s *Store) loadSQLite() error {
 		return err
 	}
 	s.db = db
+	if err := s.prepareSQLiteMigrationBackup(sqliteSchemaVersion); err != nil {
+		return err
+	}
 	if err := initializeSQLiteSchema(db); err != nil {
 		return err
 	}

@@ -101,6 +101,7 @@ func testSystemdInstallAndRollback(t *testing.T, targetSchema int) {
 	}
 	os.Chown(database, uid, gid)
 	old := Manifest{Version: "0.13.0", Commit: strings.Repeat("1", 40), Schema: 7}
+	prepared := map[string]string{}
 	prepare := func(_ context.Context, v string) (Manifest, string, error) {
 		manifest := Manifest{Version: v, Commit: strings.Repeat("2", 40), Schema: targetSchema}
 		if targetSchema == 8 {
@@ -108,6 +109,9 @@ func testSystemdInstallAndRollback(t *testing.T, targetSchema int) {
 		}
 		if v == old.Version {
 			manifest = old
+		}
+		if dir := prepared[v]; dir != "" {
+			return manifest, dir, nil
 		}
 		dir := filepath.Join(releases, v)
 		os.Mkdir(dir, 0755)
@@ -118,6 +122,7 @@ func testSystemdInstallAndRollback(t *testing.T, targetSchema int) {
 		// Exercise the real extraction path under the production worker's
 		// umask, then actually start it as the non-root fixture account.
 		extractRestricted(t, testReleaseArchive(t, data, manifest), dir, manifest)
+		prepared[v] = dir
 		return manifest, dir, nil
 	}
 	_, previous, err := prepare(context.Background(), old.Version)

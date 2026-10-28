@@ -107,6 +107,7 @@ async function main() {
     if(process.env.MUSIC_SERVER_TEST_SHARING_ONLY==='1'){await require('./sharing-ui.cjs')({page,browser,base,directory});return}
     if(process.env.MUSIC_SERVER_TEST_ACCOUNT_DELETE_ONLY==='1'){await require('./account-delete-ui.cjs')({page,browser,base,directory});return}
     if(process.env.MUSIC_SERVER_TEST_BACKUP_ONLY==='1'){await require('./backup-ui.cjs')({page,browser,base,directory});return}
+    if(process.env.MUSIC_SERVER_TEST_TAG_BACKUP_ONLY==='1'){await require('./tag-backup-ui.cjs')({page,browser,base,directory});return}
     if(process.env.MUSIC_SERVER_TEST_RESUMABLE_ONLY==='1'){await require('./resumable-ui.cjs')({page,directory});return}
     if(process.env.MUSIC_SERVER_TEST_STORAGE_ONLY==='1'){await require('./storage-ui.cjs')({page,directory});return}
     if(process.env.MUSIC_SERVER_TEST_SIDEBAR_ONLY==='1'){await require('./sidebar-ui.cjs')({page,directory});return}

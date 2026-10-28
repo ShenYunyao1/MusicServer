@@ -209,6 +209,24 @@ func verifyDatabaseSchema(path string, expected int) error {
 	if result != "ok" {
 		return errors.New("database backup integrity check failed")
 	}
+	// SQLite's structural integrity check does not validate foreign keys.
+	// Reject an inconsistent snapshot before migration or rollback can use it.
+	rows, err := db.Query("PRAGMA foreign_key_check")
+	if err != nil {
+		return err
+	}
+	broken := rows.Next()
+	err = rows.Err()
+	closeErr := rows.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if broken {
+		return errors.New("database backup foreign key check failed")
+	}
 	var schema int
 	var metadata string
 	if err = db.QueryRow("PRAGMA user_version").Scan(&schema); err != nil {

@@ -67,7 +67,15 @@ jobs:
           go test -race ./internal/music -run '^TestRealtime|^TestAccountDeletion|^TestKeyDeletion|^TestStorage|^TestManagedBackup|^TestBackup|^TestResumable|^TestBrowse|^TestObjectSync|^TestMail|^TestEmail|^TestRegistration|^TestAccountStorage|^TestUploadEmailPolicy|^TestSchemaMigration|^TestTag|^TestTrackTag|^TestTrackFilter|^TestSavedTrackFilter' -count=1 -timeout 240s
       - name: Linux installation integration
         if: runner.os == 'Linux'
-        run: sudo -E env PATH="$PATH" bash tests/update-systemd.sh
+        run: |
+          python tests/test-schema-preview.py
+          CGO_ENABLED=0 go build -trimpath -buildvcs=true -o build/schema-preview/baseline/musicserver ./cmd/musicserver
+          CGO_ENABLED=0 python tests/build-schema-preview.py --version 0.21.0
+          export MUSIC_SERVER_SCHEMA7_BINARY="$PWD/build/schema-preview/baseline/musicserver"
+          export MUSIC_SERVER_SCHEMA8_BINARY="$PWD/build/schema-preview/musicserver"
+          export MUSIC_SERVER_SCHEMA7_VERSION="$(go run ./cmd/release -version)"
+          export MUSIC_SERVER_SCHEMA8_VERSION=0.21.0
+          sudo -E env PATH="$PATH" bash tests/update-systemd.sh
 
   web:
     runs-on: ubuntu-24.04
@@ -81,6 +89,14 @@ jobs:
         working-directory: server
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout released schema-7 source for upgrade acceptance
+        if: matrix.suite == 'tags'
+        uses: actions/checkout@v4
+        with:
+          ref: fc6cd7745fa11818de59e6566ed9d664bc71f618 # v0.20.2
+          path: schema7-release
+          persist-credentials: false
+          sparse-checkout: server
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26.x'
@@ -125,6 +141,12 @@ jobs:
         run: go build -trimpath -buildvcs=true -o build/musicserver ./cmd/musicserver
         env:
           CGO_ENABLED: '0'
+      - name: Build the released schema-7 baseline
+        if: matrix.suite == 'tags'
+        working-directory: schema7-release/server
+        run: go build -trimpath -buildvcs=true -o "$GITHUB_WORKSPACE/server/build/schema-preview/released/musicserver" ./cmd/musicserver
+        env:
+          CGO_ENABLED: '0'
       - name: Real browser acceptance
         run: |
           node --test tests/browser-wait-test.cjs tests/resumable-ui.cjs tests/browse-state-test.cjs
@@ -141,6 +163,10 @@ jobs:
             CGO_ENABLED=0 go test -c -o build/email-browser-fixture ./internal/music
             MUSIC_SERVER_TEST_EMAIL_BINARY="$PWD/build/email-browser-fixture" node tests/registration-email-ui.cjs
           elif [ "$SUITE" = tags ]; then
+            python tests/test-schema-preview.py
+            CGO_ENABLED=0 python tests/build-schema-preview.py --version 0.21.0
+            python tests/schema-upgrade-process.py --old-server build/schema-preview/released/musicserver --new-server build/schema-preview/musicserver
+            MUSIC_SERVER_TEST_BINARY="$PWD/build/schema-preview/musicserver" MUSIC_SERVER_TEST_TAG_BACKUP_ONLY=1 node tests/management-ui.cjs
             node tests/tag-editor-ui.cjs
             node tests/track-filter-ui.cjs
             node tests/tag-ui.cjs
@@ -171,6 +197,7 @@ jobs:
       fail-fast: false
       matrix:
         player: [33da837016e01419db3200bb0adcc58aae179c56, f36c07dbe7f3890080b0290dd4ad32bb7729711d]
+        schema: [7, 8]
     defaults:
       run:
         shell: pwsh
@@ -178,6 +205,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: server-source
+      - name: Checkout released schema-7 source for upgrade acceptance
+        if: matrix.schema == 8
+        uses: actions/checkout@v4
+        with:
+          ref: fc6cd7745fa11818de59e6566ed9d664bc71f618 # v0.20.2
+          path: schema7-release
+          persist-credentials: false
+          sparse-checkout: server
       - name: Checkout accepted native player
         uses: actions/checkout@v4
         with:
@@ -222,19 +257,35 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Candidate server build failed' }
           $candidateVersion = go run ./cmd/release -version
           if ($LASTEXITCODE -ne 0) { throw 'Cannot read candidate identity' }
+          $candidateBinary = '../server-source/server/build/musicserver.exe'
+          if ('${{ matrix.schema }}' -eq '8') {
+            Push-Location '../../schema7-release/server'
+            try {
+              go build -trimpath -buildvcs=true -o "$env:GITHUB_WORKSPACE/server-source/server/build/schema-preview/released/musicserver.exe" ./cmd/musicserver
+              if ($LASTEXITCODE -ne 0) { throw 'Cannot build released schema-7 baseline' }
+            } finally { Pop-Location }
+            python tests/build-schema-preview.py --version 0.21.0
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot build isolated schema-8 preview' }
+            python tests/schema-upgrade-process.py --old-server build/schema-preview/released/musicserver.exe --new-server build/schema-preview/musicserver.exe
+            if ($LASTEXITCODE -ne 0) { throw 'Real populated schema migration failed' }
+            $candidateBinary = '../server-source/server/build/schema-preview/musicserver.exe'
+            $candidateVersion = '0.21.0'
+          }
           "version=$candidateVersion" >> $env:GITHUB_OUTPUT
+          "binary=$candidateBinary" >> $env:GITHUB_OUTPUT
           "server=$(git rev-parse HEAD)" >> $env:GITHUB_STEP_SUMMARY
           "player=${{ matrix.player }}" >> $env:GITHUB_STEP_SUMMARY
+          "schema=${{ matrix.schema }} (8 is an isolated test preview, never a Release package)" >> $env:GITHUB_STEP_SUMMARY
         env:
           CGO_ENABLED: '0'
       - name: Real WinHTTP TLS, cache and two-ended integration
         working-directory: player
         run: |
           ./UnitTest/run-remote-library-cache-tests.ps1 -Python python `
-            -ServerBinary '../server-source/server/build/musicserver.exe' `
+            -ServerBinary '${{ steps.candidate.outputs.binary }}' `
             -ServerSource '../server-source/server' `
             -ExpectedServerVersion '${{ steps.candidate.outputs.version }}' `
-            -ExpectedServerSchema 7
+            -ExpectedServerSchema ${{ matrix.schema }}
 
   package:
     timeout-minutes: 15
