@@ -10,6 +10,7 @@ function updateTrackSelection() {
   $('trackSelectionStatus').textContent='';
 }
 function renderTracks() {
+  if(typeof loadTagCapability==='function')loadTagCapability();
   if(typeof browseLibraryPage!=='function'&&state.page==='tracks'&&location.hash.startsWith('#/library')){
     const query=new URLSearchParams();if($('trackSearch').value.trim())query.set('q',$('trackSearch').value.trim());if(state.trackFilter!=='all')query.set('filter',state.trackFilter);
     history.replaceState(null,'','#/library'+(query.size?'?'+query:''));
@@ -71,6 +72,7 @@ async function openTrackDetails(track) {
   const technical=document.createElement('details');technical.innerHTML='<summary>来源与技术信息</summary>';
   const info=document.createElement('pre');info.className='lyrics-text';info.textContent='曲目 UUID：'+track.id+'\n原始上传者：'+track.uploaded_by+'\n当前管理者：'+track.owner_id+(isAdministrator()?'\n文件路径：'+(track.path||'—'):'');technical.append(info);body.append(technical);
   dialog.showModal();
+  if(typeof decorateTrackTagDetails==='function')decorateTrackTagDetails(track);
   return true;
 }
 function openAddTracks(ids) {

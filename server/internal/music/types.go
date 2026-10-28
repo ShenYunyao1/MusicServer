@@ -71,16 +71,18 @@ type CoverAsset struct {
 }
 
 type UploadPreview struct {
-	Timings      map[string]int64 `json:"timings,omitempty"`
-	ID           string           `json:"id"`
-	OriginalName string           `json:"original_name"`
-	Size         int64            `json:"size"`
-	ContentHash  string           `json:"content_hash"`
-	DuplicateOf  string           `json:"duplicate_of,omitempty"`
-	Track        Track            `json:"track"`
-	CreatedAt    time.Time        `json:"created_at"`
-	ExpiresAt    time.Time        `json:"expires_at"`
-	Validation   string           `json:"validation"`
+	TagVersions  *UploadTagVersions `json:"tag_versions,omitempty"`
+	GenreValues  []string           `json:"genre_values,omitempty"`
+	Timings      map[string]int64   `json:"timings,omitempty"`
+	ID           string             `json:"id"`
+	OriginalName string             `json:"original_name"`
+	Size         int64              `json:"size"`
+	ContentHash  string             `json:"content_hash"`
+	DuplicateOf  string             `json:"duplicate_of,omitempty"`
+	Track        Track              `json:"track"`
+	CreatedAt    time.Time          `json:"created_at"`
+	ExpiresAt    time.Time          `json:"expires_at"`
+	Validation   string             `json:"validation"`
 }
 
 // APIKey stores only the hash of a secret. Plaintext is returned once when a

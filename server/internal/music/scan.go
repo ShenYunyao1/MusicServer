@@ -392,7 +392,8 @@ func (s *Store) runScan(ctx context.Context, full bool, options []MutationOption
 				return err
 			}
 			applyMetadata(&track, overrides)
-			if !reflect.DeepEqual(track, previous) {
+			metadataChanged := !reflect.DeepEqual(track, previous)
+			if metadataChanged {
 				if err := saveCover(tx, candidate.metadata.Cover, candidate.metadata.CoverMIME); err != nil {
 					return err
 				}
@@ -400,6 +401,26 @@ func (s *Store) runScan(ctx context.Context, full bool, options []MutationOption
 				if err := writeTrack(tx, track); err != nil {
 					return err
 				}
+			}
+			genreValues := candidate.metadata.GenreValues
+			if value, present := overrides["genre"]; present {
+				genreValues = []string{value}
+			}
+			tagsChanged := false
+			if !track.Removed {
+				var err error
+				tagsChanged, err = syncImportedGenreTags(tx, track.ID, genreValues)
+				if err != nil {
+					return err
+				}
+			}
+			if tagsChanged && !metadataChanged {
+				track.Version++
+				if err := writeTrack(tx, track); err != nil {
+					return err
+				}
+			}
+			if metadataChanged || tagsChanged {
 				if !track.Removed {
 					if err := recordChange(tx, "track", track.ID, false); err != nil {
 						return err

@@ -24,7 +24,10 @@ const maxMetadataReadBytes = 32 << 20
 
 type audioMetadata struct {
 	Title, Artist, Album, Genre, Comment, Lyrics string
-	LyricsSource                                 string
+	// Nil means the source was unreadable; an empty slice means no genre.
+	GenreValues     []string
+	genreUnreadable bool
+	LyricsSource    string
 	// Cover contains a validated image selected from embedded metadata. The
 	// store persists it as a content-addressed asset and exposes only its ID.
 	// CoverSource is embedded or external and is useful for diagnostics/UI.
@@ -42,6 +45,7 @@ const (
 // Missing or malformed tags are nonfatal to callers, which can use filename defaults.
 // The reader's original position is preserved, including after a prior content hash.
 func readAudioMetadata(reader io.ReadSeeker) (result audioMetadata, err error) {
+	genreReadFailed := false
 	original, err := reader.Seek(0, io.SeekCurrent)
 	if err != nil {
 		return result, err
@@ -53,6 +57,17 @@ func readAudioMetadata(reader io.ReadSeeker) (result audioMetadata, err error) {
 		if recovered := recover(); recovered != nil {
 			err = fmt.Errorf("malformed audio metadata: %v", recovered)
 		}
+		if !genreReadFailed && !result.genreUnreadable && (err == nil || errors.Is(err, tag.ErrNoTagsFound)) {
+			if result.GenreValues == nil {
+				result.GenreValues = []string{}
+				if result.Genre != "" {
+					result.GenreValues = []string{result.Genre}
+				}
+			}
+		} else {
+			result.GenreValues = nil
+			result.genreUnreadable = true
+		}
 	}()
 	length, err := reader.Seek(0, io.SeekEnd)
 	if err != nil {
@@ -62,6 +77,8 @@ func readAudioMetadata(reader io.ReadSeeker) (result audioMetadata, err error) {
 		return result, err
 	}
 	bounded := &metadataReader{ReadSeeker: reader, length: length, remaining: maxMetadataReadBytes}
+	var containerGenres []string
+	var id3Genres []string
 	var signature [8]byte
 	if _, signatureErr := io.ReadFull(bounded, signature[:]); signatureErr == nil {
 		if string(signature[:4]) == "RIFF" {
@@ -74,13 +91,17 @@ func readAudioMetadata(reader io.ReadSeeker) (result audioMetadata, err error) {
 		}
 		switch string(signature[:4]) {
 		case "fLaC":
-			err = validateFLACMetadata(bounded, length)
+			err = validateFLACMetadata(bounded, length, &containerGenres)
 		case "OggS":
-			err = validateOggMetadata(bounded)
+			err = validateOggMetadata(bounded, &containerGenres)
 		}
 		if err != nil {
 			return result, err
 		}
+	}
+	if string(signature[:3]) == "ID3" && signature[3] == 4 {
+		id3Genres, err = readID3v24Genres(bounded, length)
+		genreReadFailed = err != nil
 	}
 	if _, err = bounded.Seek(0, io.SeekStart); err != nil {
 		return result, err
@@ -100,6 +121,17 @@ func readAudioMetadata(reader io.ReadSeeker) (result audioMetadata, err error) {
 		}
 	}
 	raw := metadata.Raw()
+	if metadata.Format() == tag.VORBIS {
+		result.GenreValues = containerGenres
+	} else if metadata.Format() == tag.ID3v2_4 {
+		result.GenreValues = id3Genres
+		if len(id3Genres) == 1 && result.Genre != "" {
+			result.GenreValues = []string{result.Genre}
+		}
+	}
+	if result.GenreValues == nil && result.Genre != "" {
+		result.GenreValues = []string{result.Genre}
+	}
 	keys := make([]string, 0, len(raw))
 	for key := range raw {
 		keys = append(keys, key)
@@ -297,7 +329,7 @@ func readWAVMetadata(reader io.ReadSeeker, length int64) (audioMetadata, error) 
 
 // The tag library allocates FLAC pictures using their internal data length
 // before reading. Validate both native and base64 pictures before that allocation.
-func validateFLACMetadata(reader io.ReadSeeker, length int64) error {
+func validateFLACMetadata(reader io.ReadSeeker, length int64, genres ...*[]string) error {
 	for position := int64(4); ; {
 		if _, err := reader.Seek(position, io.SeekStart); err != nil {
 			return err
@@ -314,7 +346,7 @@ func validateFLACMetadata(reader io.ReadSeeker, length int64) error {
 		end := start + size
 		switch header[0] & 0x7f {
 		case 4:
-			if err := validateVorbisComments(reader, start, end, true); err != nil {
+			if err := validateVorbisComments(reader, start, end, true, genres...); err != nil {
 				return err
 			}
 		case 6:
@@ -389,7 +421,7 @@ func validatePictureBlock(reader io.ReadSeeker, start, end int64) error {
 	return skipMetadataBytes(reader, end, int64(size))
 }
 
-func validateVorbisComments(reader io.ReadSeeker, start, end int64, exact bool) error {
+func validateVorbisComments(reader io.ReadSeeker, start, end int64, exact bool, genres ...*[]string) error {
 	if _, err := reader.Seek(start, io.SeekStart); err != nil {
 		return err
 	}
@@ -427,6 +459,20 @@ func validateVorbisComments(reader io.ReadSeeker, start, end int64, exact bool) 
 		}
 		remaining := int64(size) - int64(probeSize)
 		separator := bytes.IndexByte(prefix[:probeSize], '=')
+		if len(genres) > 0 && separator >= 0 && strings.EqualFold(string(prefix[:separator]), "genre") {
+			if size > 1024 || len(*genres[0]) >= 64 {
+				return errors.New("genre metadata limit exceeded")
+			}
+			value := make([]byte, int(size)-separator-1)
+			copied := copy(value, prefix[separator+1:probeSize])
+			if _, err := io.ReadFull(reader, value[copied:]); err != nil {
+				return err
+			}
+			if text := cleanMetadataText(string(value)); text != "" {
+				*genres[0] = append(*genres[0], text)
+			}
+			continue
+		}
 		if separator < 0 || strings.ToLower(string(prefix[:separator])) != pictureKey {
 			if err := skipMetadataBytes(reader, end, remaining); err != nil {
 				return err
@@ -462,7 +508,7 @@ func validateVorbisComments(reader io.ReadSeeker, start, end int64, exact bool) 
 
 // Reassemble only enough Ogg packets to validate comments. The library checks
 // page CRCs afterward; the shared reader budget bounds pages and packet buffers.
-func validateOggMetadata(reader io.ReadSeeker) error {
+func validateOggMetadata(reader io.ReadSeeker, genres ...*[]string) error {
 	if _, err := reader.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
@@ -504,7 +550,7 @@ func validateOggMetadata(reader io.ReadSeeker) error {
 			contents := packet.Bytes()
 			for _, prefix := range []string{"\x03vorbis", "OpusTags"} {
 				if bytes.HasPrefix(contents, []byte(prefix)) {
-					return validateVorbisComments(bytes.NewReader(contents), int64(len(prefix)), int64(len(contents)), false)
+					return validateVorbisComments(bytes.NewReader(contents), int64(len(prefix)), int64(len(contents)), false, genres...)
 				}
 			}
 			packet = &bytes.Buffer{}

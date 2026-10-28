@@ -79,7 +79,7 @@ func (s *Store) DeleteUser(id string, options MutationOptions) error {
 // Schema 7 has no tag tables. Account tombstones retain uploader references,
 // so explicitly remove the private scope instead of relying on users DELETE.
 func deleteAccountTagRows(tx *sql.Tx, userID string) error {
-	for _, table := range []string{"tag_scopes", "saved_track_filters"} {
+	for _, table := range []string{"tag_scopes", "saved_track_filters", "tag_batches"} {
 		var exists bool
 		if err := tx.QueryRow("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)", table).Scan(&exists); err != nil {
 			return err
@@ -90,6 +90,9 @@ func deleteAccountTagRows(tx *sql.Tx, userID string) error {
 		query := "DELETE FROM tag_scopes WHERE user_id=?"
 		if table == "saved_track_filters" {
 			query = "DELETE FROM saved_track_filters WHERE user_id=?"
+		}
+		if table == "tag_batches" {
+			query = "DELETE FROM tag_batches WHERE user_id=?"
 		}
 		if _, err := tx.Exec(query, userID); err != nil {
 			return err

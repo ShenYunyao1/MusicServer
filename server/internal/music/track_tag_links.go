@@ -113,11 +113,13 @@ func validateTrackTagIDs(addIDs, removeIDs []string) error {
 	return nil
 }
 
-func (s *Store) ChangeTrackTags(auth authContext, trackID, scope string, expectedVersion int64, addIDs, removeIDs []string) (TrackTagsView, error) {
+// changeTrackTagsTx is shared by single edits, upload commits and bounded batch
+// tasks. The caller owns the transaction and notifies only after committing it.
+func changeTrackTagsTx(tx *sql.Tx, auth authContext, trackID, scope string, expectedVersion int64, addIDs, removeIDs []string) (TrackTagsView, bool, error) {
 	var view TrackTagsView
 	changed := false
 	public := scope == "" || scope == "public"
-	err := s.tagTransaction(false, func(tx *sql.Tx) error {
+	err := func() error {
 		actor, err := tagActor(tx, auth)
 		if err != nil {
 			return err
@@ -260,8 +262,19 @@ func (s *Store) ChangeTrackTags(auth authContext, trackID, scope string, expecte
 		}
 		view, err = trackTagsView(tx, trackID, actor.ID)
 		return err
+	}()
+	return view, changed, err
+}
+
+func (s *Store) ChangeTrackTags(auth authContext, trackID, scope string, expectedVersion int64, addIDs, removeIDs []string) (TrackTagsView, error) {
+	var view TrackTagsView
+	var changed bool
+	err := s.tagTransaction(false, func(tx *sql.Tx) error {
+		var err error
+		view, changed, err = changeTrackTagsTx(tx, auth, trackID, scope, expectedVersion, addIDs, removeIDs)
+		return err
 	})
-	if err == nil && changed && public {
+	if err == nil && changed && (scope == "" || scope == "public") {
 		s.notifyCommunityCommit()
 	}
 	return view, err

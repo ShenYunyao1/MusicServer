@@ -35,6 +35,7 @@ var errVersionConflict = errors.New("record changed; refresh before editing")
 var errTrackInUse = errors.New("this track is used by another account's playlist; contact an administrator")
 
 type Store struct {
+	tagBatches     tagBatchRuntime
 	mail           mailRuntime
 	storageWriteMu sync.Mutex
 	spaceProbe     func(string) (diskspace.Space, error)
@@ -796,6 +797,11 @@ func (s *Store) updateTrackGuarded(id string, fields map[string]string, guard fu
 		}
 		if err := writeOverrides(tx, id, fields); err != nil {
 			return err
+		}
+		if genre, present := fields["genre"]; present {
+			if _, err := syncImportedGenreTags(tx, id, []string{genre}); err != nil {
+				return err
+			}
 		}
 		if err := recordChange(tx, "track", id, false); err != nil {
 			return err

@@ -27,10 +27,11 @@ type uploadAssets struct {
 
 // Keep edits separate so an unchanged preview retains its metadata sources.
 type stagedRecord struct {
-	Track     Track             `json:"track"`
-	Overrides map[string]string `json:"overrides"`
-	Cover     []byte            `json:"cover,omitempty"`
-	Sidecar   string            `json:"sidecar,omitempty"`
+	GenreValues []string          `json:"genre_values"`
+	Track       Track             `json:"track"`
+	Overrides   map[string]string `json:"overrides"`
+	Cover       []byte            `json:"cover,omitempty"`
+	Sidecar     string            `json:"sidecar,omitempty"`
 }
 
 func validMetadataFields(fields map[string]string) error {
@@ -207,7 +208,7 @@ func (s *Store) stageAudioWithAssetsContext(ctx context.Context, name string, re
 		_ = root.Remove(relative)
 		return UploadPreview{}, err
 	}
-	record := stagedRecord{Track: track, Overrides: map[string]string{}, Cover: metadata.Cover, Sidecar: lyrics}
+	record := stagedRecord{Track: track, Overrides: map[string]string{}, Cover: metadata.Cover, Sidecar: lyrics, GenreValues: metadata.GenreValues}
 	if metadata.Title == "" {
 		record.Overrides["title"] = track.Title
 	}
@@ -228,6 +229,9 @@ func (s *Store) stageAudioWithAssetsContext(ctx context.Context, name string, re
 		record.Overrides[key] = value
 	}
 	applyMetadata(&record.Track, fields)
+	if genre, ok := fields["genre"]; ok {
+		record.GenreValues = genreImportValues(genre)
+	}
 	created := time.Now().UTC()
 	expires := created.Add(uploadStageTTL)
 	if err := checkStageUploadActor(s.db, owner, options); err != nil {
@@ -262,6 +266,7 @@ func (s *Store) stageAudioWithAssetsContext(ctx context.Context, name string, re
 func (s *Store) previewLocked(id, name string, record stagedRecord, created, expires time.Time) UploadPreview {
 	preview := UploadPreview{ID: id, OriginalName: name, Size: record.Track.Size, ContentHash: record.Track.ContentHash, Track: record.Track, CreatedAt: created, ExpiresAt: expires, Validation: "audio_stream_verified"}
 	_ = s.db.QueryRow("SELECT id FROM tracks WHERE content_hash=? AND removed=0 AND missing=0 ORDER BY id LIMIT 1", record.Track.ContentHash).Scan(&preview.DuplicateOf)
+	s.uploadPreviewTags(&preview, record)
 	return preview
 }
 
@@ -328,8 +333,27 @@ func (s *Store) CommitUploadStage(id string, options ...MutationOptions) (Track,
 }
 
 func (s *Store) commitUploadStageWithMetadata(id string, fields map[string]string, options ...MutationOptions) (Track, bool, error) {
+	return s.commitUploadStageWithTags(id, fields, nil, options...)
+}
+
+func genreImportValues(value string) []string {
+	if value == "" {
+		return []string{}
+	}
+	return []string{value}
+}
+
+func (s *Store) commitUploadStageWithTags(id string, fields map[string]string, edits *UploadTagEdits, options ...MutationOptions) (Track, bool, error) {
 	if err := validMetadataFields(fields); err != nil {
 		return Track{}, false, err
+	}
+	if edits != nil {
+		if err := requireTagsSchema(s.db); err != nil {
+			return Track{}, false, err
+		}
+		if err := validateUploadTagEdits(edits); err != nil {
+			return Track{}, false, err
+		}
 	}
 	s.stageMu.Lock()
 	defer s.stageMu.Unlock()
@@ -438,6 +462,9 @@ func (s *Store) commitUploadStageWithMetadata(id string, fields map[string]strin
 		record.Overrides[key] = value
 	}
 	applyMetadata(&track, fields)
+	if genre, ok := fields["genre"]; ok {
+		record.GenreValues = genreImportValues(genre)
+	}
 	if len(record.Cover) > 0 {
 		track.CoverID = hashBytes(record.Cover)
 		if track.CoverSource == "manual" {
@@ -447,12 +474,17 @@ func (s *Store) commitUploadStageWithMetadata(id string, fields map[string]strin
 		}
 	}
 	duplicate := false
+	publicTagChanged := false
 	// Media and SQLite may share a volume; recheck after publishing temporary
 	// copies and sidecars, before database assets consume the remaining headroom.
 	if err := s.checkSpace(filepath.Dir(s.dataPath), int64(len(record.Cover)+len(record.Sidecar))*2+(1<<20)); err != nil {
 		return Track{}, false, err
 	}
-	if err := s.transaction(func(tx *sql.Tx) error {
+	transact := s.transaction
+	if edits != nil {
+		transact = func(run func(*sql.Tx) error) error { return s.tagTransaction(false, run) }
+	}
+	if err := transact(func(tx *sql.Tx) error {
 		if err := checkStageUploadActor(tx, stageOwner, options); err != nil {
 			return err
 		}
@@ -464,6 +496,14 @@ func (s *Store) commitUploadStageWithMetadata(id string, fields map[string]strin
 				return err
 			}
 			duplicate = true
+			publicTagChanged, err = applyUploadTagsTx(tx, track.ID, edits, options)
+			if err != nil {
+				return err
+			}
+			track, err = readTrackFrom(tx, track.ID, false)
+			if err != nil {
+				return err
+			}
 			_, err = tx.Exec("DELETE FROM upload_staging WHERE id=?", id)
 			return err
 		}
@@ -496,6 +536,24 @@ func (s *Store) commitUploadStageWithMetadata(id string, fields map[string]strin
 		if err := writeOverrides(tx, track.ID, record.Overrides); err != nil {
 			return err
 		}
+		publicTagChanged, err = applyUploadTagsTx(tx, track.ID, edits, options)
+		if err != nil {
+			return err
+		}
+		importChanged, err := syncImportedGenreTags(tx, track.ID, record.GenreValues)
+		if err != nil {
+			return err
+		}
+		track, err = readTrackFrom(tx, track.ID, false)
+		if err != nil {
+			return err
+		}
+		if importChanged {
+			track.Version++
+			if err := writeTrack(tx, track); err != nil {
+				return err
+			}
+		}
 		if err := recordChange(tx, "track", track.ID, false); err != nil {
 			return err
 		}
@@ -508,6 +566,9 @@ func (s *Store) commitUploadStageWithMetadata(id string, fields map[string]strin
 		return auditMutation(tx, "track.upload", track.ID, nil, track, options)
 	}); err != nil {
 		return Track{}, false, err
+	}
+	if edits != nil && (!duplicate || publicTagChanged) {
+		s.notifyCommunityCommit()
 	}
 	committed = !duplicate
 	_ = source.Close()

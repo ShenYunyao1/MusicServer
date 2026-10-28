@@ -114,9 +114,11 @@ if (require.main === module) {
     await h.context.resumeStageUpload(upload);
     const task = h.tasks.get(upload.resumeId); task.state = 'uploading'; delete task.stage_id; task.offset = 4194304; task.chunks.length = 1;
     upload.stageId = null; upload.resumeTask = h.clone(task); upload.edits = { title: 'Durable edited title' };
+    upload.tagDraft = { personal: { add_ids: ['personal-tag'], remove_ids: [] } };
     await h.context.persistResumeQueue(); h.context.clearResumeWorkspace(); h.state.uploads = [];
     await h.context.restoreResumeQueue(); const restored = h.state.uploads[0];
     assert.equal(restored.needsSourceFile, true); assert.equal(restored.edits.title, 'Durable edited title'); assert.equal(typeof restored.file.slice, 'undefined');
+    assert.deepEqual(h.clone(restored.tagDraft), upload.tagDraft);
     const before = h.sent.length;
     await assert.rejects(h.context.reselectResumeFile(restored, h.file(Buffer.alloc(bytes.length, 9))), /不匹配|原文件/);
     assert.equal(h.sent.length, before); assert.equal(restored.needsSourceFile, true);

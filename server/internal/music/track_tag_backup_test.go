@@ -15,7 +15,7 @@ import (
 func tagDataSnapshot(t *testing.T, db *sql.DB) map[string][]string {
 	t.Helper()
 	result := map[string][]string{}
-	for _, table := range []string{"tag_groups", "tag_scopes", "tags", "tag_aliases", "track_tags", "track_tag_overrides", "track_tag_states", "saved_track_filters"} {
+	for _, table := range []string{"tag_groups", "tag_scopes", "tags", "tag_aliases", "track_tags", "track_tag_overrides", "track_tag_states", "saved_track_filters", "track_tag_imports"} {
 		rows, err := db.Query("SELECT * FROM " + table)
 		if err != nil {
 			t.Fatal(err)
@@ -69,6 +69,7 @@ func TestTrackTagBackupRestoresDictionaryRelationshipsAndPrivateTombstones(t *te
 	if _, err := s.MergeTags(auth, personal.ID, target.ID, 1, 1); err != nil {
 		t.Fatal(err)
 	}
+	runGenreImport(t, s, track.ID, []string{public.Name, "Unknown saved source"})
 	if _, err := s.db.Exec("INSERT INTO saved_track_filters VALUES(?,?,?, ?,1,'created','updated')", uuid.NewString(), auth.userID, "Private saved", `{"tags":["`+personal.ID+`"]}`); err != nil {
 		t.Fatal(err)
 	}

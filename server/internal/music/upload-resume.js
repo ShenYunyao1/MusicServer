@@ -48,6 +48,7 @@ function resumeDraft(upload) {
     name: upload.file.name, size: upload.file.size, lastModified: upload.file.lastModified || 0,
     path: upload.path || '', directory: upload.directory || '',
     edits: { ...upload.edits }, attachments,
+    tagDraft: upload.tagDraft ? JSON.parse(JSON.stringify(upload.tagDraft)) : undefined,
     ignoreAutomaticCover: Boolean(upload.ignoreAutomaticCover), ignoreAutomaticLyrics: Boolean(upload.ignoreAutomaticLyrics),
     detailsOpen: Boolean(upload.detailsOpen), editorOpen: Boolean(upload.editorOpen),
   };
@@ -396,6 +397,7 @@ async function restoreResumeQueue() {
     const file = { name: saved.name || task.name, size: saved.size || task.size, lastModified: saved.lastModified || 0 };
     const upload = { ...describeFile(file, ++state.batch), id: saved.id || browserUUID(), path: saved.path || '', directory: saved.directory || '', file, sourceFile: null, needsSourceFile: true, edits: saved.edits || {}, preview: null, localPreview: null, localPromise: null, localStatus: '', stageId: null, status: '选择原文件继续', error: '', lyricsFile: null, coverFile: null, resumePaused: true, resumeMissingAttachments: saved.attachments || task?.attachments || {}, ignoreAutomaticCover: Boolean(saved.ignoreAutomaticCover), ignoreAutomaticLyrics: Boolean(saved.ignoreAutomaticLyrics), detailsOpen: saved.detailsOpen, editorOpen: saved.editorOpen };
     for (const name of ['title', 'artist', 'album', 'genre', 'comment', 'lyrics']) upload[name] = upload.edits[name] || '';
+    if (saved.tagDraft) upload.tagDraft = JSON.parse(JSON.stringify(saved.tagDraft));
     state.uploads.push(upload);
     if (task) {
       try {

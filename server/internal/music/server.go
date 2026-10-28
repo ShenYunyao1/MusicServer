@@ -32,7 +32,7 @@ var accountPageScript []byte
 //go:embed users.js
 var usersPageScript []byte
 
-//go:embed management.css management.js navigation.js feedback.js library.js administration.js playlist-ui.js community.js sharing.js updater-ui.js setup.js upload-progress.js system-logs.js profile.js profile.css community-realtime.js backup-ui.js storage-ui.js storage-ui.css browse-ui.js browse-ui.css upload-resume.js email-ui.js email-ui.css
+//go:embed management.css management.js navigation.js feedback.js library.js administration.js playlist-ui.js community.js sharing.js updater-ui.js setup.js upload-progress.js system-logs.js profile.js profile.css community-realtime.js backup-ui.js storage-ui.js storage-ui.css browse-ui.js browse-ui.css upload-resume.js email-ui.js email-ui.css tag-editor.js tag-editor.css
 var workspaceAssets embed.FS
 
 type API struct {
@@ -170,6 +170,8 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		assets["/assets/storage-ui.css"] = "text/css; charset=utf-8"
 		assets["/assets/browse-ui.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/browse-ui.css"] = "text/css; charset=utf-8"
+		assets["/assets/tag-editor.js"] = "text/javascript; charset=utf-8"
+		assets["/assets/tag-editor.css"] = "text/css; charset=utf-8"
 		assets["/assets/community-realtime.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/profile.css"] = "text/css; charset=utf-8"
 		if contentType, ok := assets[request.URL.Path]; ok {
@@ -273,6 +275,12 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if a.trackTagsHTTP(response, request) {
+		return
+	}
+	if a.tagImportHTTP(response, request) {
+		return
+	}
+	if a.tagBatchesHTTP(response, request) {
 		return
 	}
 	if strings.HasPrefix(request.URL.Path, "/api/v2/auth/") && !strings.HasPrefix(request.URL.Path, "/api/v2/auth/keys") {
@@ -1371,21 +1379,24 @@ func (a *API) stagedUpload(response http.ResponseWriter, request *http.Request) 
 			writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
 			return
 		}
-		fields := map[string]string{}
-		if request.Body != nil && request.ContentLength != 0 {
-			request.Body = http.MaxBytesReader(response, request.Body, 2<<20)
-			if err := json.NewDecoder(request.Body).Decode(&fields); err != nil {
+		request.Body = http.MaxBytesReader(response, request.Body, 2<<20)
+		fields, edits, err := parseUploadCommit(request)
+		if err != nil {
+			if !writeUploadTagError(response, err) {
 				writeError(response, http.StatusBadRequest, "INVALID_METADATA", "invalid metadata JSON")
-				return
 			}
+			return
 		}
-		track, duplicate, err := a.store.commitUploadStageWithMetadata(id, fields, mutationOptions(request))
+		track, duplicate, err := a.store.commitUploadStageWithTags(id, fields, edits, mutationOptions(request))
 		if errors.Is(err, os.ErrNotExist) {
 			writeError(response, http.StatusNotFound, "STAGE_NOT_FOUND", "upload stage not found or expired")
 			return
 		}
 		if err != nil {
 			if writeStorageError(response, err) {
+				return
+			}
+			if writeUploadTagError(response, err) {
 				return
 			}
 			writeError(response, http.StatusBadRequest, "COMMIT_FAILED", err.Error())

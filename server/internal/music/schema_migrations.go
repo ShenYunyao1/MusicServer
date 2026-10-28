@@ -120,5 +120,13 @@ INSERT INTO schema_migrations VALUES(7,8,strftime('%Y-%m-%dT%H:%M:%fZ','now'));`
 		return err
 	}
 	_, err = tx.Exec(tagSchema)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(tagImportSchema)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(tagBatchSchema)
 	return err
 }
