@@ -35,6 +35,7 @@ async function initializeTrackFilters(){
   if(!await loadTagCapability()||owner!==state.user?.id||epoch!==trackFilterWorkspace.epoch)return false;
   const toolbar=document.querySelector('#page-tracks .track-toolbar');if(!toolbar)return false;
   if(!$('trackAdvancedFilter')){const button=filterButton('筛选与分类',()=>openTrackFilterEditor());button.id='trackAdvancedFilter';button.dataset.trackFilterUi='button';toolbar.append(button)}
+  if(typeof openTagDictionary==='function'&&!$('trackTagDictionary')){const button=filterButton('标签词典',()=>openTagDictionary());button.id='trackTagDictionary';button.dataset.trackFilterUi='dictionary';toolbar.append(button)}
   if(!$('trackFilterChips')){const chips=filterNode('div',undefined,'track-filter-chips');chips.id='trackFilterChips';chips.dataset.trackFilterUi='chips';toolbar.append(chips)}
   if(!$('trackFilterMessage')){const message=filterNode('p','','track-filter-message');message.id='trackFilterMessage';message.dataset.trackFilterUi='message';message.setAttribute('role','status');toolbar.append(message)}
   renderTrackFilterChips();return true;

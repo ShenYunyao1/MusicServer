@@ -39,6 +39,8 @@ const memberPlayer=document.createElement('audio');memberPlayer.id='memberPlayer
 function playTrack(track){if(track.missing || track.removed)return;memberPlayer.src='/api/v2/media/'+encodeURIComponent(track.id);memberPlayer.hidden=false;$('previewBar').hidden=false;$('previewTitle').textContent=track.title||'未命名曲目';memberPlayer.play().catch(error=>setStatus(error.message,'error'))}
 
 function setLoggedOut() {
+	if(typeof clearTagDictionaryWorkspace==='function')clearTagDictionaryWorkspace();
+	if(typeof clearTagSyncWorkspace==='function')clearTagSyncWorkspace();
 	if(typeof clearTrackFilterWorkspace==='function')clearTrackFilterWorkspace();
 	if(typeof clearTagWorkspace==='function')clearTagWorkspace();
   if(typeof clearEmailWorkspace==='function')clearEmailWorkspace();
@@ -112,14 +114,22 @@ async function enterAccount(identity) {
   document.querySelector('.app').hidden = false;
   $('loginScreen').hidden = true;
   setStatus('正在载入…');
-  await connect();
-  await restoreResumeQueue();
   if(typeof loadTagCapability==='function') {
     await loadTagCapability();
     if(typeof initializeTrackFilters==='function')await initializeTrackFilters();
     if(typeof decorateTagUploads==='function')decorateTagUploads();
   }
+  // Discover capabilities before the first catalogue read. Restored tag
+  // rules must never briefly fall back to an unfiltered legacy request.
+  if(location.hash.split('?')[0]==='#/library'){
+    const query=new URLSearchParams(location.hash.split('?')[1]||'');
+    $('trackSearch').value=query.get('q')||'';
+    state.trackFilter=query.get('filter')||'all';
+  }
+  await connect();
+  await restoreResumeQueue();
   await restoreWorkspaceRoute();
+  if(typeof pollTagChanges==='function')void pollTagChanges();
   if (state.user) setStatus('已登录', 'ok');
 }
 

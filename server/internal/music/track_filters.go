@@ -442,7 +442,7 @@ func (s *Store) QueryTrackFilter(auth authContext, q TrackFilterQuery) (TrackFil
 				item["path"] = ""
 			}
 		}
-		return nil
+		return projectTrackTagSummaries(tx, actor.ID, page.Items)
 	})
 	return page, err
 }

@@ -22,7 +22,7 @@ function renderTracks() {
   const head=$('trackRows').closest('table').querySelector('thead');
   if(!head.dataset.browseReady){head.innerHTML='<tr><th><input id="selectAll" type="checkbox" aria-label="选择当前页全部曲目"></th><th>曲目</th><th>歌手</th><th>专辑</th><th>状态</th></tr>';head.dataset.browseReady='1'}
   $('selectAll').onchange=e=>{for(const t of rows){if(e.target.checked)state.selectedTrackIds.add(t.id);else state.selectedTrackIds.delete(t.id)}renderTracks()};
-  if(!rows.length)$('trackRows').innerHTML='<tr><td colspan="5" class="empty">'+(state.tracks.length?'没有匹配的曲目，请调整搜索或筛选。':'曲库暂无曲目，可以上传音乐。')+'</td></tr>';
+  if(!rows.length)$('trackRows').innerHTML='<tr><td colspan="5" class="empty">'+txt((typeof browseLibraryPage==='function'&&browseLibraryPage()?.error)||(state.tracks.length?'没有匹配的曲目，请调整搜索或筛选。':'曲库暂无曲目，可以上传音乐。'))+'</td></tr>';
   for(const [index,t] of rows.entries()){
     const existing=oldRows.get(t.id),signature=JSON.stringify(t);
     if(existing?.dataset.signature===signature){existing.querySelector('[data-track-id]').checked=state.selectedTrackIds.has(t.id);if($('trackRows').children[index]!==existing)$('trackRows').insertBefore(existing,$('trackRows').children[index]||null);continue}
@@ -31,6 +31,10 @@ function renderTracks() {
     row.dataset.signature=signature;
     row.innerHTML='<td><input type="checkbox" data-track-id="'+txt(t.id)+'" aria-label="选择 '+txt(t.title)+'" '+(state.selectedTrackIds.has(t.id)?'checked':'')+'></td><td><div class="track-title-cell"><span class="track-cover">♪</span><button class="text-button track-title" data-details>'+txt(t.title||'未命名')+'</button></div></td><td class="track-artist">'+txt(t.artist||'—')+'</td><td class="track-album">'+txt(t.album||'—')+'</td><td><span class="badge '+(t.missing?'warn':'ok')+'">'+(t.missing?'文件缺失':'可播放')+'</span></td><td class="row-actions"></td>';
     row.querySelector('[data-details]').onclick=()=>openTrackDetails(t);
+    if(typeof renderTrackTagSummary==='function'){
+      const summary=renderTrackTagSummary(t);
+      if(summary){const info=document.createElement('div');info.className='library-track-info';const title=row.querySelector('[data-details]');title.before(info);info.append(title,summary)}
+    }
     row.querySelector('[data-track-id]').onchange=e=>{if(e.target.checked)state.selectedTrackIds.add(t.id);else state.selectedTrackIds.delete(t.id);updateTrackSelection();$('selectAll').checked=rows.every(t=>state.selectedTrackIds.has(t.id))};
     row.querySelector('.row-actions').remove();
     row.tabIndex=0;

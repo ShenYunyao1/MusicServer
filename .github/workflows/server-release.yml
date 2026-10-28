@@ -143,7 +143,9 @@ jobs:
           elif [ "$SUITE" = tags ]; then
             node tests/tag-editor-ui.cjs
             node tests/track-filter-ui.cjs
-            MUSIC_SERVER_TAG_UI=1 MUSIC_SERVER_FILTER_UI=1 go test ./internal/music -run '^TestTagEditorLiveBrowser$|^TestTrackFilterLiveBrowser$' -count=1 -timeout 180s
+            node tests/tag-ui.cjs
+            node tests/tag-dictionary-ui.cjs
+            MUSIC_SERVER_TAG_UI=1 MUSIC_SERVER_FILTER_UI=1 MUSIC_SERVER_TAG_WORKSPACE_UI=1 go test ./internal/music -run '^TestTagEditorLiveBrowser$|^TestTrackFilterLiveBrowser$|^TestTagWorkspaceLiveBrowser$' -count=1 -timeout 180s
           else
             node tests/management-ui.cjs
           fi

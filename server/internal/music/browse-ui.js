@@ -29,7 +29,10 @@ function browseCacheTracks(){
     // A cached member page may predate a freshly read catalogue page. Preserve
     // the newest version instead of overwriting it with the older projection.
     const selected=unique.get(item.id);if(selected&&selected.version>=item.version)continue;
-    const full=previous.get(item.id);unique.set(item.id,full?.detail_loaded&&full.version===item.version?full:item);
+    const full=previous.get(item.id);
+    // Personal summaries can change independently of the public Track.Version.
+    // Keep full metadata, but take this account's latest paged projection.
+    unique.set(item.id,full?.detail_loaded&&full.version===item.version?{...full,tag_summary:item.tag_summary}:item);
   }
   state.tracks=[...unique.values()];
 }
@@ -62,6 +65,11 @@ async function loadBrowseTracks(offset=browseRouteOffset(),revision){
   // Pollers capture this loader's generation immediately after calling it.
   // Capability discovery belongs to account entry, never an awaited prelude.
   if(typeof trackFiltersEnabled==='function'&&trackFiltersEnabled())return loadFilteredTracks(offset);
+  if(['tf','sort','dir'].some(key=>browseRouteQuery().has(key))){
+    const error=Object.assign(new Error('当前服务端暂不支持此地址中的组合筛选；请清除条件或使用支持标签的版本。'),{code:'FILTER_UNAVAILABLE'});
+    browseState.tracks={items:[],total:0,offset:0,limit:browsePageSize,error:error.message};
+    browseCacheTracks();setStatus(error.message,'error');throw error;
+  }
   return browseFetchPage('tracks','browse/tracks',{q:$('trackSearch').value.trim(),filter:state.trackFilter||'all',offset,revision});
 }
 async function loadBrowsePlaylists(offset=browseRouteOffset(),revision){return browseFetchPage('playlists','browse/playlists',{q:$('playlistSearch').value.trim(),offset,revision})}

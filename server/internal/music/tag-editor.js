@@ -57,8 +57,9 @@ function tagSetBusy(editor,busy){
 async function decorateTrackTagDetails(track){
   const container=$('trackDetailsBody'),dialog=$('trackDetails');
   if(!container)return;
+  const capability=loadTagCapability(),workspaceGeneration=tagWorkspace.generation,request=String((Number(container.dataset.tagRequest)||0)+1);container.dataset.tagRequest=request;
   const marker=track.id;container.dataset.tagTrack=marker;
-  if(!await loadTagCapability()||container.dataset.tagTrack!==marker)return;
+  if(!await capability||workspaceGeneration!==tagWorkspace.generation||container.dataset.tagTrack!==marker||container.dataset.tagRequest!==request)return;
   if(!container||!dialog?.open)return;
   container.querySelector('[data-tag-feature]')?.remove();
   const section=tagNode('section',undefined,'tag-detail-panel');section.dataset.tagFeature='details';
@@ -69,7 +70,7 @@ async function decorateTrackTagDetails(track){
   loadTrackTagImportSource(track.id,importSource,generation);
   try{
     const view=await api('tracks/'+encodeURIComponent(track.id)+'/tags');
-    if(generation!==tagWorkspace.generation||!section.isConnected||container.dataset.tagTrack!==marker)return;
+    if(generation!==tagWorkspace.generation||!section.isConnected||container.dataset.tagTrack!==marker||container.dataset.tagRequest!==request)return;
     for(const scope of ['public','personal']){
       const line=tagNode('p');line.append(tagNode('span',tagScopeLabel(scope)+'：','status'));
       const tags=view[scope]||[];
