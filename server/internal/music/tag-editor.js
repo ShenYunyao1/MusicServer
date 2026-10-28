@@ -74,7 +74,10 @@ async function decorateTrackTagDetails(track){
       const line=tagNode('p');line.append(tagNode('span',tagScopeLabel(scope)+'：','status'));
       const tags=view[scope]||[];
       if(!tags.length)line.append(document.createTextNode('暂无'));
-      for(const tag of tags)line.append(tagNode('span',tag.name,'tag-chip'));
+      for(const tag of tags){
+        if(typeof applyTrackTagFilter==='function')line.append(tagButton(tag.name,()=>{dialog.close();applyTrackTagFilter(tag)},'tag-chip'));
+        else line.append(tagNode('span',tag.name,'tag-chip'));
+      }
       section.append(line);
     }
   }catch(error){if(section.isConnected)section.append(tagNode('p','标签读取失败：'+error.message,'status error'))}
@@ -179,7 +182,11 @@ async function tagLoadSelection(editor,explicit){
       for(const id of saved?.[editor.scope]?.remove_ids||[])editor.remove.add(id);
     }else{
       const range=editor.rangeInput.value,input={scope:editor.scope,add_ids:[],remove_ids:[]};
-      if(range==='all')input.query={q:$('trackSearch')?.value.trim()||'',filter:state.trackFilter||'all'};
+      if(range==='all'){
+        const conditions=typeof getActiveTrackFilter==='function'?getActiveTrackFilter():null;
+        if(conditions){input.query={conditions};const baseline=typeof getActiveTrackFilterBaseline==='function'?getActiveTrackFilterBaseline():null;if(baseline)input.query.baseline=baseline}
+        else input.query={q:$('trackSearch')?.value.trim()||'',filter:state.trackFilter||'all'};
+      }
       else input.track_ids=range==='page'?visibleTracks().map(track=>track.id):editor.ids;
       if(!input.query&&!input.track_ids.length)throw new Error('所选范围没有曲目');
       const job=await api('tag-batches','POST',input);if(!tagEditorCurrent(editor))return;

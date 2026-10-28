@@ -209,7 +209,7 @@ async function restoreWorkspaceRoute() {
     }
     if(page==='tracks'){
       const query=new URLSearchParams(location.hash.split('?')[1]||'');$('trackSearch').value=query.get('q')||'';
-      state.trackFilter=['all','mine','managed','orphan'].includes(query.get('filter'))?query.get('filter'):'all';
+      state.trackFilter=['all','mine','managed','orphan','missing'].includes(query.get('filter'))?query.get('filter'):'all';
       document.querySelectorAll('[data-filter]').forEach(el=>el.classList.toggle('active',el.dataset.filter===state.trackFilter));await loadBrowseView();if(generation!==routeGeneration)return;renderTracks();
     }
     if(page==='keys'){await loadBrowseGrantPlaylists();if(generation!==routeGeneration)return;await loadKeys()}

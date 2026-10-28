@@ -32,7 +32,7 @@ var accountPageScript []byte
 //go:embed users.js
 var usersPageScript []byte
 
-//go:embed management.css management.js navigation.js feedback.js library.js administration.js playlist-ui.js community.js sharing.js updater-ui.js setup.js upload-progress.js system-logs.js profile.js profile.css community-realtime.js backup-ui.js storage-ui.js storage-ui.css browse-ui.js browse-ui.css upload-resume.js email-ui.js email-ui.css tag-editor.js tag-editor.css
+//go:embed management.css management.js navigation.js feedback.js library.js administration.js playlist-ui.js community.js sharing.js updater-ui.js setup.js upload-progress.js system-logs.js profile.js profile.css community-realtime.js backup-ui.js storage-ui.js storage-ui.css browse-ui.js browse-ui.css upload-resume.js email-ui.js email-ui.css tag-editor.js tag-editor.css track-filter-ui.js track-filter-ui.css
 var workspaceAssets embed.FS
 
 type API struct {
@@ -172,6 +172,8 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		assets["/assets/browse-ui.css"] = "text/css; charset=utf-8"
 		assets["/assets/tag-editor.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/tag-editor.css"] = "text/css; charset=utf-8"
+		assets["/assets/track-filter-ui.js"] = "text/javascript; charset=utf-8"
+		assets["/assets/track-filter-ui.css"] = "text/css; charset=utf-8"
 		assets["/assets/community-realtime.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/profile.css"] = "text/css; charset=utf-8"
 		if contentType, ok := assets[request.URL.Path]; ok {
@@ -281,6 +283,9 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if a.tagBatchesHTTP(response, request) {
+		return
+	}
+	if a.trackFiltersHTTP(response, request) {
 		return
 	}
 	if strings.HasPrefix(request.URL.Path, "/api/v2/auth/") && !strings.HasPrefix(request.URL.Path, "/api/v2/auth/keys") {

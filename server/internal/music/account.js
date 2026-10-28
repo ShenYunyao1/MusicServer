@@ -39,6 +39,7 @@ const memberPlayer=document.createElement('audio');memberPlayer.id='memberPlayer
 function playTrack(track){if(track.missing || track.removed)return;memberPlayer.src='/api/v2/media/'+encodeURIComponent(track.id);memberPlayer.hidden=false;$('previewBar').hidden=false;$('previewTitle').textContent=track.title||'未命名曲目';memberPlayer.play().catch(error=>setStatus(error.message,'error'))}
 
 function setLoggedOut() {
+	if(typeof clearTrackFilterWorkspace==='function')clearTrackFilterWorkspace();
 	if(typeof clearTagWorkspace==='function')clearTagWorkspace();
   if(typeof clearEmailWorkspace==='function')clearEmailWorkspace();
   if(typeof clearResumeWorkspace==='function')clearResumeWorkspace();
@@ -115,6 +116,7 @@ async function enterAccount(identity) {
   await restoreResumeQueue();
   if(typeof loadTagCapability==='function') {
     await loadTagCapability();
+    if(typeof initializeTrackFilters==='function')await initializeTrackFilters();
     if(typeof decorateTagUploads==='function')decorateTagUploads();
   }
   await restoreWorkspaceRoute();

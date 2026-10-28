@@ -64,6 +64,10 @@ func tagGroupID(id string) bool {
 
 func writeTagError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, errFilterReference):
+		writeError(w, 409, "FILTER_REFERENCE_INVALID", "review unavailable tags referenced by this filter")
+	case errors.Is(err, errFilterSnapshot):
+		writeError(w, 409, "FILTER_SNAPSHOT_CHANGED", "filter data changed; reload from the first page")
 	case errors.Is(err, errTagsUnavailable):
 		writeError(w, 503, "TAGS_UNAVAILABLE", "tag features are not enabled for this database schema")
 	case errors.Is(err, errTagSession):

@@ -23,8 +23,10 @@ const tagBatchSize = 32
 const tagBatchMaxTracks = 5000
 
 type TagBatchQuery struct {
-	Search string `json:"q"`
-	Filter string `json:"filter"`
+	Search     string               `json:"q"`
+	Filter     string               `json:"filter"`
+	Conditions *TrackFilter         `json:"conditions,omitempty"`
+	Baseline   *TrackFilterBaseline `json:"baseline,omitempty"`
 }
 type TagBatchInput struct {
 	Scope     string         `json:"scope"`
@@ -215,8 +217,20 @@ func (s *Store) PreviewTagBatch(auth authContext, input TagBatchInput) (TagBatch
 			return errTagLimit
 		}
 		ids := slices.Clone(input.TrackIDs)
-		if input.Query != nil {
+		if input.Query != nil && input.Query.Conditions != nil {
+			if input.Query.Search != "" || input.Query.Filter != "" {
+				return errTagInvalid
+			}
+			var err error
+			ids, err = filteredTagBatchIDs(tx, auth, *input.Query)
+			if err != nil {
+				return err
+			}
+		} else if input.Query != nil {
 			q := input.Query
+			if q.Baseline != nil {
+				return errTagInvalid
+			}
 			if !utf8.ValidString(q.Search) || utf8.RuneCountInString(q.Search) > 256 {
 				return errTagInvalid
 			}

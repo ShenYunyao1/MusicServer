@@ -3,11 +3,13 @@
 const browseState={userID:null,epoch:0,summary:null,tracks:null,playlists:null,member:null,generations:{tracks:0,playlists:0,member:0},timers:{},polling:false};
 const browsePageSize=50;
 function clearBrowseWorkspace(){
+  if(typeof clearTrackFilterWorkspace==='function')clearTrackFilterWorkspace();
   browseState.epoch++;browseState.userID=null;browseState.summary=null;browseState.tracks=null;browseState.playlists=null;browseState.member=null;state.browseSummary=null;
   for(const kind of ['tracks','playlists','member']){browseState.generations[kind]++;clearTimeout(browseState.timers[kind])}
 }
 function browseReset(){
   if(browseState.userID===state.user?.id)return;
+  if(typeof clearTrackFilterWorkspace==='function'&&(typeof trackFilterWorkspace==='undefined'||trackFilterWorkspace.owner!==state.user?.id))clearTrackFilterWorkspace();
   browseState.epoch++;
   browseState.userID=state.user?.id||null;browseState.summary=null;browseState.tracks=null;browseState.playlists=null;browseState.member=null;
   for(const kind of ['tracks','playlists','member']){browseState.generations[kind]++;clearTimeout(browseState.timers[kind])}
@@ -16,6 +18,7 @@ function browseRouteQuery(){return new URLSearchParams(location.hash.split('?')[
 function browseRouteOffset(){return Math.max(0,Number.parseInt(browseRouteQuery().get('offset'),10)||0)}
 function browseSetRoute(query,offset,filter){
   const values=new URLSearchParams();if(query)values.set('q',query);if(offset)values.set('offset',offset);if(filter&&filter!=='all')values.set('filter',filter);
+  if(location.hash.split('?')[0]==='#/library')for(const key of ['tf','sort','dir']){const value=browseRouteQuery().get(key);if(value)values.set(key,value)}
   history.replaceState(null,'',location.hash.split('?')[0]+(values.size?'?'+values:''));
 }
 function browseReuse(items,old=[]){const byID=new Map(old.map(item=>[item.id,item]));return items.map(item=>{const previous=byID.get(item.id);return previous&&JSON.stringify(previous)===JSON.stringify(item)?previous:item})}
@@ -55,7 +58,12 @@ async function browseFetchPage(kind,path,params={}){
   }
   browseCacheTracks();browseCachePlaylists();return page;
 }
-async function loadBrowseTracks(offset=browseRouteOffset(),revision){return browseFetchPage('tracks','browse/tracks',{q:$('trackSearch').value.trim(),filter:state.trackFilter||'all',offset,revision})}
+async function loadBrowseTracks(offset=browseRouteOffset(),revision){
+  // Pollers capture this loader's generation immediately after calling it.
+  // Capability discovery belongs to account entry, never an awaited prelude.
+  if(typeof trackFiltersEnabled==='function'&&trackFiltersEnabled())return loadFilteredTracks(offset);
+  return browseFetchPage('tracks','browse/tracks',{q:$('trackSearch').value.trim(),filter:state.trackFilter||'all',offset,revision});
+}
 async function loadBrowsePlaylists(offset=browseRouteOffset(),revision){return browseFetchPage('playlists','browse/playlists',{q:$('playlistSearch').value.trim(),offset,revision})}
 async function loadBrowseMembers(id,offset=browseRouteOffset(),revision){
   state.playlistTrackQuery=browseRouteQuery().get('q')||'';state.playlistTrackSearchID=id;
@@ -108,7 +116,7 @@ function browseRenderPager(host,id,page,onChange){
   nav.page=page;nav.change=onChange;nav.children[0].disabled=page.offset<=0;nav.children[2].disabled=page.offset+page.items.length>=page.total;
   nav.children[1].textContent=page.total?(page.offset+1)+'–'+(page.offset+page.items.length)+' / '+page.total:'0 / 0';nav.hidden=page.total<=browsePageSize;
 }
-function browseLibraryPage(){const page=browseState.tracks;return page&&page.query===$('trackSearch').value.trim()&&page.filter===(state.trackFilter||'all')?page:null}
+function browseLibraryPage(){const page=browseState.tracks;if(page?.filterKey&&typeof activeTrackFilterKey==='function'&&page.filterKey!==activeTrackFilterKey())return null;return page&&page.query===$('trackSearch').value.trim()&&page.filter===(state.trackFilter||'all')?page:null}
 function browseOwnPlaylistPage(){return browseState.playlists}
 function browseMemberPage(id){return browseState.member?.id===id?browseState.member:null}
 function browseMemberPlaylist(p){
