@@ -68,6 +68,17 @@ async function main(){
     // Alias search selects the canonical public term instead of creating a duplicate.
     await page.locator('#taggerScope').selectOption('public');
     await page.locator('#compactTagger [data-group="language"]').click();
+    const japanese=await page.evaluate(async()=>(await api('tags?scope=public&group_id=language')).items.find(tag=>tag.name==='日语'));
+    await page.locator('[data-tagger-edit="'+japanese.id+'"]').click();
+    await page.waitForFunction(()=>document.querySelector('#dictionaryName')?.value==='日语');
+    await page.locator('#dictionaryAliases').fill([...japanese.aliases,'日本語'].join('\n'));
+    await page.locator('#dictionarySave').click();
+    await page.waitForFunction(()=>document.querySelector('#dictionaryMessage').textContent==='词条已保存。');
+    await page.locator('#dictionaryClose').click();
+    await page.locator('#taggerSearch').fill('日本語');
+    await page.locator('[data-tagger-tag="'+japanese.id+'"]').waitFor({state:'visible'});
+    assert.equal(await page.locator('#taggerCreate').count(),0,'A saved alias immediately reuses the original term');
+    assert.ok((await page.evaluate(async id=>api('tags/'+id),japanese.id)).aliases.includes('日本語'));
     await page.locator('#taggerSearch').fill('日文');
     await page.locator('#taggerResults button[data-tagger-tag]').filter({hasText:'日语'}).waitFor({state:'visible'});
     await page.waitForFunction(()=>!compactTagger.loading);

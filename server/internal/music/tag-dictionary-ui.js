@@ -18,13 +18,15 @@ async function dictionaryOperation(e,run){
  try{await run()}catch(error){dictionaryError(e,error)}finally{if(dictionaryCurrent(e)){e.busy=false;for(const [n,disabled]of controls)if(n.isConnected)n.disabled=disabled}}
 }
 function dictionaryChanged(e){if(!dictionaryCurrent(e))return;window.dispatchEvent(new CustomEvent('tag-dictionary-changed',{detail:{scope:e.scope.value}}))}
-async function openTagDictionary(){
+function dictionaryDirty(e){return e.name.value!==(e.selected?.name||'')||e.aliases.value!==(e.selected?.aliases||[]).join('\n')}
+function dictionaryClose(e){if(e.busy)return;if(dictionaryDirty(e)&&!confirm('词条修改尚未保存，放弃修改并关闭？'))return;e.dialog.close()}
+async function openTagDictionary(options={}){
  const owner=state.user?.id,epoch=tagDictionaryWorkspace.epoch,generation=tagWorkspace.generation;if(!owner||!await loadTagCapability()||state.user?.id!==owner||epoch!==tagDictionaryWorkspace.epoch||generation!==tagWorkspace.generation)return false;
  clearTagDictionaryWorkspace();const e={owner,epoch:tagDictionaryWorkspace.epoch,generation,request:0,targetRequest:0,offset:0,busy:false,selected:null,target:null};tagDictionaryWorkspace.editor=e;
  const dialog=dictionaryNode('dialog',undefined,'tagDictionaryDialog');dialog.className='modal dictionary-dialog';dialog.setAttribute('aria-labelledby','dictionaryHeading');e.dialog=dialog;
- const head=dictionaryNode('div');head.className='modal-head';head.append(dictionaryNode('h3','标签词典','dictionaryHeading'),dictionaryButton('关闭','dictionaryClose',()=>dialog.close()));dialog.append(head);
+ const head=dictionaryNode('div');head.className='modal-head';head.append(dictionaryNode('h3','标签词典','dictionaryHeading'),dictionaryButton('关闭','dictionaryClose',()=>dictionaryClose(e)));dialog.append(head);
  const body=dictionaryNode('div');body.className='dictionary-body';dialog.append(body);
- body.append(dictionaryNode('p','公共词条由管理员维护；个人词条仅本人可见。改名不改变标签 ID，合并会保留旧名称为别名。'));
+ body.append(dictionaryNode('p','公共词条可由成员创建，名称修改、别名、合并与删除由管理员维护；个人词条仅本人可见。改名不改变标签 ID，合并会保留旧名称为别名。'));
  const toolbar=dictionaryNode('div');toolbar.className='dictionary-toolbar';body.append(toolbar);
  e.scope=dictionaryNode('select',undefined,'dictionaryScope');for(const [value,label]of [['public','公共词典'],['personal','我的词典']]){const o=dictionaryNode('option',label);o.value=value;e.scope.append(o)}dictionaryField(toolbar,'作用域',e.scope);
  e.group=dictionaryNode('select',undefined,'dictionaryGroup');dictionaryField(toolbar,'分组',e.group);e.groups=tagWorkspace.groups;dictionaryFillGroups(e);
@@ -35,7 +37,7 @@ async function openTagDictionary(){
  const pager=dictionaryNode('div');pager.className='dictionary-toolbar';e.prev=dictionaryButton('上一页','dictionaryPrevious',()=>{e.offset=Math.max(0,e.offset-50);dictionaryList(e)});e.next=dictionaryButton('下一页','dictionaryNext',()=>{e.offset+=50;dictionaryList(e)});e.count=dictionaryNode('span');pager.append(e.prev,e.count,e.next);listPane.append(pager);
  e.form=dictionaryNode('section');e.form.className='dictionary-form';columns.append(e.form);
  e.form.append(dictionaryNode('h4','编辑词条'),dictionaryButton('新建词条','dictionaryNew',()=>dictionarySelect(e,null)));
- e.name=dictionaryInput('dictionaryName');dictionaryField(e.form,'名称（最多 64 字）',e.name);e.aliases=dictionaryNode('textarea',undefined,'dictionaryAliases');e.aliases.rows=4;e.aliases.maxLength=4096;dictionaryField(e.form,'别名（每行一个，最多 32 个）',e.aliases);
+ e.name=dictionaryInput('dictionaryName');dictionaryField(e.form,'名称（最多 64 字）',e.name);e.aliases=dictionaryNode('textarea',undefined,'dictionaryAliases');e.aliases.rows=4;e.aliases.maxLength=4096;dictionaryField(e.form,'别名（每行一个，最多 32 个）',e.aliases);e.form.append(dictionaryNode('small','例如“日语”的别名填写“日文”和“Japanese”，每行一个。搜索这些别名时会复用同一词条。'));
  e.form.append(dictionaryButton('保存词条','dictionarySave',()=>dictionarySave(e)),dictionaryButton('重新读取版本','dictionaryReloadVersion',()=>dictionaryReloadVersion(e)),dictionaryButton('删除词条','dictionaryDelete',()=>dictionaryConfirm(e,'delete')));
  e.mergeSearch=dictionaryInput('dictionaryMergeSearch');dictionaryField(e.form,'合并到同组词条（搜索目标）',e.mergeSearch);e.form.append(dictionaryButton('查找合并目标','dictionaryMergeFind',()=>dictionaryTargets(e)));e.targets=dictionaryNode('div',undefined,'dictionaryTargets');e.form.append(e.targets);e.targetCount=dictionaryNode('span');e.form.append(e.targetCount);
  e.targetPrev=dictionaryButton('上一页目标','dictionaryTargetPrevious',()=>{e.targetOffset=Math.max(0,(e.targetOffset||0)-50);dictionaryTargets(e,false)});e.targetNext=dictionaryButton('下一页目标','dictionaryTargetNext',()=>{e.targetOffset=(e.targetOffset||0)+50;dictionaryTargets(e,false)});e.form.append(e.targetPrev,e.targetNext,dictionaryButton('合并词条','dictionaryMerge',()=>dictionaryConfirm(e,'merge')));
@@ -43,7 +45,10 @@ async function openTagDictionary(){
  if(state.user.role==='admin'){const groupBox=dictionaryNode('details',undefined,'dictionaryGroupManage');groupBox.append(dictionaryNode('summary','管理公共分组'));body.append(groupBox);dictionaryGroupForm(e,groupBox)}
  e.scope.onchange=e.group.onchange=()=>{e.offset=0;e.request++;dictionarySelect(e,null);dictionaryList(e)};
  e.search.onkeydown=event=>{if(event.key==='Enter'){e.offset=0;dictionaryList(e)}};
- dialog.addEventListener('close',()=>{if(dictionaryCurrent(e))clearTagDictionaryWorkspace();else dialog.remove()});document.body.append(dialog);dictionarySelect(e,null);dialog.showModal();await dictionaryList(e);return dictionaryCurrent(e);
+ dialog.addEventListener('cancel',event=>{event.preventDefault();dictionaryClose(e)});
+ dialog.addEventListener('close',()=>{if(dictionaryCurrent(e))clearTagDictionaryWorkspace();else dialog.remove()});document.body.append(dialog);dictionarySelect(e,null);dialog.showModal();
+ if(options.tag?.id){await dictionaryOperation(e,async()=>{const tag=await api('tags/'+encodeURIComponent(options.tag.id));if(!dictionaryCurrent(e))return;e.scope.value=tag.scope;e.group.value=tag.group_id;e.search.value=tag.name;await dictionaryList(e);if(!dictionaryCurrent(e))return;dictionarySelect(e,tag);e.name.focus();e.form.scrollIntoView({block:'nearest'})})}else await dictionaryList(e);
+ return dictionaryCurrent(e);
 }
 function dictionaryFillGroups(e){const current=e.group.value;e.group.replaceChildren();for(const g of e.groups){const o=dictionaryNode('option',g.name);o.value=g.id;e.group.append(o)}if(e.groups.some(g=>g.id===current))e.group.value=current}
 async function dictionaryList(e){

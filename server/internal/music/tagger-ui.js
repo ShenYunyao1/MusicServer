@@ -52,7 +52,9 @@ async function taggerSearch(e){
   for(const tag of rows){const row=tagNode('div',undefined,'tagger-row');const count=[...e.views.values()].filter(v=>taggerHas(v,scope,tag.id)).length;const all=count===e.ids.length;
    const select=tagButton(tag.name,()=>taggerApply(e,tag,false));select.dataset.taggerTag=tag.id;select.disabled=all;select.title=all?'已添加到全部所选曲目':'添加到全部所选曲目';select.append(tagNode('small',all?'全部已有':count?'部分已有':'添加'));
    const alias=(tag.aliases||[]).find(a=>q&&taggerNormalize(a).includes(taggerNormalize(q)));if(alias)select.append(tagNode('small','别名：'+alias));row.append(select);if(!all)e.options.push(select);
-   if(count){const remove=tagButton('移除',()=>taggerApply(e,tag,true));remove.dataset.taggerRemove=tag.id;remove.setAttribute('aria-label','从所选曲目移除 '+tag.name);row.append(remove)}e.results.append(row);
+   if(count){const remove=tagButton('移除',()=>taggerApply(e,tag,true));remove.dataset.taggerRemove=tag.id;remove.setAttribute('aria-label','从所选曲目移除 '+tag.name);row.append(remove)}
+   if(typeof openTagDictionary==='function'&&(scope==='personal'||state.user.role==='admin')){const edit=tagButton('编辑',()=>{if(!taggerCurrent(e)||e.busy||e.loading)return;void openTagDictionary({tag})});edit.dataset.taggerEdit=tag.id;edit.setAttribute('aria-label','编辑词条 '+tag.name+' 与别名');row.append(edit)}
+   e.results.append(row);
   }
   const exact=e.items.some(tag=>[tag.name,...tag.aliases||[]].some(n=>taggerNormalize(n)===taggerNormalize(q)));
   if(q&&!exact){const create=tagButton('＋ 创建「'+q+'」到当前分组',()=>taggerCreate(e,q));create.id='taggerCreate';e.results.append(create);e.options.push(create)}
@@ -87,5 +89,6 @@ async function taggerUndo(e){
   e.undo=null;e.undoButton.hidden=true;taggerMessage(e,'已撤销 '+done+' 首。');
  }catch(error){undo.changed=undo.changed.slice(done);e.undoButton.hidden=!undo.changed.length;taggerMessage(e,'已撤销 '+done+' 首；'+error.message,true)}finally{e.busy=false;if(taggerCurrent(e)){if(e.selectionPending){e.selectionPending=false;e.ids=e.pendingIDs}await taggerLoadTargets(e);taggerBusy(e);document.dispatchEvent(new CustomEvent('tagger-saved'))}}
 }
-document.addEventListener('pointerdown',event=>{const e=compactTagger;if(event.button!==0||!e||e.pinned||e.busy||e.panel.contains(event.target))return;if(event.target.closest('#trackRows tr,.track-toolbar,.browse-pager,#playlistDetail [data-track-id],#contextMenu,#contextSubmenu'))return;closeCompactTagger()});
+document.addEventListener('pointerdown',event=>{const e=compactTagger;if(document.querySelector('dialog[open]')||event.button!==0||!e||e.pinned||e.busy||e.panel.contains(event.target))return;if(event.target.closest('#trackRows tr,.track-toolbar,.browse-pager,#playlistDetail [data-track-id],#contextMenu,#contextSubmenu'))return;closeCompactTagger()});
 document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!event.isComposing&&compactTagger&&!document.querySelector('dialog[open]')){event.preventDefault();closeCompactTagger()}});
+window.addEventListener('tag-dictionary-changed',()=>{const e=compactTagger;if(e&&taggerCurrent(e)&&!e.busy)void taggerLoadTargets(e)});

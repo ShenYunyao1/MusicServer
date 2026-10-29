@@ -22,6 +22,17 @@ async function main(){const browser=await chromium.launch({headless:true,executa
  await page.addScriptTag({path:path.resolve(__dirname,'../internal/music/tagger-ui.js')});
  await page.evaluate(()=>document.querySelector('#selectB').onclick=()=>{state.selectedTrackIds=new Set(['b']);taggerSelectionChanged()});
  await page.evaluate(()=>openCompactTagger(['a']));
+ await page.evaluate(()=>{state.user.role='admin';window.editedTag=null;window.openTagDictionary=async options=>{editedTag=options.tag};return taggerSearch(compactTagger)});
+ await page.locator('[data-tagger-edit=jp]').click();assert.equal(await page.evaluate(()=>editedTag.id),'jp');
+ assert.equal(await page.evaluate(()=>data.a.public.length),0,'Editing a term must not bind it to a track');
+ await page.evaluate(()=>{const modal=document.createElement('dialog');modal.id='dictionaryLayer';modal.innerHTML='<button id="editAlias">Edit alias</button>';document.body.append(modal);modal.showModal()});
+ await page.locator('#editAlias').click();assert.equal(await page.locator('#compactTagger').count(),1,'Editing in a modal must not dismiss the underlying tagger');
+ await page.evaluate(()=>document.querySelector('#dictionaryLayer').remove());
+ await page.evaluate(()=>{state.user.role='member';return taggerSearch(compactTagger)});
+ assert.equal(await page.locator('[data-tagger-edit]').count(),0,'Members cannot edit public dictionary terms');
+ await page.locator('#taggerScope').selectOption('personal');await page.waitForFunction(()=>compactTagger.ready&&!compactTagger.loading);
+ assert.ok(await page.locator('[data-tagger-edit]').count()>0,'Members may edit their personal terms');
+ await page.locator('#taggerScope').selectOption('public');await page.waitForFunction(()=>compactTagger.ready&&!compactTagger.loading);
  await page.evaluate(()=>{const old=document.querySelector('[data-tagger-tag=jp]');const search=document.querySelector('#taggerSearch');search.value='pending query';search.dispatchEvent(new Event('input'));old.click()});
  assert.equal(await page.evaluate(()=>data.a.public.length),0,'Old search results cannot write during debounce');
  assert.equal(await page.locator('dialog').count(),0);
