@@ -40,6 +40,7 @@ function setupProfileWorkspace() {
     </section>`;
   document.querySelector('.content').append(page);
   setupEmailProfile();
+  if(typeof setupAvatarProfile==='function')setupAvatarProfile();
   const entry=makeButton('个人中心',()=>navigatePage('account'));entry.id='personalCenter';
   entry.addEventListener('click',()=>accountMenu.open=false);accountActions.prepend(entry);
   $('changePassword').onclick=()=>location.hash='#/account/security';
@@ -61,11 +62,11 @@ const personalPasswordFields=['accountOldPassword','accountNewPassword','account
 function personalError(id,message='') {$(id).textContent=message;$(id).hidden=!message;}
 function personalDirty() {
   if(!state.user||!personalRoute||state.page!=='account')return false;
-  return personalRoute==='#/account/profile' ? $('profileName').value!==personalOriginalName||emailProfileDirty() :
+  return personalRoute==='#/account/profile' ? $('profileName').value!==personalOriginalName||emailProfileDirty()||(typeof avatarDirty==='function'&&avatarDirty()) :
     personalRoute==='#/account/security' && personalPasswordFields.some(id=>$(id).value!=='');
 }
 function confirmPersonalExit() {
-  if(personalBusy)return false;
+  if(personalBusy||(typeof avatarWorkspace!=='undefined'&&avatarWorkspace.busy))return false;
   return !personalDirty()||confirm('个人中心有尚未保存的输入，放弃修改并离开？');
 }
 function resetPersonalPassword() {
@@ -73,6 +74,7 @@ function resetPersonalPassword() {
   $('toggleAccountPassword').textContent='显示密码';$('toggleAccountPassword').setAttribute('aria-pressed','false');
 }
 function clearProfileWorkspace() {
+  if(typeof clearAvatarWorkspace==='function')clearAvatarWorkspace();
   ++personalGeneration;personalBusy=false;personalRoute='';personalUserID=null;personalOriginalName='';personalVersion=0;personalOtherSessions=0;
   personalReturnRoute=lastPersonalOrigin='#/library';
   if(!$('page-account'))return;
@@ -85,6 +87,7 @@ function clearProfileWorkspace() {
 function permitPersonalNavigation(hash) {
   if(!personalRoute||hash===personalRoute)return true;
   if(!confirmPersonalExit()){history.replaceState(null,'',personalRoute);return false}
+  if(typeof discardAvatarDraft==='function')discardAvatarDraft();
   personalRoute='';personalOriginalName='';resetPersonalPassword();++personalGeneration;return true;
 }
 function notePersonalNavigation(hash,page) {
@@ -98,6 +101,7 @@ function applyPersonalIdentity(identity) {
   if(state.user?.id!==user.id)return;
   state.user=user;state.csrf=identity.csrf_token||state.csrf;
   $('accountName').textContent=user.display_name||user.username;
+  if(typeof renderOwnAvatar==='function')renderOwnAvatar();
   state.users=(state.users||[]).map(item=>item.id===user.id?user:item);
   const update=playlist=>{if(playlist?.owner_id===user.id)playlist.source_owner_name=user.display_name};
   state.playlists.forEach(update);update(state.publicDetail?.playlist);update(state.sharingPlaylist);
@@ -112,6 +116,7 @@ function fillPersonalProfile(user) {
   $('profileName').value=personalOriginalName;$('profileUsername').value=user.username;
   $('profileHeading').textContent=accountLabel(user);
   $('profileAvatar').textContent=Array.from(personalOriginalName.trim())[0]||'♪';
+  if(typeof renderOwnAvatar==='function')renderOwnAvatar();
   $('profileRole').textContent=user.role==='admin'?'管理员':'普通用户';
   $('profileCreatedAt').textContent=new Date(user.created_at).toLocaleString();$('profileCreatedAt').dateTime=user.created_at;
 }
@@ -140,6 +145,7 @@ async function loadPersonalProfile(force=false) {
     applyPersonalIdentity(identity);
     if(force||!personalDirty())fillPersonalProfile(identity.user);
     await loadEmailProfile();
+    if(typeof loadOwnAvatar==='function')await loadOwnAvatar(force);
     personalError('profileError');
   }catch(error){if(generation===personalGeneration&&state.user?.id===userID)personalError('profileError',error.message)}
   finally{if(force&&state.user?.id===userID)setPersonalBusy(false)}

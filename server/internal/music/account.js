@@ -63,6 +63,7 @@ function setLoggedOut() {
   state.uploads = [];
   state.attachments = [];
   state.user = null;
+  if(typeof renderOwnAvatar==='function')renderOwnAvatar();
   state.stats=null;state.settings={};state.playlistDetailId=null;state.trackFilter="all";state.revision=null;
   state.page='tracks';$('trackSearch').value='';$('playlistSearch').value='';
   state.users=[];state.statsUserID="";state.managedUserID=null;state.userResources=[];state.resourceOffset=0;
@@ -109,6 +110,7 @@ async function enterAccount(identity) {
     $('firstPasswordForm').reset();$('firstPasswordError').textContent='';return;
   }
   $('firstPasswordScreen').hidden=true;
+  if(typeof loadOwnAvatar==='function')void loadOwnAvatar();
   applyAccountRole();
   if(isAdministrator()&&typeof loadUsers==='function')await loadUsers();
   document.querySelector('.app').hidden = false;

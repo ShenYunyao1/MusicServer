@@ -178,7 +178,9 @@ jobs:
           export TMPDIR="$PWD/build/browser-diagnostics"
           export MUSIC_SERVER_TEST_BINARY="$PWD/build/musicserver"
           if [ "$SUITE" = personal-center ]; then
+            node tests/avatar-ui.cjs
             node tests/personal-center-ui.cjs
+            MUSIC_SERVER_AVATAR_UI=1 go test ./internal/music -run '^TestAvatarLiveBrowser$' -count=1 -timeout 120s
           elif [ "$SUITE" = realtime ]; then
             MUSIC_SERVER_TEST_REALTIME_ONLY=1 node tests/management-ui.cjs
           elif [ "$SUITE" = browse ]; then
