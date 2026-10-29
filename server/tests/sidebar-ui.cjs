@@ -2,6 +2,15 @@ const assert=require('node:assert/strict');
 const path=require('node:path');
 
 module.exports=async function({page,directory}){
+ const assertNavAlignment=async()=>{
+   const items=await page.locator('.nav [data-page]').evaluateAll(buttons=>buttons.filter(b=>!b.hidden).map(b=>({page:b.dataset.page,icon:b.querySelector('.nav-icon').getBoundingClientRect().left,label:b.querySelector('.nav-label').getBoundingClientRect().left,labelVisible:getComputedStyle(b.querySelector('.nav-label')).display!=='none'})));
+   const reference=items.find(item=>item.page==='tracks');
+   for(const item of items){
+     assert.ok(Math.abs(item.icon-reference.icon)<1,item.page+' icon must align with other navigation icons');
+     if(item.labelVisible)assert.ok(Math.abs(item.label-reference.label)<1,item.page+' label must align with other navigation labels');
+   }
+ };
+ await assertNavAlignment();
  const logo=()=>page.locator('.brand-mark').boundingBox();
  const logoLeft=(await logo()).x;
  const iconLeft=(await page.locator('.nav-icon').first().boundingBox()).x;
@@ -12,6 +21,7 @@ module.exports=async function({page,directory}){
  const collapsedLogo=await logo();
  assert.equal(Math.round(collapsedLogo.width),32,'Collapsed sidebar must not squeeze the logo');
  assert.equal(Math.round(collapsedLogo.height),32,'Logo must remain square');
+ await assertNavAlignment();
  assert.equal(await page.locator('.brand #brandToggle').count(),1,'The logo owns the navigation toggle');
  assert.equal(await page.locator('.topbar #brandToggle, #collapse').count(),0,'There must be no separate collapse control');
  const target=await page.locator('#brandToggle').boundingBox();assert.equal(target.width,44);assert.equal(target.height,44);
@@ -54,6 +64,7 @@ module.exports=async function({page,directory}){
  await page.setViewportSize({width:390,height:844});
  await page.click('#menuToggle');await page.waitForFunction(()=>document.querySelector('#sidebar').getBoundingClientRect().left>=-1);
  assert.equal(Math.round((await page.locator('#sidebar').boundingBox()).width),232,'Mobile drawer must ignore desktop collapsed width');
+ await assertNavAlignment();
  assert.equal(await page.locator('.brand-text').isVisible(),true);assert.equal(await page.locator('#brandToggle').isVisible(),true);
  const preference=await page.evaluate(()=>localStorage.getItem('musicserver.sidebarCollapsed'));
  await page.click('#brandToggle');assert.equal(await page.locator('#menuToggle').getAttribute('aria-expanded'),'false');

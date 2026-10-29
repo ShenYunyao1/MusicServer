@@ -43,7 +43,7 @@ const clearCompleted=makeButton('清理已完成',()=>run(async()=>{for(const up
 clearCompleted.id='clearCompleted';$('page-upload').querySelector('.queue-actions').prepend(clearCompleted);
 window.addEventListener('beforeunload',event=>{if(state.user&&state.uploads.some(x=>!['完成','已去重'].includes(x.status))){event.preventDefault();event.returnValue=''}});
 const groups = [['音乐', ['tracks','public','playlists','upload']], ['播放器',['keys']], ['管理',['overview','users','maintenance','logs','settings']]];
-const logsNav=makeButton('',()=>showPage('logs'));logsNav.dataset.page='logs';logsNav.innerHTML='<span class="nav-icon">▤</span><span class="nav-label">系统日志</span>';nav.append(logsNav);
+const logsNav=makeButton('',()=>showPage('logs'),'');logsNav.dataset.page='logs';logsNav.innerHTML='<span class="nav-icon">▤</span><span class="nav-label">系统日志</span>';nav.append(logsNav);
 const maintenanceNav = makeButton('', () => showPage('maintenance'));
 maintenanceNav.dataset.page = 'maintenance';
 maintenanceNav.className='';
