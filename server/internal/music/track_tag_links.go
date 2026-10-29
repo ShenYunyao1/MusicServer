@@ -138,9 +138,6 @@ func changeTrackTagsTx(tx *sql.Tx, auth authContext, trackID, scope string, expe
 		if err != nil {
 			return err
 		}
-		if public && actor.Role != "admin" && track.OwnerID != actor.ID {
-			return errResourceHidden
-		}
 		if err = validateTrackTagIDs(addIDs, removeIDs); err != nil {
 			return err
 		}
@@ -153,7 +150,7 @@ func changeTrackTagsTx(tx *sql.Tx, auth authContext, trackID, scope string, expe
 					}
 					return e
 				}
-				// Binding public terms requires ownership of the track, not dictionary administration.
+				// All active members may bind public terms; personal scope stays isolated.
 				if e = authorizeTag(actor, tag, false); e != nil {
 					return e
 				}

@@ -13,7 +13,7 @@ import (
 )
 
 // Tag routes precede the generic track-owner guard: personal tags belong to
-// the reader, while public tag bindings still require track ownership.
+// the reader, while active members may contribute public bindings.
 func (a *API) trackTagsHTTP(w http.ResponseWriter, r *http.Request) bool {
 	path := r.URL.Path
 	isTrack := strings.HasPrefix(path, "/api/v2/tracks/") && strings.HasSuffix(path, "/tags")

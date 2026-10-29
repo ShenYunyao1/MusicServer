@@ -90,8 +90,8 @@ func TestTrackTagLinksAuthorizeBeforeVersionsAndDoNotLeakPersonal(t *testing.T) 
 	track := s.Tracks()[0]
 	public := mustLinkTag(t, s, admin, "public", "public marker")
 	private := mustLinkTag(t, s, aliceAuth, "personal", "alice secret tag")
-	if _, err := s.ChangeTrackTags(bobAuth, track.ID, "public", 999, []string{public.ID}, nil); !errors.Is(err, errResourceHidden) {
-		t.Fatal("owner check followed version", err)
+	if _, err := s.ChangeTrackTags(bobAuth, track.ID, "public", 999, []string{public.ID}, nil); !errors.Is(err, errVersionConflict) {
+		t.Fatal("public contribution must still check version", err)
 	}
 	if _, err := s.ChangeTrackTags(bobAuth, track.ID, "personal", 999, []string{private.ID}, nil); !errors.Is(err, errResourceHidden) {
 		t.Fatal("personal scope leaked behind version", err)

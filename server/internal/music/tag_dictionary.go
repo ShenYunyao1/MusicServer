@@ -403,7 +403,12 @@ func (s *Store) CreateTag(auth authContext, input TagInput) (Tag, error) {
 			return err
 		}
 		tag.scopeID = scopeID
-		if err := authorizeTag(actor, tag, true); err != nil {
+		// Members may contribute public names; aliases and dictionary-wide
+		// changes remain administrator responsibilities.
+		if scopeID == "public" && actor.Role != "admin" && len(input.Aliases) > 0 {
+			return errTagForbidden
+		}
+		if err := authorizeTag(actor, tag, false); err != nil {
 			return err
 		}
 		if _, err := readTagGroup(tx, input.GroupID); err != nil {
@@ -621,7 +626,16 @@ func (s *Store) ListTags(auth authContext, query TagQuery) (TagPage, error) {
 		if err := tx.QueryRow("SELECT COALESCE((SELECT revision FROM tag_scopes WHERE id=?),0)", scopeID).Scan(&page.Revision); err != nil {
 			return err
 		}
-		rows, err := tx.Query("SELECT t.id"+where+" ORDER BY t.normalized_name,t.id LIMIT ? OFFSET ?", append(args, page.Limit, page.Offset)...)
+		order := "t.normalized_name,t.id"
+		if search != "" {
+			order = `CASE WHEN t.normalized_name=? THEN 0
+ WHEN EXISTS(SELECT 1 FROM tag_aliases a WHERE a.tag_id=t.id AND a.normalized_name=?) THEN 1
+ WHEN instr(t.normalized_name,?)=1 THEN 2
+ WHEN EXISTS(SELECT 1 FROM tag_aliases a WHERE a.tag_id=t.id AND instr(a.normalized_name,?)=1) THEN 2
+ ELSE 3 END,t.normalized_name,t.id`
+			args = append(args, search, search, search, search)
+		}
+		rows, err := tx.Query("SELECT t.id"+where+" ORDER BY "+order+" LIMIT ? OFFSET ?", append(args, page.Limit, page.Offset)...)
 		if err != nil {
 			return err
 		}

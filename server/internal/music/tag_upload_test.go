@@ -70,9 +70,9 @@ func TestTagUploadDraftAtomicCommitAndDedupPermissions(t *testing.T) {
 	if second.DuplicateOf != track.ID || second.TagVersions == nil || second.TagVersions.PublicVersion != view.PublicVersion || second.TagVersions.PersonalVersion != 1 {
 		t.Fatal(second)
 	}
-	_, _, err = s.commitUploadStageWithTags(second.ID, nil, &UploadTagEdits{Public: &UploadTagEdit{Version: view.PublicVersion, RemoveIDs: []string{public.ID}}}, aliceOptions)
-	if !errors.Is(err, errResourceHidden) {
-		t.Fatal("duplicate bypassed public owner", err)
+	_, _, err = s.commitUploadStageWithTags(second.ID, nil, &UploadTagEdits{Public: &UploadTagEdit{Version: view.PublicVersion + 99, RemoveIDs: []string{public.ID}}}, aliceOptions)
+	if !errors.Is(err, errVersionConflict) {
+		t.Fatal("duplicate bypassed public version", err)
 	}
 	if _, ok, err := s.UploadStage(second.ID); err != nil || !ok {
 		t.Fatal("failed commit consumed draft", ok, err)
@@ -100,6 +100,18 @@ func TestTagUploadDraftAtomicCommitAndDedupPermissions(t *testing.T) {
 	view, err = s.GetTrackTags(alice, track.ID)
 	if err != nil || len(view.Public) != 1 || len(view.Personal) != 1 {
 		t.Fatal(view, err)
+	}
+	third, err := s.StageAudio("community-duplicate.wav", bytes.NewReader(data), nil, aliceOptions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contributed, duplicate, err := s.commitUploadStageWithTags(third.ID, nil, &UploadTagEdits{Public: &UploadTagEdit{Version: view.PublicVersion, RemoveIDs: []string{public.ID}}}, aliceOptions)
+	if err != nil || !duplicate || contributed.ID != track.ID || contributed.ContentHash != track.ContentHash || contributed.OwnerID != track.OwnerID || contributed.UploadedBy != track.UploadedBy {
+		t.Fatal("community duplicate changed identity", contributed, duplicate, err)
+	}
+	view, err = s.GetTrackTags(alice, track.ID)
+	if err != nil || len(view.Public) != 0 || len(view.Personal) != 1 {
+		t.Fatal("duplicate contribution failed", view, err)
 	}
 }
 

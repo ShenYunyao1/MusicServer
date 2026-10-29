@@ -143,8 +143,8 @@ func TestTagDictionaryPrivateIsolationSessionsAndAudit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateTag(own, TagInput{GroupID: "custom", Name: "Unapproved public term"}); !errors.Is(err, errTagForbidden) {
-		t.Fatal("member created public dictionary term", err)
+	if _, err := s.CreateTag(own, TagInput{GroupID: "custom", Name: "Community public term"}); err != nil {
+		t.Fatal("member cannot create public dictionary term", err)
 	}
 	name := "Rename public"
 	if _, err := s.UpdateTag(own, public.ID, TagPatch{Name: &name}, public.Version); !errors.Is(err, errTagForbidden) {

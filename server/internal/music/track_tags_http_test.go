@@ -66,7 +66,7 @@ func TestTrackTagsHTTPDictionaryPermissionsAndMerge(t *testing.T) {
 		t.Fatal(w.Code, w.Body)
 	}
 	w = mailRequest(a, alice, "POST", "/api/v2/tags", `{"scope":"public","group_id":"genre","name":"No"}`, 0)
-	if w.Code != 403 {
+	if w.Code != 201 {
 		t.Fatal(w.Code, w.Body)
 	}
 	private := createHTTPTag(t, a, alice, "personal", "only-alice-secret")
@@ -123,10 +123,10 @@ func TestTrackTagsHTTPTrackScopesAndVersions(t *testing.T) {
 		t.Fatal("personal tag changed track")
 	}
 	w = mailRequest(a, alice, "PATCH", path, fmt.Sprintf(`{"scope":"public","add_ids":[%q]}`, public.ID), 1)
-	if w.Code != 403 && w.Code != 404 {
+	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body)
 	}
-	w = mailRequest(a, admin, "PATCH", path, fmt.Sprintf(`{"scope":"public","add_ids":[%q]}`, public.ID), 1)
+	w = mailRequest(a, admin, "PATCH", path, fmt.Sprintf(`{"scope":"public","add_ids":[%q]}`, public.ID), 2)
 	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body)
 	}

@@ -175,7 +175,7 @@ func validateTagBatchEdits(tx *sql.Tx, auth authContext, scope string, add, remo
 	return nil
 }
 func tagBatchTrack(tx *sql.Tx, auth authContext, scope, id string) (int64, error) {
-	track, err := readTrackFrom(tx, id, false)
+	_, err := readTrackFrom(tx, id, false)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, errResourceHidden
@@ -185,9 +185,6 @@ func tagBatchTrack(tx *sql.Tx, auth authContext, scope, id string) (int64, error
 	actor, err := tagActor(tx, auth)
 	if err != nil {
 		return 0, err
-	}
-	if scope == "public" && actor.Role != "admin" && track.OwnerID != actor.ID {
-		return 0, errResourceHidden
 	}
 	scopeID, err := tagScopeID(actor.ID, scope)
 	if err != nil {
