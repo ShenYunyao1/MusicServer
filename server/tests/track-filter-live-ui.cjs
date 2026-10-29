@@ -36,7 +36,9 @@ async function main(){
     await page.evaluate(async()=>{await api('tags','POST',{scope:'public',group_id:'genre',name:'Snapshot change'});await loadFilteredTracks(50)});
     assert.equal(await page.evaluate(()=>browseState.tracks.offset),0);assert.match(await page.locator('#status').textContent(),/更新|变化/);
     await page.locator('#trackAdvancedFilter').click();await page.locator('#savedTrackFilter').selectOption(presetID);await page.locator('#filterDeletePreset').click();await page.waitForFunction(()=>document.querySelector('#savedTrackFilter').options.length===1);
-    await page.setViewportSize({width:390,height:850});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+    await page.setViewportSize({width:390,height:850});
+    // Mobile geometry must fit immediately, including the avatar account control.
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
     const screenshot=path.resolve(__dirname,'../build/tag-bridge/ui/track-filter-narrow.png');fs.mkdirSync(path.dirname(screenshot),{recursive:true});await page.screenshot({path:screenshot,fullPage:true});
     await page.locator('#trackFilterDialog').getByRole('button',{name:'关闭',exact:true}).first().click();
     await page.goto(base.href.replace(/\/$/,'')+'/#/library?filter=missing');await page.reload();await page.locator('#trackAdvancedFilter').waitFor({state:'visible'});await page.waitForFunction(()=>browseState.tracks?.filterKey);
