@@ -29,7 +29,7 @@ module.exports=async function({page,directory}){
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'Quota dialog fits mobile width');await page.click('#cancelQuota');
  await page.setViewportSize({width:1440,height:1100});
  await page.goto(base+'#/admin/users/'+admin.id);await page.locator('[data-account-action="quota"]').click();await page.locator('#quotaEditor').waitFor({state:'visible'});await page.click('#cancelQuota');
- await page.goto(base+'#/account/profile');await page.waitForFunction(()=>document.querySelector('#personalStorageStatus').textContent.includes('音频占用'));
+ await page.goto(base+'#/account/storage');await page.waitForFunction(()=>document.querySelector('#personalStorageMetrics')?.children.length===3);
  await page.goto(base+'#/admin/settings/storage');await page.waitForFunction(()=>storageView&&!storageLoading);
  await page.fill('#storageReserve','256');await page.click('#saveStoragePolicy');await page.waitForFunction(()=>storageView.policy.reserve_bytes===268435456);
  await page.reload();await page.waitForFunction(()=>storageView&&!storageLoading);assert.equal(await page.inputValue('#storageReserve'),'256');

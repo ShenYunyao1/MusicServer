@@ -165,7 +165,7 @@ async function restoreWorkspaceRoute() {
   if(!location.hash || location.hash==='#/') {history.replaceState(null,'','#/'+pageRoutes[isAdministrator()?'overview':'tracks']);}
   const path=location.hash.slice(2).split('?')[0].split('/');
   let page=Object.keys(pageRoutes).find(key=>pageRoutes[key]===path.join('/'));
-  if(path[0]==='account'&&path.length===2&&['profile','security','sessions'].includes(path[1]))page='account';
+  if(path[0]==='account'&&path.length===2&&['profile','storage','security','sessions'].includes(path[1]))page='account';
   if(path[0]==='playlists'&&path.length===2)page='playlists';
   if(path[0]==='playlists'&&path.length===3&&path[2]==='edit')page='playlists';
   if(path[0]==='subscriptions'&&(path.length===1||path.length===2))page='playlists';

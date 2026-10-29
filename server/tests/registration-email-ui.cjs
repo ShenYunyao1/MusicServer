@@ -75,14 +75,14 @@ module.exports=async function registrationEmailUI({page,browser,base,directory})
       view={email:'person@example.invalid',email_verified:true,email_verification_required:true,upload_allowed:true,pending_email:'',challenge_id:'',delivery_status:'sent'};await request.fulfill({status:200,json:view});
     });
     await route('**/api/v2/auth/me',request=>request.fulfill({status:200,json:{...originalIdentity,user:{...originalIdentity.user,email:view.email,email_verified:view.email_verified,email_verification_required:true,upload_allowed:view.upload_allowed}}}));
-    await page.goto(base+'#/account/profile');await page.waitForFunction(()=>document.querySelector('#emailBindingStatus').textContent.includes('需要验证'));
-    await page.fill('#accountEmail','person@example.invalid');await page.click('#sendEmailCode');await page.locator('#emailVerifyForm').waitFor({state:'visible'});
+    await page.goto(base+'#/account/security');await page.waitForFunction(()=>document.querySelector('#emailBindingStatus').textContent.includes('需要验证'));
+    await page.locator('#editEmail').click();await page.locator('#accountEmail').waitFor({state:'visible'});await page.fill('#accountEmail','person@example.invalid');await page.click('#sendEmailCode');await page.locator('#emailVerifyForm').waitFor({state:'visible'});
     await page.fill('#emailCode','123450');await page.click('#verifyEmailCode');await page.waitForFunction(()=>document.querySelector('#emailProfileError').textContent.includes('400'));
     assert.equal(await page.inputValue('#emailCode'),'123450');
-    await page.fill('#emailCode','123456');await page.click('#verifyEmailCode');await page.waitForFunction(()=>state.user.email_verified&&state.user.upload_allowed);
-    assert.equal(await page.inputValue('#emailCode'),'');assert.ok((await page.locator('#emailBindingStatus').textContent()).includes('邮箱已验证'));assert.equal(await page.locator('#emailBindingStatus').isVisible(),true);assert.equal(await page.locator('#personalStorageStatus').isVisible(),true);
+    await page.fill('#emailCode','123456');await page.click('#verifyEmailCode');await page.waitForFunction(()=>state.user.email_verified&&state.user.upload_allowed);await page.locator('#personalEditDialog').waitFor({state:'detached'});
+    assert.equal(await page.locator('#emailCode').count(),0);assert.ok((await page.locator('#emailBindingStatus').textContent()).includes('邮箱已验证'));assert.equal(await page.locator('#emailBindingStatus').isVisible(),true);await page.goto(base+'#/account/storage');await page.locator('#personalStorageStatus').waitFor({state:'visible'});assert.equal(await page.locator('#personalStorageStatus').isVisible(),true);
     await page.setViewportSize({width:390,height:844});await page.waitForFunction(()=>document.querySelector('.main').getBoundingClientRect().left<=1&&document.querySelector('#sidebar').getBoundingClientRect().right<=1);await page.evaluate(()=>document.querySelector('#notifications')?.replaceChildren());await page.screenshot({path:path.join(directory,'email-profile-mobile.png'),fullPage:true});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.setViewportSize({width:1440,height:1100});
-    await page.evaluate(()=>clearEmailWorkspace());assert.equal(await page.inputValue('#accountEmail'),'');assert.equal(await page.inputValue('#emailCurrentPassword'),'');assert.equal(await page.inputValue('#emailCode'),'');
+    await page.evaluate(()=>clearEmailWorkspace());assert.equal(await page.locator('#accountEmail').count(),0);assert.equal(await page.locator('#emailCurrentPassword').count(),0);assert.equal(await page.locator('#emailCode').count(),0);
 
     const context=await browser.newContext({viewport:{width:390,height:844}});contexts.push(context);const anonymous=await context.newPage();let registrationBody;
     await anonymous.route('**/api/v2/registration/config',request=>request.fulfill({status:200,json:{enabled:true,mail_ready:true}}));
@@ -120,11 +120,14 @@ async function realBrowserFlow({browser,page,base,directory,fs}){
     await member.fill('#password','email browser personal password');await member.click('#loginButton');await member.waitForFunction(()=>state.user&&document.querySelector('#status').textContent==='已登录');return member;
   };
   const verify=async(member,address)=>{
-    await member.evaluate(()=>location.hash='#/account/profile');await member.locator('#accountEmail').waitFor({state:'visible'});
+    await member.evaluate(()=>location.hash='#/account/security');await member.locator('#editEmail').click();await member.locator('#accountEmail').waitFor({state:'visible'});
     await member.fill('#accountEmail',address);await member.click('#sendEmailCode');await member.waitForFunction(()=>Boolean(emailView?.challenge_id));
     const challenge=await member.evaluate(()=>emailView.challenge_id),mail=await delivery(address);
+    await member.click('#cancelPersonalEdit');if(await member.locator('#personalDiscard').isVisible())await member.click('#discardPersonalEdit');await member.locator('#personalEditDialog').waitFor({state:'detached'});
+    assert.equal(await member.locator('#emailCode').count(),0,'Closing clears sensitive inputs but keeps the server challenge');
+    await member.click('#editEmail');await member.locator('#emailVerifyForm').waitFor({state:'visible'});assert.equal(await member.inputValue('#emailCode'),'');
     await member.fill('#emailCode',mail.code==='000000'?'999999':'000000');await member.click('#verifyEmailCode');await member.waitForFunction(()=>document.querySelector('#emailProfileError').textContent.includes('400'));
-    await member.fill('#emailCode',mail.code);await member.click('#verifyEmailCode');await member.waitForFunction(()=>state.user.email_verified&&state.user.upload_allowed);
+    await member.fill('#emailCode',mail.code);await member.click('#verifyEmailCode');await member.waitForFunction(()=>state.user.email_verified&&state.user.upload_allowed);await member.locator('#personalEditDialog').waitFor({state:'detached'});
     await member.evaluate(async({challenge,code})=>{const repeated=await api('auth/email/verify','POST',{challenge_id:challenge,code});if(!repeated.email_verified)throw new Error('Repeated verification was not idempotent')},{challenge,code:mail.code});
   };
   try{
@@ -156,10 +159,10 @@ async function realBrowserFlow({browser,page,base,directory,fs}){
     await early.setInputFiles('#uploadInput',{name:'email-upload.wav',mimeType:'audio/wav',buffer:audio});await early.locator('[data-stage-upload]').click();await early.waitForFunction(()=>state.uploads[0]?.stageId);await early.locator('[data-confirm-upload]').click();await early.waitForFunction(()=>['完成','已去重'].includes(state.uploads[0]?.status));
     assert.equal(await early.evaluate(async()=>(await api('auth/storage')).used_bytes),audio.length,'Verified member uses the assigned audio quota');
     await ageChallenge(await early.evaluate(()=>state.user.id));
-    await early.evaluate(()=>location.hash='#/account/profile');await early.locator('#accountEmail').waitFor({state:'visible'});await early.fill('#accountEmail','changed@example.invalid');await early.click('#sendEmailCode');await early.waitForFunction(()=>document.querySelector('#emailProfileError').textContent.includes('400'));
+    await early.evaluate(()=>location.hash='#/account/security');await early.locator('#editEmail').click();await early.locator('#accountEmail').waitFor({state:'visible'});await early.fill('#accountEmail','changed@example.invalid');await early.click('#sendEmailCode');await early.waitForFunction(()=>document.querySelector('#emailProfileError').textContent.includes('400'));
     assert.equal(await early.evaluate(()=>state.user.email),'early@example.invalid','Changing email without the current password preserves the old binding');
     await early.fill('#emailCurrentPassword','email browser personal password');await early.click('#sendEmailCode');await early.waitForFunction(()=>emailView?.pending_email==='changed@example.invalid');
-    assert.equal(await early.evaluate(()=>state.user.email),'early@example.invalid');const changed=await delivery('changed@example.invalid');await early.fill('#emailCode',changed.code);await early.click('#verifyEmailCode');await early.waitForFunction(()=>state.user.email==='changed@example.invalid');
+    assert.equal(await early.evaluate(()=>state.user.email),'early@example.invalid');const changed=await delivery('changed@example.invalid');await early.fill('#emailCode',changed.code);await early.click('#verifyEmailCode');await early.waitForFunction(()=>state.user.email==='changed@example.invalid');await early.locator('#personalEditDialog').waitFor({state:'detached'});
     assert.equal(await early.evaluate(async()=>(await api('auth/storage')).limit_bytes),1048576,'Changing email never grants the new default quota');
     await early.setViewportSize({width:390,height:844});await early.waitForFunction(()=>document.querySelector('.main').getBoundingClientRect().left<=1&&document.querySelector('#sidebar').getBoundingClientRect().right<=1&&document.querySelector('#emailBindingStatus').textContent.includes('邮箱已验证'));await early.evaluate(()=>document.querySelector('#notifications')?.replaceChildren());await early.screenshot({path:path.join(directory,'real-email-profile-mobile.png'),fullPage:true});assert.equal(await early.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
     // Old-account verification preserves the existing unlimited quota and unlocks uploads.

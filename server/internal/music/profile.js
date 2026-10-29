@@ -1,98 +1,84 @@
 'use strict';
-
-let personalRoute='', personalUserID=null, personalOriginalName='', personalVersion=0;
-let personalGeneration=0, personalBusy=false, personalReturnRoute='#/library', lastPersonalOrigin='#/library';
-let personalOtherSessions=0;
-
-function setupProfileWorkspace() {
-  const page=document.createElement('section');page.id='page-account';page.className='page';
-  page.innerHTML=`<button id="accountBack" class="btn page-back">← 返回</button>
-    <div class="page-intro"><div><h1>个人中心</h1><p>管理你的资料、密码和网页登录。</p></div></div>
-    <nav class="page-tabs" aria-label="个人中心页签">
-      <a class="btn" href="#/account/profile" data-account-tab="profile">基本资料</a>
-      <a class="btn" href="#/account/security" data-account-tab="security">账户安全</a>
-      <a class="btn" href="#/account/sessions" data-account-tab="sessions">登录管理</a>
-    </nav>
-    <section id="account-profile" class="panel account-panel" aria-label="基本资料">
-      <div class="profile-summary"><span id="profileAvatar" class="profile-avatar" aria-hidden="true"></span><div><strong id="profileHeading"></strong><p class="status">昵称用于展示，登录名用于登录和指定账户分享。</p></div></div>
-      <form id="profileForm" novalidate>
-        <div class="field"><label for="profileName">昵称</label><input id="profileName" autocomplete="nickname" maxlength="256" aria-describedby="profileNameHint profileError"><small id="profileNameHint">1–128 个字符，支持中文，允许与其他人重名。</small></div>
-        <div class="field"><label for="profileUsername">登录名</label><input id="profileUsername" readonly autocomplete="username"></div>
-        <dl class="profile-facts"><div><dt>账户角色</dt><dd id="profileRole"></dd></div><div><dt>注册时间</dt><dd><time id="profileCreatedAt"></time></dd></div></dl>
-        <p id="profileError" class="form-error" role="alert" hidden></p>
-        <div class="actions"><button id="saveProfile" class="btn primary" type="submit">保存资料</button><button id="reloadProfile" class="btn" type="button">重新读取资料</button><a class="btn" href="#/player/keys">播放器接入</a></div>
-      </form>
-    </section>
-    <section id="account-security" class="panel account-panel" aria-label="账户安全" hidden>
-      <p class="notice">修改密码后需要重新登录，播放器连接不受影响。</p>
-      <form id="accountPasswordForm" novalidate>
-        <div class="field"><label for="accountOldPassword">当前密码</label><input id="accountOldPassword" type="password" autocomplete="current-password" maxlength="1024"></div>
-        <div class="field"><label for="accountNewPassword">新密码</label><input id="accountNewPassword" type="password" autocomplete="new-password" maxlength="1024" aria-describedby="accountPasswordHint"><small id="accountPasswordHint">至少 12 个字符，最多 1024 个 UTF-8 字节，须与当前密码不同。</small></div>
-        <div class="field"><label for="accountConfirmPassword">确认新密码</label><input id="accountConfirmPassword" type="password" autocomplete="new-password" maxlength="1024"></div>
-        <button id="toggleAccountPassword" class="btn small" type="button" aria-pressed="false">显示密码</button>
-        <p id="accountPasswordError" class="form-error" role="alert" hidden></p>
-        <div class="actions"><button id="saveAccountPassword" class="btn primary" type="submit">修改并重新登录</button></div>
-      </form>
-    </section>
-    <section id="account-sessions" class="account-panel" aria-label="登录管理" hidden>
-      <div class="toolbar"><p class="status">这里管理网页登录；播放器 API Key 不受影响。</p><div class="actions"><button id="refreshAccountSessions" class="btn">刷新登录</button><button id="revokeOtherSessions" class="btn danger">退出其他所有登录</button></div></div>
-      <p id="accountSessionError" class="form-error" role="alert" hidden></p><p id="accountSessionStatus" class="status" role="status"></p><div id="accountSessionList"></div>
-    </section>`;
-  document.querySelector('.content').append(page);
-  setupEmailProfile();
-  if(typeof setupAvatarProfile==='function')setupAvatarProfile();
-  const entry=makeButton('个人中心',()=>navigatePage('account'));entry.id='personalCenter';
-  entry.addEventListener('click',()=>accountMenu.open=false);accountActions.prepend(entry);
-  $('changePassword').onclick=()=>location.hash='#/account/security';
-  $('manageSessions').textContent='登录管理';$('manageSessions').onclick=()=>location.hash='#/account/sessions';
-  $('accountBack').onclick=()=>location.hash=personalReturnRoute;
-  $('profileForm').onsubmit=savePersonalProfile;
-  $('reloadProfile').onclick=()=>{if(!personalBusy&&confirmPersonalExit())loadPersonalProfile(true)};
-  $('accountPasswordForm').onsubmit=savePersonalPassword;
-  $('toggleAccountPassword').onclick=()=>{
-    const show=$('accountNewPassword').type==='password';
-    for(const id of personalPasswordFields)$(id).type=show?'text':'password';
-    $('toggleAccountPassword').textContent=show?'隐藏密码':'显示密码';$('toggleAccountPassword').setAttribute('aria-pressed',String(show));
-  };
-  $('refreshAccountSessions').onclick=()=>loadPersonalSessions();
-  $('revokeOtherSessions').onclick=()=>mutatePersonalSessions(null);
-  window.addEventListener('beforeunload',event=>{if(personalDirty()){event.preventDefault();event.returnValue=''}});
-}
+let personalRoute='',personalUserID=null,personalOriginalName='',personalVersion=0,personalGeneration=0,personalBusy=false,personalReturnRoute='#/library',lastPersonalOrigin='#/library',personalOtherSessions=0;
+let personalEdit=null,personalEditEpoch=0;
 const personalPasswordFields=['accountOldPassword','accountNewPassword','accountConfirmPassword'];
-function personalError(id,message='') {$(id).textContent=message;$(id).hidden=!message;}
-function personalDirty() {
-  if(!state.user||!personalRoute||state.page!=='account')return false;
-  return personalRoute==='#/account/profile' ? $('profileName').value!==personalOriginalName||emailProfileDirty()||(typeof avatarDirty==='function'&&avatarDirty()) :
-    personalRoute==='#/account/security' && personalPasswordFields.some(id=>$(id).value!=='');
+function setupProfileWorkspace(){
+ const page=document.createElement('section');page.id='page-account';page.className='page';
+ page.innerHTML=`<button id="accountBack" class="btn page-back">← 返回</button><div class="page-intro"><h1>个人中心</h1></div>
+ <section class="panel account-summary"><div class="profile-summary"><span id="profileAvatar" class="profile-avatar" aria-hidden="true"></span><div><strong id="profileHeading"></strong><p id="profileSummaryMeta" class="status"></p></div></div><a id="accountCapacitySummary" href="#/account/storage">读取容量…</a></section>
+ <nav class="page-tabs" aria-label="个人中心页签">${[['profile','基本资料'],['storage','存储与上传'],['security','账户安全'],['sessions','登录管理']].map(([key,name])=>'<a class="btn" href="#/account/'+key+'" data-account-tab="'+key+'">'+name+'</a>').join('')}</nav>
+ <section id="account-profile" class="panel account-panel"><div class="storage-section-head"><h2>基本资料</h2><button id="editProfile" class="btn primary">编辑资料</button></div><dl class="profile-facts"><div><dt>昵称</dt><dd id="profileDisplayName"></dd></div><div><dt>登录名</dt><dd id="profileUsername"></dd></div><div><dt>角色</dt><dd id="profileRole"></dd></div><div><dt>注册时间</dt><dd><time id="profileCreatedAt"></time></dd></div></dl><p id="profilePageError" class="form-error" hidden></p></section>
+ <section id="account-storage" class="panel account-panel" hidden><div class="storage-section-head"><h2>存储与上传</h2><button id="refreshPersonalStorage" class="btn">刷新容量</button></div><div id="personalStorageMetrics" class="personal-storage-metrics"></div><progress id="personalStorageProgress" max="100" hidden></progress><p id="personalStorageStatus" class="status"></p><p id="personalUploadStatus" class="notice"></p><div class="actions"><a class="btn primary" href="#/uploads">上传曲目</a><a class="btn" href="#/library?filter=mine">查看我的上传</a><a class="btn" href="#/account/security">邮箱与上传资格</a></div><details class="storage-rules"><summary>容量统计说明</summary><p>按原始上传者统计音频占用，接管不转移占用；头像不计入音频额度。额度由管理员调整。</p></details></section>
+ <section id="account-security" class="account-panel" hidden><article id="emailProfile" class="panel"><div class="storage-section-head"><h2>邮箱</h2><button id="editEmail" class="btn">绑定／更换邮箱</button></div><p id="emailBindingStatus" class="notice"></p><p id="emailProfilePageError" class="form-error" hidden></p></article><article class="panel"><div class="storage-section-head"><h2>登录密码</h2><button id="editPassword" class="btn">修改密码</button></div><p class="status">修改成功后重新登录，播放器 Key 保留。</p></article></section>
+ <section id="account-sessions" class="account-panel" hidden><div class="toolbar"><p class="status">管理网页登录；播放器 API Key 不受影响。</p><div class="actions"><button id="refreshAccountSessions" class="btn">刷新登录</button><button id="revokeOtherSessions" class="btn danger">退出其他所有登录</button></div></div><p id="accountSessionError" class="form-error" hidden></p><p id="accountSessionStatus" class="status"></p><div id="accountSessionList"></div></section>`;
+ document.querySelector('.content').append(page);
+ const entry=makeButton('个人中心',()=>navigatePage('account'));entry.id='personalCenter';entry.addEventListener('click',()=>accountMenu.open=false);accountActions.prepend(entry);
+ $('changePassword').onclick=()=>openPersonalEditor('password');$('manageSessions').onclick=()=>location.hash='#/account/sessions';
+ $('accountBack').onclick=()=>location.hash=personalReturnRoute;
+ $('editProfile').onclick=()=>openPersonalEditor('profile');$('editPassword').onclick=()=>openPersonalEditor('password');$('editEmail').onclick=()=>openPersonalEditor('email');
+ $('refreshPersonalStorage').onclick=()=>loadPersonalStorage();$('refreshAccountSessions').onclick=()=>loadPersonalSessions();$('revokeOtherSessions').onclick=()=>mutatePersonalSessions(null);
+ window.addEventListener('beforeunload',event=>{if(personalDirty()){event.preventDefault();event.returnValue=''}});
 }
-function confirmPersonalExit() {
-  if(personalBusy||(typeof avatarWorkspace!=='undefined'&&avatarWorkspace.busy))return false;
-  return !personalDirty()||confirm('个人中心有尚未保存的输入，放弃修改并离开？');
+function personalError(id,message=''){const n=$(id);if(n){n.textContent=message;n.hidden=!message}}
+function personalEditCurrent(e){return personalEdit===e&&e.owner===state.user?.id&&e.epoch===personalEditEpoch&&e.dialog.isConnected}
+function personalDirty(){
+ const e=personalEdit;if(!e||!personalEditCurrent(e))return false;
+ if(e.type==='profile')return Boolean($('profileName')&&$('profileName').value!==e.originalName||avatarDirty());
+ if(e.type==='password')return personalPasswordFields.some(id=>$(id)?.value);
+ return Boolean(emailProfileDirty());
 }
-function resetPersonalPassword() {
-  $('accountPasswordForm').reset();personalPasswordFields.forEach(id=>$(id).type='password');
-  $('toggleAccountPassword').textContent='显示密码';$('toggleAccountPassword').setAttribute('aria-pressed','false');
+function confirmPersonalExit(){return !personalEdit}
+function permitPersonalNavigation(hash){if(personalEdit){history.replaceState(null,'',personalEdit.openingHash||'#/library');requestPersonalClose();return false}personalRoute='';++personalGeneration;return true}
+function notePersonalNavigation(hash,page){if(page!=='account')lastPersonalOrigin=hash}
+function resetPersonalPassword(){for(const id of personalPasswordFields)if($(id)){$(id).value='';$(id).type='password'}}
+function clearProfileWorkspace(){closePersonalEditor(true);++personalGeneration;personalBusy=false;personalRoute='';personalUserID=null;personalOriginalName='';personalVersion=0;personalOtherSessions=0;personalReturnRoute=lastPersonalOrigin='#/library';if(typeof clearAvatarWorkspace==='function')clearAvatarWorkspace();for(const id of ['profileDisplayName','profileUsername','profileHeading','profileRole','profileSummaryMeta','profileCreatedAt','emailBindingStatus','accountCapacitySummary','personalStorageStatus','personalUploadStatus','accountSessionStatus','accountSessionList','personalStorageMetrics'])if($(id))$(id).replaceChildren();if($('personalStorageProgress'))$('personalStorageProgress').hidden=true}
+function fillPersonalProfile(user){
+ personalOriginalName=user.display_name||user.username;personalVersion=user.version;
+ $('profileHeading').textContent=accountLabel(user);$('profileDisplayName').textContent=personalOriginalName;$('profileUsername').textContent=user.username;$('profileRole').textContent=user.role==='admin'?'管理员':'普通用户';
+ $('profileSummaryMeta').textContent='@'+user.username+' · '+$('profileRole').textContent;$('profileCreatedAt').textContent=new Date(user.created_at).toLocaleString();renderOwnAvatar();
 }
-function clearProfileWorkspace() {
-  if(typeof clearAvatarWorkspace==='function')clearAvatarWorkspace();
-  ++personalGeneration;personalBusy=false;personalRoute='';personalUserID=null;personalOriginalName='';personalVersion=0;personalOtherSessions=0;
-  personalReturnRoute=lastPersonalOrigin='#/library';
-  if(!$('page-account'))return;
-  $('profileForm').reset();resetPersonalPassword();
-  for(const id of ['profileAvatar','profileHeading','profileRole','profileCreatedAt','accountSessionStatus'])$(id).textContent='';
-  $('accountSessionList').replaceChildren();
-  for(const id of ['profileError','accountPasswordError','accountSessionError'])personalError(id);
-  setPersonalBusy(false);
+async function showPersonalCenter(tab){if(!personalRoute)personalReturnRoute=lastPersonalOrigin;personalRoute='#/account/'+tab;personalUserID=state.user.id;
+ for(const key of ['profile','storage','security','sessions']){$('account-'+key).hidden=key!==tab;const link=document.querySelector('[data-account-tab="'+key+'"]');link.classList.toggle('active',key===tab);if(key===tab)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current')}
+ fillPersonalProfile(state.user);if(tab==='sessions')await loadPersonalSessions();else if(tab==='storage')await loadPersonalStorage();else if(tab==='security')await loadEmailProfile();else await loadPersonalProfile();
 }
-function permitPersonalNavigation(hash) {
-  if(!personalRoute||hash===personalRoute)return true;
-  if(!confirmPersonalExit()){history.replaceState(null,'',personalRoute);return false}
-  if(typeof discardAvatarDraft==='function')discardAvatarDraft();
-  personalRoute='';personalOriginalName='';resetPersonalPassword();++personalGeneration;return true;
+async function loadPersonalProfile(){const generation=++personalGeneration,owner=state.user?.id;try{const identity=await api('auth/me');if(generation!==personalGeneration||owner!==state.user?.id)return;applyPersonalIdentity(identity);fillPersonalProfile(identity.user);await Promise.all([loadOwnAvatar(),loadPersonalStorage()])}catch(error){if(owner===state.user?.id)personalError('profilePageError',error.message)}}
+async function loadPersonalStorage(){const owner=state.user?.id,generation=personalGeneration;try{const [storage,view]=await Promise.all([api('auth/storage'),api('auth/email')]);if(owner!==state.user?.id||generation!==personalGeneration)return;
+ $('personalStorageStatus').hidden=false;const limit=storage.limit_bytes,used=storage.used_bytes;$('accountCapacitySummary').textContent='音频占用 '+storageBytes(used)+' / '+(limit?storageBytes(limit):'不限额');
+ $('personalStorageMetrics').replaceChildren();for(const [label,value]of [['已使用',storageBytes(used)],['容量额度',limit?storageBytes(limit):'不限额'],['剩余可用',limit?storageBytes(Math.max(0,limit-used)):'不限额']]){const n=document.createElement('div');const title=document.createElement('span'),strong=document.createElement('strong');title.textContent=label;strong.textContent=value;n.append(title,strong);$('personalStorageMetrics').append(n)}
+ $('personalStorageProgress').hidden=!limit;$('personalStorageProgress').value=limit?Math.min(100,used/limit*100):0;
+ $('personalStorageStatus').textContent=limit&&used>=limit?'已达到容量额度，请联系管理员调整。':'按原始上传者统计音频占用。';
+ $('personalUploadStatus').textContent=limit&&used>=limit?'容量不足，暂时无法新增上传。':view.email_verification_required!==false&&!view.email_verified?'验证邮箱后可以上传。':'当前可以按账户配额上传。';
+ }catch(error){if(owner===state.user?.id)personalError('personalStorageStatus',error.message)}}
+function requestPersonalClose(){const e=personalEdit;if(!e||e.busy||avatarWorkspace.busy||emailBusy)return;e.afterDiscard=null;if(!personalDirty()){closePersonalEditor();return}$('personalDiscard').hidden=false;$('continuePersonalEdit').focus()}
+function closePersonalEditor(force=false){const e=personalEdit;if(!e)return;if(!force&&(e.busy||avatarWorkspace.busy||emailBusy))return;personalEdit=null;personalEditEpoch++;if(e.type==='email'){emailProfileGeneration++;emailEpoch++;emailBusy=false}discardAvatarDraft();resetPersonalPassword();e.dialog.close();e.dialog.remove()}
+async function openPersonalEditor(type){
+ if(!state.user||personalEdit)return;++personalGeneration;const dialog=document.createElement('dialog');dialog.id='personalEditDialog';dialog.className='modal personal-edit-dialog';dialog.dataset.type=type;
+ const e={dialog,type,openingHash:location.hash,owner:state.user.id,epoch:++personalEditEpoch,busy:false,loading:true,originalName:''};personalEdit=e;
+ dialog.innerHTML='<div class="modal-head"><h3>'+({profile:'编辑资料',email:'绑定／更换邮箱',password:'修改密码'}[type])+'</h3><button id="closePersonalEdit" class="btn" type="button">关闭</button></div><div id="personalEditBody" class="modal-body"></div><div id="personalDiscard" class="notice" hidden><p>有尚未保存的修改，是否放弃？</p><button id="discardPersonalEdit" class="btn danger" type="button">放弃修改</button><button id="continuePersonalEdit" class="btn" type="button">继续编辑</button></div><div class="modal-foot"><button id="cancelPersonalEdit" class="btn" type="button">取消</button></div>';
+ document.body.append(dialog);$('closePersonalEdit').onclick=$('cancelPersonalEdit').onclick=requestPersonalClose;$('continuePersonalEdit').onclick=()=>{e.afterDiscard=null;$('personalDiscard').hidden=true};$('discardPersonalEdit').onclick=()=>{const after=e.afterDiscard;closePersonalEditor();if(!personalEdit&&after)void after()};
+ dialog.addEventListener('cancel',event=>{event.preventDefault();requestPersonalClose()});dialog.showModal();
+ $('personalEditBody').textContent='正在读取…';
+ try{
+ if(type==='profile'){
+ const [identity,avatar]=await Promise.all([api('auth/me'),api('auth/avatar')]);if(!personalEditCurrent(e))return;e.originalName=identity.user.display_name||identity.user.username;e.userVersion=identity.user.version;
+ avatarWorkspace.owner=e.owner;avatarWorkspace.epoch++;avatarWorkspace.metadata=avatar;avatarWorkspace.version=avatar.version;avatarWorkspace.loading=false;
+ $('personalEditBody').innerHTML='<form id="profileForm" novalidate><div class="field"><label for="profileName">昵称</label><input id="profileName" autocomplete="nickname" maxlength="256"></div><p id="profileError" class="form-error" hidden></p><div class="actions"><button id="saveProfile" class="btn primary" type="submit">保存更改</button><button id="reloadProfile" class="btn" type="button">重新读取资料</button></div></form>';
+ $('profileName').value=e.originalName;$('profileName').oninput=updateAvatarControls;setupAvatarProfile();$('profileForm').onsubmit=savePersonalProfile;$('reloadProfile').onclick=()=>{if(personalDirty()){e.afterDiscard=()=>openPersonalEditor('profile');$('personalDiscard').hidden=false;return}closePersonalEditor();void openPersonalEditor('profile')};
+ }else if(type==='password'){
+ $('personalEditBody').innerHTML='<form id="accountPasswordForm" novalidate><p class="notice">修改后需要重新登录，播放器 Key 保留。</p>'+[['accountOldPassword','当前密码','current-password'],['accountNewPassword','新密码','new-password'],['accountConfirmPassword','确认新密码','new-password']].map(([id,name,autocomplete])=>'<div class="field"><label for="'+id+'">'+name+'</label><input id="'+id+'" type="password" autocomplete="'+autocomplete+'" maxlength="1024"></div>').join('')+'<button id="toggleAccountPassword" class="btn" type="button" aria-pressed="false">显示密码</button><p id="accountPasswordError" class="form-error" hidden></p><button id="saveAccountPassword" class="btn primary">修改并重新登录</button></form>';
+ $('accountPasswordForm').onsubmit=savePersonalPassword;$('toggleAccountPassword').onclick=()=>{const show=$('accountNewPassword').type==='password';for(const id of personalPasswordFields)$(id).type=show?'text':'password';$('toggleAccountPassword').textContent=show?'隐藏密码':'显示密码';$('toggleAccountPassword').setAttribute('aria-pressed',String(show))};
+ }else{setupEmailEditor();setEmailBusy(true);try{await loadEmailProfile(true)}finally{if(personalEditCurrent(e))setEmailBusy(false)}}
+ }catch(error){if(personalEditCurrent(e)){$('personalEditBody').textContent='读取失败：'+error.message}}
+ finally{if(personalEditCurrent(e)){e.loading=false;updateProfileSaveState()}}
 }
-function notePersonalNavigation(hash,page) {
-  if(page!=='account')lastPersonalOrigin=hash;
-}
+function updateProfileSaveState(){const e=personalEdit;if(e?.type==='profile'&&$('saveProfile'))$('saveProfile').disabled=e.busy||e.loading||avatarWorkspace.decoding||!personalDirty()}
+function setPersonalBusy(busy){personalBusy=busy;const e=personalEdit;if(e){e.busy=busy;if(e.type==='profile')avatarWorkspace.busy=busy;e.dialog.querySelectorAll('input,select,button').forEach(n=>n.disabled=busy);updateProfileSaveState()}if($('revokeOtherSessions'))$('revokeOtherSessions').disabled=busy||!personalOtherSessions;document.querySelectorAll('[data-revoke-session]').forEach(b=>b.disabled=busy)}
+async function savePersonalProfile(event){event.preventDefault();const e=personalEdit;if(!e||e.busy||e.loading||avatarWorkspace.decoding)return;const name=$('profileName').value.trim();if(!name||Array.from(name).length>128){personalError('profileError','请输入1–128个字符的昵称。');return}
+ setPersonalBusy(true);try{const form=new FormData();form.set('display_name',name);await appendAvatarProfileDraft(form);if(!personalEditCurrent(e))return;const identity=await api('auth/profile','PUT',form,undefined,e.userVersion);if(!personalEditCurrent(e))return;++personalGeneration;avatarWorkspace.metadata=identity.avatar;avatarWorkspace.version=identity.avatar.version;applyPersonalIdentity(identity);fillPersonalProfile(identity.user);e.busy=false;personalBusy=false;avatarWorkspace.busy=false;closePersonalEditor();setStatus('资料已保存','ok')}
+ catch(error){if(personalEditCurrent(e))personalError('profileError',error.status===409?'资料已变化，草稿保留。请取消后重新读取。':error.message)}finally{if(personalEditCurrent(e))setPersonalBusy(false)}}
+async function savePersonalPassword(event){event.preventDefault();const e=personalEdit;if(!e||e.busy)return;const old=$('accountOldPassword').value,next=$('accountNewPassword').value,confirm=$('accountConfirmPassword').value;
+ const error=!old?'请输入当前密码。':next!==confirm?'两次新密码不一致。':Array.from(next).length<12||new TextEncoder().encode(next).length>1024?'新密码至少12字符，最多1024字节。':old===next?'新密码须不同于当前密码。':'';if(error){personalError('accountPasswordError',error);return}
+ setPersonalBusy(true);try{await api('auth/password','PUT',{old_password:old,new_password:next});if(!personalEditCurrent(e))return;setLoggedOut();$('loginError').textContent='密码已修改，请重新登录。'}catch(error){if(personalEditCurrent(e))personalError('accountPasswordError',error.message)}finally{if(personalEditCurrent(e))setPersonalBusy(false)}}
 function accountLabel(user) {
   return (user.display_name||user.username)+(user.username?' (@'+user.username+')':'');
 }
@@ -111,77 +97,7 @@ function applyPersonalIdentity(identity) {
   communityCache.clear();
   if(isAdministrator()){renderUsers();if(typeof renderManagedUserPage==='function')renderManagedUserPage()}
 }
-function fillPersonalProfile(user) {
-  personalOriginalName=user.display_name||user.username;personalVersion=user.version;
-  $('profileName').value=personalOriginalName;$('profileUsername').value=user.username;
-  $('profileHeading').textContent=accountLabel(user);
-  $('profileAvatar').textContent=Array.from(personalOriginalName.trim())[0]||'♪';
-  if(typeof renderOwnAvatar==='function')renderOwnAvatar();
-  $('profileRole').textContent=user.role==='admin'?'管理员':'普通用户';
-  $('profileCreatedAt').textContent=new Date(user.created_at).toLocaleString();$('profileCreatedAt').dateTime=user.created_at;
-}
-async function showPersonalCenter(tab) {
-  const route='#/account/'+tab;
-  if(personalRoute===route&&personalUserID===state.user.id&&personalDirty())return;
-  if(!personalRoute)personalReturnRoute=lastPersonalOrigin;
-  personalRoute=route;personalUserID=state.user.id;++personalGeneration;
-  for(const name of ['profile','security','sessions']){
-    $('account-'+name).hidden=name!==tab;
-    const link=document.querySelector('[data-account-tab="'+name+'"]');link.classList.toggle('active',name===tab);
-    if(name===tab)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');
-  }
-  for(const id of ['profileError','accountPasswordError','accountSessionError'])personalError(id);
-  if(tab==='profile'){fillPersonalProfile(state.user);await loadPersonalProfile()}
-  if(tab==='security')resetPersonalPassword();
-  if(tab==='sessions')await loadPersonalSessions();
-}
-async function loadPersonalProfile(force=false) {
-  const generation=++personalGeneration,userID=state.user?.id;
-  if(force)setPersonalBusy(true);
-  try {
-    const identity=await api('auth/me');
-    if(generation!==personalGeneration||state.user?.id!==userID||state.page!=='account')return;
-    if(identity.user.must_change_password){await enterAccount(identity);return}
-    applyPersonalIdentity(identity);
-    if(force||!personalDirty())fillPersonalProfile(identity.user);
-    await loadEmailProfile();
-    if(typeof loadOwnAvatar==='function')await loadOwnAvatar(force);
-    personalError('profileError');
-  }catch(error){if(generation===personalGeneration&&state.user?.id===userID)personalError('profileError',error.message)}
-  finally{if(force&&state.user?.id===userID)setPersonalBusy(false)}
-}
-function setPersonalBusy(busy) {
-  personalBusy=busy;
-  for(const id of ['saveProfile','reloadProfile','saveAccountPassword','refreshAccountSessions','revokeOtherSessions'])$(id).disabled=busy;
-  $('revokeOtherSessions').disabled=busy||!personalOtherSessions;
-  for(const id of ['profileName','toggleAccountPassword',...personalPasswordFields])$(id).disabled=busy;
-  document.querySelectorAll('[data-revoke-session]').forEach(button=>button.disabled=busy);
-}
-async function savePersonalProfile(event) {
-  event.preventDefault();if(personalBusy)return;personalError('profileError');
-  const name=$('profileName').value.trim(),userID=state.user?.id;
-  if(!name||Array.from(name).length>128){personalError('profileError','请输入 1–128 个字符的昵称。');$('profileName').focus();return}
-  setPersonalBusy(true);
-  try {
-    const identity=await api('auth/me','PATCH',{display_name:name},undefined,personalVersion);
-    if(state.user?.id!==userID)return;
-    applyPersonalIdentity(identity);fillPersonalProfile(identity.user);setStatus('昵称已保存','ok');
-  }catch(error){if(state.user?.id===userID)personalError('profileError',error.message)}
-  finally{setPersonalBusy(false)}
-}
-async function savePersonalPassword(event) {
-  event.preventDefault();if(personalBusy)return;personalError('accountPasswordError');
-  const old=$('accountOldPassword').value,next=$('accountNewPassword').value,confirm=$('accountConfirmPassword').value,userID=state.user?.id;
-  const error=!old?'请输入当前密码。':next!==confirm?'两次新密码不一致。':Array.from(next).length<12||new TextEncoder().encode(next).length>1024?'新密码至少 12 个字符，最多 1024 个 UTF-8 字节。':old===next?'新密码须与当前密码不同。':'';
-  if(error){personalError('accountPasswordError',error);return}
-  setPersonalBusy(true);
-  try {
-    await api('auth/password','PUT',{old_password:old,new_password:next});
-    if(state.user?.id!==userID)return;
-    setLoggedOut();$('loginError').textContent='密码已修改，请重新登录。';
-  }catch(error){if(state.user?.id===userID)personalError('accountPasswordError',error.message)}
-  finally{setPersonalBusy(false)}
-}
+
 async function loadPersonalSessions() {
   const generation=++personalGeneration,userID=state.user?.id;
   $('accountSessionStatus').textContent='正在读取登录…';personalError('accountSessionError');

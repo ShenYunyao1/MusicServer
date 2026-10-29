@@ -18,14 +18,15 @@ function renderOwnAvatar(){
 }
 function updateAvatarControls(){
  const a=avatarWorkspace;if(!$('avatarInput'))return;
- for(const id of ['avatarInput','resetAvatar','reloadAvatar','avatarZoom'])$(id).disabled=a.busy||a.loading;
+ for(const id of ['avatarInput','resetAvatar','avatarZoom'])$(id).disabled=a.busy||a.loading;
  $('chooseAvatar').disabled=a.busy||a.loading||a.decoding;
- $('saveAvatar').disabled=a.busy||a.loading||a.decoding||!a.draft;
+ if(typeof updateProfileSaveState==='function')updateProfileSaveState();
  $('avatarCrop').hidden=a.draft!=='image';$('avatarZoom').value=String(a.zoom);
- $('avatarDefaultPreview').hidden=a.draft!=='remove';$('avatarDefaultPreview').textContent=Array.from((state.user?.display_name||state.user?.username||'♪').trim())[0]||'♪';
- $('avatarPreviewNote').textContent=a.draft==='remove'?'预览：保存后恢复昵称首字头像。':a.draft==='image'?'预览中，点击保存头像后应用。':'JPEG / PNG，最多 8 MiB、20MP；保存为 256×256 静态头像。';
+ $('avatarDefaultPreview').hidden=a.draft!=='remove';$('avatarDefaultPreview').textContent=Array.from(($('profileName')?.value||state.user?.display_name||state.user?.username||'♪').trim())[0]||'♪';
+ $('avatarPreviewNote').textContent=a.draft==='remove'?'预览：保存资料后恢复昵称首字头像。':a.draft==='image'?'预览中，保存资料后统一应用。':'JPEG / PNG，最多 8 MiB、20MP；保存为 256×256 静态头像。';
 }
 async function loadOwnAvatar(discard=false){
+ if(typeof personalEdit!=='undefined'&&personalEdit?.type==='profile'&&!discard)return;
  if(!state.user)return;const a=avatarWorkspace,owner=state.user.id;
  if(a.owner!==owner){clearAvatarWorkspace();a.owner=owner}
  if((a.draft||a.decoding)&&!discard)return;if(discard)discardAvatarDraft();
@@ -73,25 +74,19 @@ function avatarImageDimensions(bytes,png){
  }
  return null;
 }
-async function saveOwnAvatar(){
- const a=avatarWorkspace;if(a.busy||a.loading||a.decoding||!a.draft)return;
- const owner=a.owner,epoch=a.epoch,form=new FormData();a.busy=true;updateAvatarControls();avatarMessage();
- try{
-  if(a.draft==='remove')form.set('remove','true');
-  else{const blob=await new Promise(resolve=>$('avatarCanvas').toBlob(resolve,'image/png'));if(!avatarCurrent(owner,epoch))return;if(!blob||blob.size>512*1024)throw new Error('头像生成失败或过大，请重新选择。');form.set('avatar',blob,'avatar.png')}
-  const metadata=await api('auth/avatar','PUT',form,undefined,a.version);if(!avatarCurrent(owner,epoch))return;
-  a.metadata=metadata;a.version=metadata.version;discardAvatarDraft();renderOwnAvatar();avatarMessage('头像已保存。');
- }catch(error){if(avatarCurrent(owner,epoch))avatarMessage(error.status===409?'头像已在其他页面修改，草稿保留。请重新读取后再选择保存。':error.message,true)}
- finally{if(avatarCurrent(owner,epoch)){a.busy=false;updateAvatarControls()}}
+async function appendAvatarProfileDraft(form){
+ const a=avatarWorkspace;if(!a.draft)return;form.set('avatar_version',String(a.version));
+ if(a.draft==='remove'){form.set('remove_avatar','true');return}
+ const blob=await new Promise(resolve=>$('avatarCanvas').toBlob(resolve,'image/png'));if(!blob||blob.size>512*1024)throw new Error('头像生成失败或过大，请重新选择。');form.set('avatar',blob,'avatar.png');
 }
+async function saveOwnAvatar(){return savePersonalProfile({preventDefault(){}})}
 function setupAvatarProfile(){
  if($('avatarEditor'))return;
  const box=document.createElement('section');box.id='avatarEditor';box.className='avatar-editor';box.setAttribute('aria-label','个人头像');
- box.innerHTML='<div class="actions"><button id="chooseAvatar" class="btn" type="button">选择头像</button><input id="avatarInput" type="file" accept="image/jpeg,image/png" hidden><button id="resetAvatar" class="btn" type="button">恢复默认</button></div><p id="avatarPreviewNote" class="status"></p><span id="avatarDefaultPreview" class="profile-avatar avatar-default-preview" role="img" aria-label="默认头像预览" hidden></span><div id="avatarCrop" hidden><canvas id="avatarCanvas" width="256" height="256" tabindex="0" role="img" aria-label="头像正方形裁剪预览，拖动或方向键调整位置"></canvas><label for="avatarZoom">缩放</label><input id="avatarZoom" type="range" min="1" max="4" step="0.01" value="1"></div><div class="actions"><button id="saveAvatar" class="btn primary" type="button">保存头像</button><button id="reloadAvatar" class="btn" type="button">重新读取头像</button></div><p id="avatarMessage" class="avatar-message" role="status" aria-live="polite"></p>';
- $('profileForm').before(box);$('avatarInput').onchange=()=>selectAvatarFile($('avatarInput').files[0]);$('saveAvatar').onclick=saveOwnAvatar;
+ box.innerHTML='<div class="actions"><button id="chooseAvatar" class="btn" type="button">选择头像</button><input id="avatarInput" type="file" accept="image/jpeg,image/png" hidden><button id="resetAvatar" class="btn" type="button">恢复默认</button></div><p id="avatarPreviewNote" class="status"></p><span id="avatarDefaultPreview" class="profile-avatar avatar-default-preview" role="img" aria-label="默认头像预览" hidden></span><div id="avatarCrop" hidden><canvas id="avatarCanvas" width="256" height="256" tabindex="0" role="img" aria-label="头像正方形裁剪预览，拖动或方向键调整位置"></canvas><label for="avatarZoom">缩放</label><input id="avatarZoom" type="range" min="1" max="4" step="0.01" value="1"></div><p id="avatarMessage" class="avatar-message" role="status" aria-live="polite"></p>';
+ $('profileForm').before(box);$('avatarInput').onchange=()=>selectAvatarFile($('avatarInput').files[0]);
  $('chooseAvatar').onclick=()=>{if(!$('chooseAvatar').disabled)$('avatarInput').click()};
  $('resetAvatar').onclick=()=>{if(avatarWorkspace.busy||avatarWorkspace.loading)return;discardAvatarDraft();avatarWorkspace.draft='remove';avatarMessage();updateAvatarControls()};
- $('reloadAvatar').onclick=()=>{if(!avatarWorkspace.busy&&(!avatarDirty()||confirm('放弃未保存的头像修改并重新读取？')))void loadOwnAvatar(true)};
  $('avatarZoom').oninput=()=>{avatarWorkspace.zoom=Number($('avatarZoom').value);drawAvatarCrop()};
  const canvas=$('avatarCanvas');let drag=null;
  canvas.onpointerdown=event=>{if(event.button!==0||avatarWorkspace.busy)return;drag={id:event.pointerId,x:event.clientX,y:event.clientY};canvas.setPointerCapture(event.pointerId)};

@@ -6,7 +6,7 @@ let registrationSettings=null,registrationDirty=false,registrationSaving=false;
 let mailSettings=null,mailDirty=false,mailSaving=false,mailPollTimer;
 let emailSettingsRoute='';
 function emailCurrent(owner,epoch){return state.user?.id===owner&&emailEpoch===epoch}
-function emailProfileDirty(){return Boolean(emailView&&($('accountEmail').value.trim()!==(emailView.pending_email||emailView.email||'')||$('emailCurrentPassword').value||$('emailCode').value))}
+function emailProfileDirty(){return Boolean($('accountEmail')&&emailView&&($('accountEmail').value.trim()!==(emailView.pending_email||emailView.email||'')||$('emailCurrentPassword').value||$('emailCode').value))}
 function permitEmailNavigation(hash){
   if(!emailSettingsRoute||hash===emailSettingsRoute)return true;
   if(mailSaving||registrationSaving){history.replaceState(null,'',emailSettingsRoute);return false}
@@ -55,31 +55,27 @@ async function registerAccount(event){
   }catch(error){if(epoch===emailEpoch)emailMessage('registrationError',error.message,true)}
   finally{if(epoch===emailEpoch)$('registerAccount').disabled=false}
 }
-function setupEmailProfile(){
-  if($('emailProfile'))return;
-  const section=document.createElement('section');section.id='emailProfile';section.className='email-profile';
-  section.innerHTML='<div class="storage-section-head"><h2>邮箱与上传资格</h2><button id="refreshEmail" class="btn small" type="button">刷新状态</button></div><p id="emailBindingStatus" class="notice"></p><p id="personalStorageStatus" class="status"></p><form id="emailChallengeForm" novalidate><div class="field"><label for="accountEmail">邮箱地址</label><input id="accountEmail" type="email" autocomplete="email" maxlength="254" required></div><div class="field" id="emailPasswordField" hidden><label for="emailCurrentPassword">当前密码</label><input id="emailCurrentPassword" type="password" autocomplete="current-password" maxlength="1024"><small>更换已绑定邮箱需要验证当前密码；新邮箱验证前保留原绑定。</small></div><div class="actions"><button id="sendEmailCode" class="btn" type="submit">发送验证码</button></div></form><form id="emailVerifyForm" novalidate hidden><div class="field"><label for="emailCode">邮箱验证码</label><input id="emailCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" aria-describedby="emailDeliveryStatus"></div><button id="verifyEmailCode" class="btn primary" type="submit">验证邮箱</button></form><p id="emailDeliveryStatus" class="status" role="status"></p><p id="emailProfileError" class="form-error" role="alert" hidden></p>';
-  $('account-profile').append(section);$('emailChallengeForm').onsubmit=sendEmailChallenge;$('emailVerifyForm').onsubmit=verifyEmailChallenge;$('refreshEmail').onclick=()=>loadEmailProfile(true);
+function setupEmailProfile(){}
+function setupEmailEditor(){
+  if($('emailChallengeForm'))return;
+  const section=document.createElement('section');section.id='emailEditorFields';section.className='email-profile';
+  section.innerHTML='<div class="storage-section-head"><h2>邮箱与上传资格</h2><button id="refreshEmail" class="btn small" type="button">刷新状态</button></div><p id="emailEditorBindingStatus" class="notice"></p><form id="emailChallengeForm" novalidate><div class="field"><label for="accountEmail">邮箱地址</label><input id="accountEmail" type="email" autocomplete="email" maxlength="254" required></div><div class="field" id="emailPasswordField" hidden><label for="emailCurrentPassword">当前密码</label><input id="emailCurrentPassword" type="password" autocomplete="current-password" maxlength="1024"><small>更换已绑定邮箱需要验证当前密码；新邮箱验证前保留原绑定。</small></div><div class="actions"><button id="sendEmailCode" class="btn" type="submit">发送验证码</button></div></form><form id="emailVerifyForm" novalidate hidden><div class="field"><label for="emailCode">邮箱验证码</label><input id="emailCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" aria-describedby="emailDeliveryStatus"></div><button id="verifyEmailCode" class="btn primary" type="submit">验证邮箱</button></form><p id="emailDeliveryStatus" class="status" role="status"></p><p id="emailProfileError" class="form-error" role="alert" hidden></p>';
+  $('personalEditBody').append(section);$('emailChallengeForm').onsubmit=sendEmailChallenge;$('emailVerifyForm').onsubmit=verifyEmailChallenge;$('refreshEmail').onclick=()=>loadEmailProfile(true);
 }
+
 function renderEmailProfile(view){
-  const requirement=view.email_verification_required===false?'此账户由管理员明确免验证。':view.email_verified?'邮箱已验证，可以按账户配额上传。':'需要验证邮箱后才能上传；现有曲目和歌单保留。';
-  $('emailBindingStatus').textContent=(view.email?'已绑定：'+view.email+'。':'尚未绑定邮箱。')+requirement;
-  $('emailBindingStatus').hidden=false;
-  if(!$('accountEmail').value)$('accountEmail').value=view.pending_email||view.email||'';
-  $('emailPasswordField').hidden=!view.email_verified;$('emailVerifyForm').hidden=!view.challenge_id;
-  const names={queued:'邮件已排队，等待提交邮件服务。',sending:'正在提交邮件服务。',submitted:'邮件已提交服务，请检查收件箱和垃圾邮件。',sent:'邮件已提交服务，请检查收件箱和垃圾邮件。',failed:'投递失败，请稍后重试或联系管理员。',expired:'验证码已过期，请重新发送。',locked:'错误次数过多，请稍后重新发送验证码。',pending:'验证码正在处理。'};
-  $('emailDeliveryStatus').textContent=(view.pending_email?'验证目标：'+view.pending_email+'。':'')+(names[view.delivery_status]||'')+(view.expires_at?' 有效至 '+new Date(view.expires_at).toLocaleTimeString()+'。':'')+(view.retry_after>0?' 重发请等待 '+view.retry_after+' 秒。':'');
-  $('emailDeliveryStatus').hidden=!$('emailDeliveryStatus').textContent;
+ const requirement=view.email_verification_required===false?'管理员已免除邮箱验证。':view.email_verified?'邮箱已验证。':'需要验证邮箱后才能上传。';
+ for(const id of ['emailBindingStatus','emailEditorBindingStatus'])if($(id)){$(id).textContent=(view.email?'当前绑定：'+view.email+'。':'尚未绑定邮箱。')+requirement;$(id).hidden=false}
+ if(!$('accountEmail'))return;
+ if(!$('accountEmail').value)$('accountEmail').value=view.pending_email||view.email||'';
+ $('emailPasswordField').hidden=!view.email_verified;$('emailVerifyForm').hidden=!view.challenge_id;
+ const labels={queued:'邮件已排队。',sending:'正在发送。',submitted:'邮件已提交，请检查收件箱及垃圾邮件。',sent:'邮件已提交，请检查收件箱及垃圾邮件。',failed:'投递失败，请稍后重试。',expired:'验证码已过期，请重新发送。',locked:'错误次数过多，请稍后再试。'};
+ $('emailDeliveryStatus').textContent=(view.pending_email?'待验证邮箱：'+view.pending_email+'。':'')+(labels[view.delivery_status]||'')+(view.retry_after>0?' 重发请等待 '+view.retry_after+' 秒。':'');
 }
 async function loadEmailProfile(force=false){
-  if(!state.user||!$('emailProfile'))return;
-  const owner=state.user.id,epoch=emailEpoch,generation=++emailProfileGeneration;
-  try{
-    const [view,storage]=await Promise.all([api('auth/email'),api('auth/storage')]);
-    if(!emailCurrent(owner,epoch)||generation!==emailProfileGeneration)return;
-    emailView=view;renderEmailProfile(view);emailMessage('personalStorageStatus','音频占用：'+storageBytes(storage.used_bytes)+' / '+(storage.limit_bytes?storageBytes(storage.limit_bytes):'不限额')+' · 按原始上传者统计');
-    if(force)emailMessage('emailProfileError');
-  }catch(error){if(emailCurrent(owner,epoch)&&generation===emailProfileGeneration)emailMessage('emailProfileError',error.message,true)}
+ if(!state.user)return;const owner=state.user.id,epoch=emailEpoch,generation=++emailProfileGeneration;
+ try{const view=await api('auth/email');if(!emailCurrent(owner,epoch)||generation!==emailProfileGeneration)return;emailView=view;renderEmailProfile(view);if(force)emailMessage('emailProfileError')}
+ catch(error){if(emailCurrent(owner,epoch)&&generation===emailProfileGeneration)emailMessage($('emailProfileError')?'emailProfileError':'emailProfilePageError',error.message,true)}
 }
 function setEmailBusy(busy){emailBusy=busy;for(const id of ['sendEmailCode','verifyEmailCode','refreshEmail','accountEmail','emailCurrentPassword','emailCode'])if($(id))$(id).disabled=busy}
 async function sendEmailChallenge(event){
@@ -100,7 +96,7 @@ async function verifyEmailChallenge(event){
     const view=await api('auth/email/verify','POST',{challenge_id:emailView.challenge_id,code});if(!emailCurrent(owner,epoch))return;
     emailView=view;renderEmailProfile(view);$('emailCode').value='';$('emailCurrentPassword').value='';
     const identity=await api('auth/me');if(!emailCurrent(owner,epoch))return;
-    applyPersonalIdentity(identity);renderUploads();await loadEmailProfile();if(emailCurrent(owner,epoch))setStatus('邮箱验证成功，账户上传资格已更新。','ok');
+    applyPersonalIdentity(identity);renderUploads();await loadEmailProfile();if(emailCurrent(owner,epoch)){setEmailBusy(false);closePersonalEditor();setStatus('邮箱验证成功，账户上传资格已更新。','ok');}
   }catch(error){if(emailCurrent(owner,epoch))emailMessage('emailProfileError',error.message,true)}
   finally{if(emailCurrent(owner,epoch))setEmailBusy(false)}
 }
