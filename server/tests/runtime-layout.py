@@ -2,6 +2,7 @@
 import http.cookiejar
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import socket
@@ -15,6 +16,7 @@ import wave
 
 def main():
     source = Path(__file__).resolve().parents[1]
+    expected_version = re.search(r'Version\s*=\s*"([^"]+)"', (source / "internal/version/version.go").read_text(encoding="utf-8")).group(1)
     binary = Path(os.environ.get("MUSIC_SERVER_TEST_BINARY", source / "build/musicserver.exe"))
     directory = Path(tempfile.mkdtemp(prefix="musicserver-layout-"))
     runtime = directory / "server with spaces/build"
@@ -71,7 +73,7 @@ def main():
         expected_commit = os.environ.get("MUSIC_SERVER_EXPECT_COMMIT")
         if expected_commit:
             assert health["commit"] == expected_commit and health["modified"] is False, health
-        assert health["version"] == "0.20.2", health
+        assert health["version"] == expected_version, health
         request("auth/login", {"username": "admin", "password": password})
         for attempt in range(100):
             tracks = request("tracks")
