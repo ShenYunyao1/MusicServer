@@ -59,7 +59,9 @@ jobs:
         shell: bash
         env:
           CGO_ENABLED: '0'
-          GO_TEST_TIMEOUT: ${{ runner.os == 'Windows' && '300s' || '180s' }}
+          # Full account/tag coverage performs real Argon2 work. Hosted Windows
+          # runners exceed five minutes while individual cases still progress.
+          GO_TEST_TIMEOUT: ${{ runner.os == 'Windows' && '600s' || '180s' }}
       - name: Linux race tests
         if: runner.os == 'Linux'
         run: |
