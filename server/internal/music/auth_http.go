@@ -173,6 +173,8 @@ func (a *API) accountAuth(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	switch {
+	case path == "profile":
+		a.combinedProfileHTTP(response, request)
 	case path == "avatar" || path == "avatar/content":
 		a.avatarHTTP(response, request)
 	case path == "me" && request.Method == "GET":
