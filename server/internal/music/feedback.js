@@ -1,5 +1,45 @@
 'use strict';
 
+// Light dismissal for current and dynamically created dialogs. The backdrop
+// targets the dialog itself, so also check coordinates to keep padding clickable.
+(() => {
+  let press = null;
+  const outside = (dialog, event) => {
+    const box = dialog.getBoundingClientRect();
+    return event.clientX < box.left || event.clientX > box.right ||
+      event.clientY < box.top || event.clientY > box.bottom;
+  };
+  document.addEventListener('pointerdown', event => {
+    press = null;
+    const dialog = event.target;
+    if (event.button !== 0 || !event.isPrimary ||
+        !(dialog instanceof HTMLDialogElement) || !dialog.open ||
+        !outside(dialog, event)) return;
+    press = {dialog, id:event.pointerId, x:event.clientX, y:event.clientY, released:false};
+  }, true);
+  document.addEventListener('pointerup', event => {
+    if (!press) return;
+    if (event.pointerId !== press.id || event.target !== press.dialog ||
+        !outside(press.dialog, event) ||
+        Math.hypot(event.clientX - press.x, event.clientY - press.y) > 8) {
+      press = null;
+    } else press.released = true;
+  }, true);
+  document.addEventListener('pointercancel', () => {press = null}, true);
+  document.addEventListener('click', event => {
+    const started = press; press = null;
+    if (!started?.released || event.button !== 0 || event.target !== started.dialog ||
+        !started.dialog.open || !outside(started.dialog, event)) return;
+    const dialog = started.dialog;
+    // These credentials cannot be recovered after closing their one-time view.
+    if (['secretDialog', 'temporaryPasswordDialog'].includes(dialog.id)) return;
+    if (dialog.querySelector('.modal-head button:disabled, .quota-head button:disabled')) return;
+    event.preventDefault(); event.stopPropagation();
+    // Use the Escape cancellation path, including unsaved-change and busy guards.
+    if (dialog.dispatchEvent(new Event('cancel', {cancelable:true})) && dialog.open) dialog.close();
+  }, true);
+})();
+
 const notificationRegion = document.createElement('div');
 notificationRegion.id = 'notifications';
 notificationRegion.setAttribute('aria-live', 'polite');

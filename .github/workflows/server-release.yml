@@ -198,6 +198,7 @@ jobs:
             node tests/tag-dictionary-ui.cjs
             MUSIC_SERVER_TAG_UI=1 MUSIC_SERVER_FILTER_UI=1 MUSIC_SERVER_TAG_WORKSPACE_UI=1 go test ./internal/music -run '^TestTagEditorLiveBrowser$|^TestTrackFilterLiveBrowser$|^TestTagWorkspaceLiveBrowser$' -count=1 -timeout 180s
           else
+            node tests/dialog-dismiss-ui.cjs
             node tests/management-ui.cjs
           fi
         env:

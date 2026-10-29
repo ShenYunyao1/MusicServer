@@ -1,0 +1,67 @@
+'use strict';
+const assert=require('node:assert/strict');
+const path=require('node:path');
+const {chromium}=require(process.env.MUSIC_SERVER_PLAYWRIGHT||'playwright');
+async function main(){
+ const browser=await chromium.launch({headless:true,executablePath:process.env.MUSIC_SERVER_BROWSER});
+ try{
+  const page=await browser.newPage({viewport:{width:1100,height:800},hasTouch:true});
+  await page.setContent('<button id="behind" style="position:absolute;left:10px;top:300px">Background</button><dialog id="editor" class="modal"><div class="modal-head"><button>Close</button></div><div id="modalBody" class="modal-body"><input value="Draft"></div><div class="modal-foot"></div></dialog><dialog id="secretDialog" class="modal"><div id="secretValue">one-time key</div></dialog><div id="contextMenu" hidden></div>');
+  await page.evaluate(()=>{window.$=id=>document.getElementById(id);window.state={user:{id:'a'}};window.behindClicks=0;$('behind').onclick=()=>behindClicks++});
+  await page.addStyleTag({path:path.resolve(__dirname,'../internal/music/management.css')});
+  await page.addScriptTag({path:path.resolve(__dirname,'../internal/music/feedback.js')});
+  await page.evaluate(()=>{$('editor').classList.add('drawer');$('editor').showModal()});
+  await page.locator('#modalBody input').click();
+  assert.equal(await page.locator('#editor').evaluate(d=>d.open),true,'Content clicks keep the panel open');
+  const bounds=await page.locator('#editor').boundingBox();
+  await page.mouse.click(bounds.x+2,bounds.y+200);
+  assert.equal(await page.locator('#editor').evaluate(d=>d.open),true,'Empty space inside the panel stays open');
+  await page.mouse.click(20,310);
+  assert.equal(await page.locator('#editor').evaluate(d=>d.open),false,'Outside click dismisses a right-side drawer');
+  assert.equal(await page.evaluate(()=>behindClicks),0,'Dismissal must not activate the underlying page');
+  await page.evaluate(()=>{
+   const dialog=document.createElement('dialog');dialog.id='dynamic';dialog.className='modal';dialog.innerHTML='<div class="modal-head"><button>Close</button></div><input value="Unsaved">';
+   document.body.append(dialog);window.blockClose=true;window.cancelCount=0;
+   dialog.addEventListener('cancel',e=>{cancelCount++;if(blockClose)e.preventDefault()});dialog.showModal();
+  });
+  await page.mouse.click(20,310);
+  assert.equal(await page.locator('#dynamic').evaluate(d=>d.open),true,'Existing cancel guards may refuse dismissal');
+  assert.equal(await page.evaluate(()=>cancelCount),1);
+  await page.evaluate(()=>blockClose=false);
+  const inner=await page.locator('#dynamic input').boundingBox();
+  await page.mouse.move(inner.x+5,inner.y+5);await page.mouse.down();await page.mouse.move(20,310);await page.mouse.up();
+  assert.equal(await page.locator('#dynamic').evaluate(d=>d.open),true,'Dragging from inside must not dismiss');
+  await page.mouse.move(20,310);await page.mouse.down();await page.mouse.move(inner.x+5,inner.y+5);await page.mouse.up();
+  assert.equal(await page.locator('#dynamic').evaluate(d=>d.open),true,'Dragging into the panel must not dismiss');
+  await page.mouse.click(20,310,{button:'right'});
+  assert.equal(await page.locator('#dynamic').evaluate(d=>d.open),true,'Context click must not dismiss');
+  await page.mouse.move(20,310);await page.mouse.down();await page.mouse.move(20,350);await page.mouse.up();
+  assert.equal(await page.locator('#dynamic').evaluate(d=>d.open),true,'Backdrop drag or scroll gesture must not dismiss');
+  await page.mouse.move(20,310);await page.mouse.down();
+  await page.evaluate(()=>document.dispatchEvent(new PointerEvent('pointercancel',{bubbles:true})));
+  await page.mouse.up();
+  assert.equal(await page.locator('#dynamic').evaluate(d=>d.open),true,'Canceled pointer gestures must not dismiss');
+  await page.evaluate(()=>document.querySelector('#dynamic .modal-head button').disabled=true);
+  await page.mouse.click(20,310);
+  assert.equal(await page.locator('#dynamic').evaluate(d=>d.open),true,'Disabled close during a write must remain disabled');
+  await page.evaluate(()=>document.querySelector('#dynamic .modal-head button').disabled=false);
+  await page.touchscreen.tap(20,310);
+  assert.equal(await page.locator('#dynamic').evaluate(d=>d.open),false,'Touch outside dismisses dynamic dialogs too');
+  await page.evaluate(()=>{$('editor').showModal();$('dynamic').showModal()});
+  await page.mouse.click(20,310);
+  assert.equal(await page.locator('#dynamic').evaluate(d=>d.open),false,'Only the top dialog closes');
+  assert.equal(await page.locator('#editor').evaluate(d=>d.open),true,'The underlying drawer remains open');
+  await page.keyboard.press('Escape');
+  await page.evaluate(()=>{$('editor').showModal();$('secretDialog').showModal()});
+  await page.mouse.click(20,310);
+  assert.equal(await page.locator('#secretDialog').evaluate(d=>d.open),true,'One-time credentials require explicit dismissal');
+  assert.equal(await page.locator('#editor').evaluate(d=>d.open),true,'Do not dismiss a lower dialog');
+  await page.keyboard.press('Escape');await page.keyboard.press('Escape');
+  await page.setViewportSize({width:390,height:844});
+  await page.evaluate(()=>{$('editor').classList.remove('drawer');$('editor').showModal()});
+  await page.touchscreen.tap(5,5);
+  assert.equal(await page.locator('#editor').evaluate(d=>d.open),false,'Narrow-screen dialog supports outside tap');
+  console.log('Dialog outside-dismiss browser checks passed');
+ }finally{await browser.close()}
+}
+main().catch(error=>{console.error(error);process.exitCode=1});

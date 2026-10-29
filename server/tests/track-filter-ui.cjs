@@ -37,6 +37,22 @@ async function fixture(browser,enabled=true){
   return page;
 }
 async function main(){const browser=await chromium.launch({headless:true,executablePath:process.env.MUSIC_SERVER_BROWSER});try{
+  let dismissPage=await fixture(browser);
+  await dismissPage.evaluate(()=>{
+    const shell=document.createElement('div');shell.innerHTML='<dialog id="editor"><div id="modalBody"></div><div class="modal-foot"></div></dialog><dialog id="secretDialog"><span id="secretValue"></span></dialog><div id="contextMenu" hidden></div>';document.body.append(shell);
+  });
+  await dismissPage.addScriptTag({path:path.resolve(__dirname,'../internal/music/feedback.js')});
+  await dismissPage.evaluate(()=>initializeTrackFilters());
+  await dismissPage.locator('#trackAdvancedFilter').click();
+  await dismissPage.locator('#filterArtists').fill('Unapplied draft');
+  await dismissPage.mouse.click(20,300);
+  assert.equal(await dismissPage.locator('#trackFilterDialog').evaluate(d=>d.open),false,'Filter drawer closes on outside click');
+  assert.equal(await dismissPage.evaluate(()=>calls.some(c=>c.path==='track-query'||c.method!=='GET'&&c.path!=='track-facets')),false,'Dismissal does not apply or save the draft');
+  await dismissPage.locator('#trackAdvancedFilter').click();
+  assert.equal(await dismissPage.locator('#filterArtists').inputValue(),'','Reopening uses applied conditions, like the existing Close button');
+  await dismissPage.keyboard.press('Escape');
+  assert.equal(await dismissPage.locator('#trackAdvancedFilter').evaluate(b=>document.activeElement===b),true,'Focus returns to the filter opener');
+  await dismissPage.close();
   let page=await fixture(browser,false);assert.equal(await page.evaluate(()=>initializeTrackFilters()),false);assert.equal(await page.locator('#trackAdvancedFilter').count(),0);await page.close();
   page=await fixture(browser);await page.evaluate(()=>initializeTrackFilters());await page.locator('#trackAdvancedFilter').click();
   await page.locator('#filterArtists').fill('Artist one\nArtist, two');await page.locator('#filterHasCover').selectOption('yes');
