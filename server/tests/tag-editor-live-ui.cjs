@@ -105,8 +105,10 @@ async function main(){
     await member.goto(base.href+'#/library');await member.waitForFunction(()=>!document.querySelector('#username').disabled);
     await member.fill('#username','tagger-member');await member.fill('#password','personal password for tagger-member');await member.click('#loginButton');
     await member.waitForFunction(()=>state.user?.username==='tagger-member'&&tagFeatureEnabled());
+    // Keep real HTTP/API behavior but expose the response window deterministically.
+    await member.route('**/api/v2/track-query',async route=>{await new Promise(resolve=>setTimeout(resolve,200));await route.continue()});
     await member.locator('#trackUntagged').click();
-    await member.waitForFunction(()=>browseState.tracks?.total===2&&getActiveTrackFilter().untagged_public===true);
+    await member.waitForFunction(()=>browseState.tracks?.total===2&&getActiveTrackFilter().untagged_public===true&&browseState.tracks.filterKey===activeTrackFilterKey());
     assert.equal(await member.locator('#trackUntagged').getAttribute('aria-pressed'),'true');
     await member.locator('[data-library-track="'+track.id+'"]').click({button:'right'});
     await member.locator('#contextMenu').getByRole('button',{name:'管理标签',exact:true}).click();
