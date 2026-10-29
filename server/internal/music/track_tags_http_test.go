@@ -13,9 +13,7 @@ import (
 func tagHTTPAPI(t *testing.T) (*API, string) {
 	t.Helper()
 	a, _ := testAPI(t)
-	if err := initializeSQLiteSchemaForTarget(a.store.db, 8); err != nil {
-		t.Fatal(err)
-	}
+	assertMigrationSchema(t, a.store.db, 8)
 	_, _, token := loginTestAccount(t, a.store, "admin")
 	return a, token
 }
@@ -34,7 +32,7 @@ func createHTTPTag(t *testing.T, a *API, token, scope, name string) Tag {
 }
 
 func TestTrackTagsHTTPSchemaGate(t *testing.T) {
-	a, _ := testAPI(t)
+	a, _ := testAPIForSchema(t, 7)
 	_, _, token := loginTestAccount(t, a.store, "admin")
 	for _, path := range []string{"/api/v2/tags", "/api/v2/tag-groups", "/api/v2/tracks/" + a.store.Tracks()[0].ID + "/tags"} {
 		w := mailRequest(a, token, "GET", path, "", 0)

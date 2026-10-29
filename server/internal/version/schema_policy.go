@@ -5,7 +5,7 @@ package version
 func KnownSchema(schema int) bool { return schema == 7 || schema == 8 }
 
 // CanMigrateSchema is a directed, explicit compatibility policy. The current
-// server stays at schema 7 until the schema 8 tag definitions are finalized.
+// server migrates schema 7 to 8, and never downgrades an existing schema 8 DB.
 func CanMigrateSchema(from, to int) bool { return from == 7 && to == 8 }
 
 // MigrationSources becomes part of the signed release identity when schema 8

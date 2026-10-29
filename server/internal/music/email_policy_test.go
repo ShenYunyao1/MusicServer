@@ -114,7 +114,7 @@ func TestEmailPolicyLegacyInitializationAndRestart(t *testing.T) {
 		t.Fatalf("restart overwrote exemption: %+v %v", got, err)
 	}
 	var schema int
-	if err := reopened.db.QueryRow("PRAGMA user_version").Scan(&schema); err != nil || schema != 7 {
+	if err := reopened.db.QueryRow("PRAGMA user_version").Scan(&schema); err != nil || schema != sqliteSchemaVersion {
 		t.Fatalf("implicit DDL migration: %d %v", schema, err)
 	}
 }

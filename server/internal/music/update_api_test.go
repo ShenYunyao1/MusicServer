@@ -86,7 +86,7 @@ func TestUpdateMaintenanceBlocksWritesButKeepsHealth(t *testing.T) {
 	}
 	r := httptest.NewRecorder()
 	api.ServeHTTP(r, httptest.NewRequest("GET", "/api/v2/health", nil))
-	if r.Code != 200 || !strings.Contains(r.Body.String(), `"schema":7`) {
+	if r.Code != 200 || !strings.Contains(r.Body.String(), `"schema":8`) {
 		t.Fatalf("health not available: %d %s", r.Code, r.Body)
 	}
 }

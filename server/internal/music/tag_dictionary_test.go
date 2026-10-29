@@ -22,9 +22,7 @@ func tagTestStore(t *testing.T) (*Store, authContext) {
 	t.Helper()
 	s, _, _ := seedStore(t)
 	t.Cleanup(func() { closeStoreForTest(t, s) })
-	if err := initializeSQLiteSchemaForTarget(s.db, 8); err != nil {
-		t.Fatal(err)
-	}
+	assertMigrationSchema(t, s.db, 8)
 	return s, tagTestAuth(t, s, "admin")
 }
 
@@ -81,13 +79,13 @@ func TestTagDictionaryUnicodeNamespaceAndCRUD(t *testing.T) {
 	}
 }
 
-func TestTagDictionaryRejectsInvalidNamesAndDefaultSchema(t *testing.T) {
+func TestTagDictionaryRejectsInvalidNamesAndLegacySchema(t *testing.T) {
 	for _, name := range []string{"", "   ", "line\nbreak", "tab\tname", string([]byte{0xff}), "zero\u200bwidth"} {
 		if _, _, err := normalizeTagName(name); !errors.Is(err, errTagInvalid) {
 			t.Fatalf("accepted %q: %v", name, err)
 		}
 	}
-	s, _, _ := seedStore(t)
+	s, _, _ := seedStoreForSchema(t, 7)
 	t.Cleanup(func() { closeStoreForTest(t, s) })
 	if _, err := s.ListTagGroups(tagTestAuth(t, s, "admin")); !errors.Is(err, errTagsUnavailable) {
 		t.Fatal("schema 7 tags available", err)

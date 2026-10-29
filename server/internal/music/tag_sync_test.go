@@ -109,7 +109,7 @@ func TestTagSyncPrivateChangesAndConditionalResponses(t *testing.T) {
 }
 
 func TestTagSyncSchemaMethodQueryAndRevocation(t *testing.T) {
-	a, _ := testAPI(t)
+	a, _ := testAPIForSchema(t, 7)
 	_, _, token := loginTestAccount(t, a.store, "admin")
 	if w := tagSyncRequest(a, token, ""); w.Code != 503 || !strings.Contains(w.Body.String(), "TAGS_UNAVAILABLE") {
 		t.Fatal(w.Code, w.Body)

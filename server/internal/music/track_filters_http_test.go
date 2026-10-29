@@ -10,7 +10,7 @@ import (
 )
 
 func TestTrackFilterHTTPSchemaAndStrictBodies(t *testing.T) {
-	a, _ := testAPI(t)
+	a, _ := testAPIForSchema(t, 7)
 	_, _, token := loginTestAccount(t, a.store, "admin")
 	for _, path := range []string{"track-query", "track-facets", "saved-track-filters"} {
 		method := "POST"

@@ -29,6 +29,14 @@ jobs:
         working-directory: server
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout immutable schema-7 bridge for installation acceptance
+        if: runner.os == 'Linux'
+        uses: actions/checkout@v4
+        with:
+          ref: bb55d3c2f3688b4f9fb27fe5b22434cdcebf6967 # v0.20.3 bridge
+          path: schema7-bridge
+          persist-credentials: false
+          sparse-checkout: server
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26.x'
@@ -71,12 +79,12 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           python tests/test-schema-preview.py
-          CGO_ENABLED=0 go build -trimpath -buildvcs=true -o build/schema-preview/baseline/musicserver ./cmd/musicserver
-          CGO_ENABLED=0 python tests/build-schema-preview.py --version 0.21.0
+          (cd "$GITHUB_WORKSPACE/schema7-bridge/server" && CGO_ENABLED=0 go build -trimpath -buildvcs=true -o "$GITHUB_WORKSPACE/server/build/schema-preview/baseline/musicserver" ./cmd/musicserver)
+          CGO_ENABLED=0 python tests/build-schema-preview.py
           export MUSIC_SERVER_SCHEMA7_BINARY="$PWD/build/schema-preview/baseline/musicserver"
           export MUSIC_SERVER_SCHEMA8_BINARY="$PWD/build/schema-preview/musicserver"
-          export MUSIC_SERVER_SCHEMA7_VERSION="$(go run ./cmd/release -version)"
-          export MUSIC_SERVER_SCHEMA8_VERSION=0.21.0
+          export MUSIC_SERVER_SCHEMA7_VERSION=0.20.3
+          export MUSIC_SERVER_SCHEMA8_VERSION="$(go run ./cmd/release -version)"
           sudo -E env PATH="$PATH" bash tests/update-systemd.sh
 
   web:
@@ -97,6 +105,14 @@ jobs:
         with:
           ref: fc6cd7745fa11818de59e6566ed9d664bc71f618 # v0.20.2
           path: schema7-release
+          persist-credentials: false
+          sparse-checkout: server
+      - name: Checkout immutable schema-7 bridge for upgrade acceptance
+        if: matrix.suite == 'tags'
+        uses: actions/checkout@v4
+        with:
+          ref: bb55d3c2f3688b4f9fb27fe5b22434cdcebf6967 # v0.20.3 bridge
+          path: schema7-bridge
           persist-credentials: false
           sparse-checkout: server
       - uses: actions/setup-go@v5
@@ -149,6 +165,12 @@ jobs:
         run: go build -trimpath -buildvcs=true -o "$GITHUB_WORKSPACE/server/build/schema-preview/released/musicserver" ./cmd/musicserver
         env:
           CGO_ENABLED: '0'
+      - name: Build the released schema-7 bridge
+        if: matrix.suite == 'tags'
+        working-directory: schema7-bridge/server
+        run: go build -trimpath -buildvcs=true -o "$GITHUB_WORKSPACE/server/build/schema-preview/bridge/musicserver" ./cmd/musicserver
+        env:
+          CGO_ENABLED: '0'
       - name: Real browser acceptance
         run: |
           node --test tests/browser-wait-test.cjs tests/resumable-ui.cjs tests/browse-state-test.cjs
@@ -167,9 +189,9 @@ jobs:
           elif [ "$SUITE" = tags ]; then
             python tests/test-schema-preview.py
             python tests/test-admin-terminal.py
-            CGO_ENABLED=0 python tests/build-schema-preview.py --version 0.21.0
-            python tests/schema-upgrade-process.py --old-server build/schema-preview/released/musicserver --new-server build/schema-preview/musicserver
-            MUSIC_SERVER_TEST_BINARY="$PWD/build/schema-preview/musicserver" MUSIC_SERVER_TEST_TAG_BACKUP_ONLY=1 node tests/management-ui.cjs
+            python tests/schema-upgrade-process.py --old-server build/schema-preview/released/musicserver --new-server build/musicserver
+            python tests/schema-upgrade-process.py --old-server build/schema-preview/bridge/musicserver --new-server build/musicserver
+            MUSIC_SERVER_TEST_TAG_BACKUP_ONLY=1 node tests/management-ui.cjs
             node tests/tag-editor-ui.cjs
             node tests/track-filter-ui.cjs
             node tests/tag-ui.cjs
@@ -209,11 +231,10 @@ jobs:
         with:
           path: server-source
       - name: Checkout released schema-7 source for upgrade acceptance
-        if: matrix.schema == 8
         uses: actions/checkout@v4
         with:
-          ref: fc6cd7745fa11818de59e6566ed9d664bc71f618 # v0.20.2
-          path: schema7-release
+          ref: bb55d3c2f3688b4f9fb27fe5b22434cdcebf6967 # v0.20.3 bridge
+          path: schema7-bridge
           persist-credentials: false
           sparse-checkout: server
       - name: Checkout accepted native player
@@ -261,24 +282,23 @@ jobs:
           $candidateVersion = go run ./cmd/release -version
           if ($LASTEXITCODE -ne 0) { throw 'Cannot read candidate identity' }
           $candidateBinary = '../server-source/server/build/musicserver.exe'
+          Push-Location '../../schema7-bridge/server'
+          try {
+            go build -trimpath -buildvcs=true -o "$env:GITHUB_WORKSPACE/server-source/server/build/schema-preview/bridge/musicserver.exe" ./cmd/musicserver
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot build released schema-7 bridge' }
+          } finally { Pop-Location }
           if ('${{ matrix.schema }}' -eq '8') {
-            Push-Location '../../schema7-release/server'
-            try {
-              go build -trimpath -buildvcs=true -o "$env:GITHUB_WORKSPACE/server-source/server/build/schema-preview/released/musicserver.exe" ./cmd/musicserver
-              if ($LASTEXITCODE -ne 0) { throw 'Cannot build released schema-7 baseline' }
-            } finally { Pop-Location }
-            python tests/build-schema-preview.py --version 0.21.0
-            if ($LASTEXITCODE -ne 0) { throw 'Cannot build isolated schema-8 preview' }
-            python tests/schema-upgrade-process.py --old-server build/schema-preview/released/musicserver.exe --new-server build/schema-preview/musicserver.exe
+            python tests/schema-upgrade-process.py --old-server build/schema-preview/bridge/musicserver.exe --new-server build/musicserver.exe
             if ($LASTEXITCODE -ne 0) { throw 'Real populated schema migration failed' }
-            $candidateBinary = '../server-source/server/build/schema-preview/musicserver.exe'
-            $candidateVersion = '0.21.0'
+          } else {
+            $candidateBinary = '../server-source/server/build/schema-preview/bridge/musicserver.exe'
+            $candidateVersion = '0.20.3'
           }
           "version=$candidateVersion" >> $env:GITHUB_OUTPUT
           "binary=$candidateBinary" >> $env:GITHUB_OUTPUT
           "server=$(git rev-parse HEAD)" >> $env:GITHUB_STEP_SUMMARY
           "player=${{ matrix.player }}" >> $env:GITHUB_STEP_SUMMARY
-          "schema=${{ matrix.schema }} (8 is an isolated test preview, never a Release package)" >> $env:GITHUB_STEP_SUMMARY
+          "schema=${{ matrix.schema }} (7: fixed released bridge; 8: current candidate without overlay)" >> $env:GITHUB_STEP_SUMMARY
         env:
           CGO_ENABLED: '0'
       - name: Real WinHTTP TLS, cache and two-ended integration

@@ -104,7 +104,7 @@ func TestTagUploadDraftAtomicCommitAndDedupPermissions(t *testing.T) {
 }
 
 func TestTagUploadSchemaGateAndRevokedSessionPreserveStage(t *testing.T) {
-	a, _ := testAPI(t)
+	a, _ := testAPIForSchema(t, 7)
 	_, _, token := loginTestAccount(t, a.store, "admin")
 	options := uploadTagOptions(t, a.store, token)
 	preview, err := a.store.StageAudio("plain.wav", bytes.NewReader(validTestAudio(t)), nil, options)

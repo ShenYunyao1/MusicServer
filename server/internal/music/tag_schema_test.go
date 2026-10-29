@@ -80,7 +80,7 @@ func TestTagSchemaMigrationSeedsAndEnforcesRelationalBoundaries(t *testing.T) {
 }
 
 func TestTagSchemaMigrationRollsBackTablesSeedsAndOldRows(t *testing.T) {
-	s, _, _ := seedStore(t)
+	s, _, _ := seedStoreForSchema(t, 7)
 	t.Cleanup(func() { closeStoreForTest(t, s) })
 	before := migrationSnapshot(t, s.db)
 	if _, err := s.db.Exec("CREATE TRIGGER reject_schema_eight BEFORE UPDATE ON meta WHEN NEW.key='schema_version' AND NEW.value='8' BEGIN SELECT RAISE(ABORT,'reject final schema marker'); END"); err != nil {

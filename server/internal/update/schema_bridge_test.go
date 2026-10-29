@@ -44,6 +44,7 @@ func TestManifestRestrictsSignedMigrationDeclarations(t *testing.T) {
 
 func TestCompatibilityRequiresSignedBridgeAndIndependentWorker(t *testing.T) {
 	m := NewManager(t.TempDir(), func() string { return Repository })
+	m.installedSchema = 7 // Simulate an installed bridge, not the current schema 8 app.
 	defer m.Close()
 	m.workerState = filepath.Join(t.TempDir(), "job.json")
 	m.readCapabilities = func(string) (workerCapabilities, error) {
@@ -111,6 +112,8 @@ func TestCheckSignedBridgeRequiresIndependentWorkerCapability(t *testing.T) {
 	sum := sha256.Sum256(payload)
 	m, _ := testManager(t, "9.0.0", "sha256:"+hex.EncodeToString(sum[:]), payload, 8, 7)
 	defer m.Close()
+	m.installedSchema = 7
+	m.readCapabilities = nil // This test explicitly simulates an unmaintained worker.
 	m.ConfigureInstaller("queue", filepath.Join(t.TempDir(), "job.json"))
 	if err := m.Check(context.Background()); err != nil {
 		t.Fatal(err)

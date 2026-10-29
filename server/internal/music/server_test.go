@@ -17,12 +17,16 @@ import (
 )
 
 func testAPI(t *testing.T) (*API, string) {
+	return testAPIForSchema(t, sqliteSchemaVersion)
+}
+
+func testAPIForSchema(t *testing.T, schema int) (*API, string) {
 	t.Helper()
 	mediaRoot := t.TempDir()
 	if err := os.WriteFile(filepath.Join(mediaRoot, "Artist - Song.mp3"), []byte("0123456789"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	store, err := NewStore(filepath.Join(t.TempDir(), "library.sqlite"), mediaRoot)
+	store, err := newStoreForSchema(filepath.Join(t.TempDir(), "library.sqlite"), mediaRoot, schema)
 	if err != nil {
 		t.Fatal(err)
 	}

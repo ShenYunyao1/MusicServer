@@ -184,7 +184,7 @@ func TestTrackFilterRejectsInvalidInputAndSchemaSeven(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	api, _ := testAPI(t)
+	api, _ := testAPIForSchema(t, 7)
 	if _, err := api.store.QueryTrackFilter(tagTestAuth(t, api.store, "admin"), TrackFilterQuery{Filter: TrackFilter{Version: 1}}); !errors.Is(err, errTagsUnavailable) {
 		t.Fatal(err)
 	}
@@ -196,9 +196,11 @@ func TestTrackFilterRejectsInvalidInputAndSchemaSeven(t *testing.T) {
 }
 
 func TestTrackFilterRejectsEmptyTagClauseInsteadOfBroadening(t *testing.T) {
-	s,auth,_,_:=filterFixture(t)
-	f:=TrackFilter{Version:1,Tags:[]TrackTagClause{{Scope:"public",GroupID:"genre"}}}
-	if _,err:=s.QueryTrackFilter(auth,TrackFilterQuery{Filter:f});!errors.Is(err,errTagInvalid){t.Fatal("empty explicit tag clause broadened to the full library",err)}
+	s, auth, _, _ := filterFixture(t)
+	f := TrackFilter{Version: 1, Tags: []TrackTagClause{{Scope: "public", GroupID: "genre"}}}
+	if _, err := s.QueryTrackFilter(auth, TrackFilterQuery{Filter: f}); !errors.Is(err, errTagInvalid) {
+		t.Fatal("empty explicit tag clause broadened to the full library", err)
+	}
 }
 
 func TestTagFacetsRemoveOnlyCurrentClauseAndPreserveOtherFilters(t *testing.T) {

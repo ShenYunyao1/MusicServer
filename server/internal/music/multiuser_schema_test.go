@@ -10,7 +10,7 @@ import (
 func TestMultiuserSchemaOwnership(t *testing.T) {
 	api, _ := testAPI(t)
 	var schema int
-	if err := api.store.db.QueryRow("PRAGMA user_version").Scan(&schema); err != nil || schema != 7 {
+	if err := api.store.db.QueryRow("PRAGMA user_version").Scan(&schema); err != nil || schema != sqliteSchemaVersion {
 		t.Fatalf("schema: %d %v", schema, err)
 	}
 	var owner, uploader string

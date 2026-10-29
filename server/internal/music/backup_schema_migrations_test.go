@@ -73,7 +73,7 @@ func migrationArchive(t *testing.T, s *Store, schema int, mutate func(string)) s
 
 func TestBackupSchemaMigrationRestoresOldArchiveAndRetainsSafetyCleanup(t *testing.T) {
 	s := migrationFixture(t)
-	archive, err := s.CreateBackupBundle(context.Background(), true, nil)
+	archive, err := s.createBackupBundleForTarget(context.Background(), true, nil, 7)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,16 +180,13 @@ func TestBackupSchemaMigrationCreationUsesVerifiedDatabaseIdentity(t *testing.T)
 	if err := initializeSQLiteSchemaForTarget(s.db, 8); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateBackupBundle(context.Background(), false, nil); err == nil {
-		t.Fatal("public backup entry point accepted target 8")
-	}
-	archive, err := s.createBackupBundleForTarget(context.Background(), false, nil, 8)
+	archive, err := s.CreateBackupBundle(context.Background(), false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	archivePath := filepath.Join(s.backupDirectory(), archive.Name)
 	destination := filepath.Join(t.TempDir(), "restored")
-	manifest, err := restoreBackupForTarget(context.Background(), archivePath, destination, 8)
+	manifest, err := RestoreBackup(context.Background(), archivePath, destination)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +195,7 @@ func TestBackupSchemaMigrationCreationUsesVerifiedDatabaseIdentity(t *testing.T)
 	}
 	db := sqliteConnection(t, filepath.Join(destination, "data/library.sqlite"))
 	assertMigrationSchema(t, db, 8)
-	if _, err := RestoreBackup(context.Background(), archivePath, filepath.Join(t.TempDir(), "downgrade")); err == nil {
-		t.Fatal("public restore accepted schema 8")
+	if _, err := restoreBackupForTarget(context.Background(), archivePath, filepath.Join(t.TempDir(), "downgrade"), 7); err == nil {
+		t.Fatal("legacy target accepted schema 8 downgrade")
 	}
 }

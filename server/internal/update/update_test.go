@@ -69,6 +69,10 @@ func testManager(t *testing.T, tag, digest string, payload []byte, schemas ...in
 	}))
 	t.Cleanup(server.Close)
 	manager := NewManager(t.TempDir(), func() string { return "https://github.com/example/musicserver" })
+	// Download fixtures simulate an already maintained updater. Capability
+	// rejection and missing-worker behavior are tested separately.
+	manager.workerState = filepath.Join(t.TempDir(), "job.json")
+	manager.readCapabilities = func(string) (workerCapabilities, error) { return currentCapabilities(), nil }
 	manager.apiBase = server.URL
 	manager.allowHTTP = true
 	manager.publicKey = pub

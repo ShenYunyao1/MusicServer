@@ -80,7 +80,7 @@ func migrationSnapshot(t *testing.T, db *sql.DB) map[string][]string {
 
 func migrationFixture(t *testing.T) *Store {
 	t.Helper()
-	s, _, tracks := seedStore(t)
+	s, _, tracks := seedStoreForSchema(t, 7)
 	t.Cleanup(func() { closeStoreForTest(t, s) })
 	var owner string
 	if err := s.db.QueryRow("SELECT id FROM users WHERE username='admin'").Scan(&owner); err != nil {
@@ -136,7 +136,7 @@ func assertMigrationSchema(t *testing.T, db *sql.DB, expected int) {
 func TestSchemaMigrationPreservesAllRowsAndIsIdempotent(t *testing.T) {
 	s := migrationFixture(t)
 	before := migrationSnapshot(t, s.db)
-	if err := initializeSQLiteSchema(s.db); err != nil {
+	if err := initializeSQLiteSchemaForTarget(s.db, 7); err != nil {
 		t.Fatal(err)
 	}
 	assertMigrationSchema(t, s.db, 7)
@@ -157,7 +157,7 @@ func TestSchemaMigrationPreservesAllRowsAndIsIdempotent(t *testing.T) {
 	if err := s.db.QueryRow("SELECT count(*) FROM schema_migrations").Scan(&count); err != nil || count != 1 {
 		t.Fatalf("repeated migration count=%d err=%v", count, err)
 	}
-	if err := initializeSQLiteSchema(s.db); err == nil {
+	if err := initializeSQLiteSchemaForTarget(s.db, 7); err == nil {
 		t.Fatal("bridge server accepted schema 8 at current target 7")
 	}
 }
@@ -186,7 +186,7 @@ func TestSchemaMigrationFailureRollsBackDDLRowsAndVersions(t *testing.T) {
 	if err := s.db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name='schema_migrations'").Scan(&count); err != nil || count != 0 {
 		t.Fatalf("failed migration published DDL: %d %v", count, err)
 	}
-	if err := initializeSQLiteSchema(s.db); err != nil {
+	if err := initializeSQLiteSchemaForTarget(s.db, 7); err != nil {
 		t.Fatal(err)
 	}
 	reopened := sqliteConnection(t, s.dataPath)
@@ -228,7 +228,7 @@ func TestSchemaMigrationRejectsUnsupportedOrInconsistentDatabases(t *testing.T) 
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			db := sqliteConnection(t, filepath.Join(t.TempDir(), "library.sqlite"))
-			if err := initializeSQLiteSchema(db); err != nil {
+			if err := initializeSQLiteSchemaForTarget(db, 7); err != nil {
 				t.Fatal(err)
 			}
 			if test.sql != "" {

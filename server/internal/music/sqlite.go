@@ -96,6 +96,10 @@ func openSQLite(path string) (*sql.DB, error) {
 	return db, nil
 }
 func (s *Store) loadSQLite() error {
+	return s.loadSQLiteForTarget(sqliteSchemaVersion)
+}
+
+func (s *Store) loadSQLiteForTarget(target int) error {
 	if strings.TrimSpace(s.dataPath) == "" {
 		return errors.New("data path is required")
 	}
@@ -107,10 +111,10 @@ func (s *Store) loadSQLite() error {
 		return err
 	}
 	s.db = db
-	if err := s.prepareSQLiteMigrationBackup(sqliteSchemaVersion); err != nil {
+	if err := s.prepareSQLiteMigrationBackup(target); err != nil {
 		return err
 	}
-	if err := initializeSQLiteSchema(db); err != nil {
+	if err := initializeSQLiteSchemaForTarget(db, target); err != nil {
 		return err
 	}
 	if err := os.Chmod(s.dataPath, 0600); err != nil {

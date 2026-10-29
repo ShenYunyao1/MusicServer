@@ -1,6 +1,6 @@
 # Ubuntu 部署与自动更新
 
-适用 Ubuntu 22.04/24.04、Linux amd64、systemd。数据库使用 schema 7；本版不迁移或清空旧库。目标主机网络和服务须按实际环境验收。
+适用 Ubuntu 22.04/24.04、Linux amd64、systemd。数据库使用 schema 8；已知 schema 7 原库经预检、旧格式快照及事务迁移后继续使用，不清库。已有安装必须先按 [schema 8 手动升级步骤](schema8-upgrade.md) 完成桥接主程序和独立更新器维护；首次安装可直接使用本版。
 
 ## 首次安装
 

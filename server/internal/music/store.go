@@ -23,6 +23,7 @@ import (
 	"musicserver/internal/activity"
 	"musicserver/internal/diskspace"
 	"musicserver/internal/update"
+	"musicserver/internal/version"
 )
 
 var audioExtensions = map[string]bool{".aac": true, ".flac": true, ".m4a": true, ".mp3": true, ".oga": true, ".ogg": true, ".opus": true, ".wav": true, ".wma": true}
@@ -66,6 +67,12 @@ type Store struct {
 }
 
 func NewStore(dataPath, mediaRoot string) (*Store, error) {
+	return newStoreForSchema(dataPath, mediaRoot, version.Schema)
+}
+
+// A private target is used by old-format migration fixtures. Production entry
+// points always use version.Schema and never expose a downgrade option.
+func newStoreForSchema(dataPath, mediaRoot string, schema int) (*Store, error) {
 	if strings.EqualFold(filepath.Ext(dataPath), ".json") {
 		return nil, errors.New("JSON data paths are unsupported; use a new SQLite database")
 	}
@@ -74,7 +81,7 @@ func NewStore(dataPath, mediaRoot string) (*Store, error) {
 		return nil, err
 	}
 	store := &Store{dataPath: dataPath, mediaRoot: filepath.Clean(root), stageSlots: make(chan struct{}, 2), activeStages: map[string]bool{}}
-	if err := store.loadSQLite(); err != nil {
+	if err := store.loadSQLiteForTarget(schema); err != nil {
 		if store.db != nil {
 			_ = store.db.Close()
 		}

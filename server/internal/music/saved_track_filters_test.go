@@ -143,7 +143,7 @@ func TestSavedTrackFilterMergedAndBrokenReferencesKeepOriginalDraft(t *testing.T
 }
 
 func TestSavedTrackFilterBoundsAndSchemaGate(t *testing.T) {
-	s, _, _ := seedStore(t)
+	s, _, _ := seedStoreForSchema(t, 7)
 	defer closeStoreForTest(t, s)
 	if _, err := s.ListSavedTrackFilters(tagTestAuth(t, s, "admin")); !errors.Is(err, errTagsUnavailable) {
 		t.Fatal(err)

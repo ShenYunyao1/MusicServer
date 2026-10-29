@@ -15,7 +15,7 @@ type sqliteMigration struct {
 }
 
 // initializeSQLiteSchemaForTarget exposes the planned target only to package
-// code and tests. Normal server startup remains bound to version.Schema (7).
+// code and tests. Normal server startup is always bound to version.Schema.
 func initializeSQLiteSchemaForTarget(db *sql.DB, target int) error {
 	return initializeSQLiteSchemaWithMigrations(db, target, []sqliteMigration{{from: 7, to: 8, apply: migrateSQLite7To8}})
 }
@@ -107,8 +107,8 @@ func initializeSQLiteSchemaWithMigrations(db *sql.DB, target int, migrations []s
 	return tx.Commit()
 }
 
-// P02 adds the relational tag dictionary and links. Schema 8 is still private:
-// the current server's normal startup and restore entry points target schema 7.
+// Schema 8 adds the relational tag dictionary and links while retaining all
+// legacy tables and rows. Normal startup first creates an old-format snapshot.
 func migrateSQLite7To8(tx *sql.Tx) error {
 	_, err := tx.Exec(`CREATE TABLE schema_migrations (
 from_version INTEGER NOT NULL,

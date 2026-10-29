@@ -24,7 +24,7 @@ func TestSchemaPolicyBridgeIsFiniteAndDirected(t *testing.T) {
 	if MigrationSources(8)[0] != 7 {
 		t.Fatal("caller mutated the schema policy")
 	}
-	if Schema != 7 {
-		t.Fatal("activate schema 8 only after its tag DDL is finalized")
+	if Schema != 8 {
+		t.Fatal("tag release must activate schema 8")
 	}
 }

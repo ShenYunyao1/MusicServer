@@ -9,8 +9,12 @@ import (
 )
 
 func sharingFixture(t *testing.T) (*API, User, User, Playlist) {
+	return sharingFixtureForSchema(t, sqliteSchemaVersion)
+}
+
+func sharingFixtureForSchema(t *testing.T, schema int) (*API, User, User, Playlist) {
 	t.Helper()
-	api, a, b, p := communityFixture(t)
+	api, a, b, p := communityFixtureForSchema(t, schema)
 	p, err := api.store.SetPlaylistVisibility(p.ID, "shared", MutationOptions{UserID: a.ID, ExpectedVersion: p.Version})
 	if err != nil {
 		t.Fatal(err)

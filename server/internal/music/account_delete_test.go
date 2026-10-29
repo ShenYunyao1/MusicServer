@@ -151,7 +151,7 @@ func TestAccountDeletionLifecycleAndReferences(t *testing.T) {
 		t.Fatalf("deletion marker did not survive reopening: %v", err)
 	}
 	var version int
-	if err := reopened.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 7 {
+	if err := reopened.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != sqliteSchemaVersion {
 		t.Fatal("deletion changed the database schema")
 	}
 	rows, err := reopened.db.Query("PRAGMA foreign_key_check")

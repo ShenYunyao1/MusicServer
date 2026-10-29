@@ -10,8 +10,7 @@ import (
 	"time"
 )
 
-// Only this isolated test fixture opts into the unpublished target schema.
-// Normal server startup and published health identity remain schema 7.
+// This isolated fixture uses the normal current-schema application model.
 func TestTagEditorLiveBrowser(t *testing.T) {
 	if os.Getenv("MUSIC_SERVER_TAG_UI") != "1" {
 		t.Skip("live browser acceptance was not requested")

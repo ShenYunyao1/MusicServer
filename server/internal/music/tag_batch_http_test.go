@@ -85,7 +85,7 @@ func TestTagBatchHTTPStrictRequestsAndFeatureGate(t *testing.T) {
 	if w.Code != 403 {
 		t.Fatal("CSRF accepted", w.Code, w.Body)
 	}
-	old, _ := testAPI(t)
+	old, _ := testAPIForSchema(t, 7)
 	_, _, oldToken := loginTestAccount(t, old.store, "admin")
 	w = mailRequest(old, oldToken, "POST", "/api/v2/tag-batches", `{}`, 0)
 	if w.Code != 503 {
@@ -162,7 +162,7 @@ func TestTagBatchHTTPRecentSummariesRecoverOwnedTaskWithoutPrivateSets(t *testin
 	if w.Code != 400 {
 		t.Fatal(w.Code, w.Body)
 	}
-	old, _ := testAPI(t)
+	old, _ := testAPIForSchema(t, 7)
 	_, _, token := loginTestAccount(t, old.store, "admin")
 	w = mailRequest(old, token, "GET", "/api/v2/tag-batches", "", 0)
 	if w.Code != 503 {

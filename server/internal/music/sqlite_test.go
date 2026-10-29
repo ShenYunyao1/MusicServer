@@ -80,6 +80,10 @@ func TestSQLiteCreatesCleanDatabase(t *testing.T) {
 }
 
 func seedStore(t *testing.T) (*Store, string, []Track) {
+	return seedStoreForSchema(t, sqliteSchemaVersion)
+}
+
+func seedStoreForSchema(t *testing.T, schema int) (*Store, string, []Track) {
 	t.Helper()
 	mediaRoot := t.TempDir()
 	for _, name := range []string{"First.mp3", "Second.mp3"} {
@@ -88,7 +92,7 @@ func seedStore(t *testing.T) (*Store, string, []Track) {
 		}
 	}
 	path := filepath.Join(t.TempDir(), "library.sqlite")
-	store, err := NewStore(path, mediaRoot)
+	store, err := newStoreForSchema(path, mediaRoot, schema)
 	if err != nil {
 		t.Fatal(err)
 	}

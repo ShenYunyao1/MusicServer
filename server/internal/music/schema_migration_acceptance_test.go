@@ -11,7 +11,7 @@ import (
 // the database in place. Existing passwords, sessions, grants and media work
 // without rescanning or issuing new credentials.
 func TestSchemaMigrationExistingAccountsAndPlayerRemainUsable(t *testing.T) {
-	api, author, reader, p := sharingFixture(t)
+	api, author, reader, p := sharingFixtureForSchema(t, 7)
 	s := api.store
 	_, _, authorToken, err := s.Login(author.Username, "personal password for "+author.Username, "migration-author")
 	if err != nil {

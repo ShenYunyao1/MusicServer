@@ -6,8 +6,12 @@ import (
 )
 
 func communityFixture(t *testing.T) (*API, User, User, Playlist) {
+	return communityFixtureForSchema(t, sqliteSchemaVersion)
+}
+
+func communityFixtureForSchema(t *testing.T, schema int) (*API, User, User, Playlist) {
 	t.Helper()
-	api, _ := testAPI(t)
+	api, _ := testAPIForSchema(t, schema)
 	a, _ := readyMember(t, api, "public-author")
 	b, _ := readyMember(t, api, "public-reader")
 	track := api.store.Tracks()[0]
