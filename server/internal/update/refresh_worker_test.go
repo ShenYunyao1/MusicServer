@@ -13,7 +13,13 @@ import (
 
 func workerRefreshFixture(t *testing.T) (*Installer, workerRefreshOptions, string) {
 	t.Helper()
-	root := t.TempDir()
+	// Hosted Windows runners expose TEMP through an 8.3 alias (RUNNER~1).
+	// The production guard deliberately rejects aliases/symlinks, so prepare
+	// the fixture under its canonical parent instead of weakening that guard.
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	i := &Installer{Config: InstallConfig{Root: filepath.Join(root, "app"), State: filepath.Join(root, "state")}}
 	next := filepath.Join(i.Config.Root, "releases", "candidate")
 	target := filepath.Join(root, "bin", "musicserver-updater")

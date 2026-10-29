@@ -164,6 +164,7 @@ jobs:
             MUSIC_SERVER_TEST_EMAIL_BINARY="$PWD/build/email-browser-fixture" node tests/registration-email-ui.cjs
           elif [ "$SUITE" = tags ]; then
             python tests/test-schema-preview.py
+            python tests/test-admin-terminal.py
             CGO_ENABLED=0 python tests/build-schema-preview.py --version 0.21.0
             python tests/schema-upgrade-process.py --old-server build/schema-preview/released/musicserver --new-server build/schema-preview/musicserver
             MUSIC_SERVER_TEST_BINARY="$PWD/build/schema-preview/musicserver" MUSIC_SERVER_TEST_TAG_BACKUP_ONLY=1 node tests/management-ui.cjs

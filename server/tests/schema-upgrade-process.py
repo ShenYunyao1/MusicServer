@@ -76,7 +76,7 @@ def main():
         content=audio.getvalue();(media/'retained.wav').write_bytes(content)
         password='isolated upgrade administrator'
         init=subprocess.run([os.sys.executable,str(terminal),str(old),str(database),'admin'],input=password+'\n',capture_output=True,text=True,timeout=35)
-        assert init.returncode==0,'isolated administrator initialization failed'
+        assert init.returncode==0,('isolated administrator initialization failed: '+init.stdout+init.stderr).replace(password,'<fixture-password>')
         process=None
         def start(binary,no_scan):
             with socket.socket() as listener:

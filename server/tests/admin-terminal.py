@@ -24,11 +24,14 @@ def main():
     timer = threading.Timer(25, close)
     timer.start()
     transcript = ""
+    # POSIX ReadPassword enables ICRNL: CRLF becomes two line terminators,
+    # leaving an empty line queued for the confirmation prompt.
+    newline = "\r\n" if os.name == "nt" else "\n"
     try:
         for prompt in ["Password (12+ characters):", "Confirm password:"]:
             while prompt not in transcript:
                 transcript += read(1024)
-            write(password + "\r\n")
+            write(password + newline)
         while "Administrator operation completed." not in transcript:
             transcript += read(1024)
         assert password not in transcript, "Password was echoed by the terminal"
