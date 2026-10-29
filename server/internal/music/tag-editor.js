@@ -3,6 +3,7 @@
 // All drafts and capability caches belong to the current signed-in workspace.
 const tagWorkspace={identity:null,generation:0,groups:null,promise:null,dialog:null,editor:null,lastJob:null};
 function clearTagWorkspace(){
+  if(typeof closeCompactTagger==='function')closeCompactTagger();
   tagWorkspace.generation++;
   clearTimeout(tagWorkspace.editor?.timer);
   tagWorkspace.dialog?.remove();
@@ -105,6 +106,10 @@ function tagTaskMenuItem(){return tagFeatureEnabled()&&tagWorkspace.lastJob?{lab
 
 async function openTrackTagEditor(ids,options={}){
   if(!await loadTagCapability())return false;
+  if(typeof openCompactTagger==='function'&&(!options.range||options.range==='selected')&&ids.length<=32){
+    $('trackDetails')?.close();
+    return openCompactTagger(ids);
+  }
   return openTagComposer({ids:[...new Set(ids)],range:options.range||'selected'});
 }
 async function openUploadTagEditor(upload){
@@ -119,7 +124,7 @@ async function openTagComposer(config){
   const dialog=tagNode('dialog',undefined,'modal tag-editor');dialog.id='tagEditorDialog';tagWorkspace.dialog=dialog;tagWorkspace.editor=editor;
   const head=tagNode('div',undefined,'modal-head');head.append(tagNode('h3',config.uploads?(config.allUploads?'本批上传默认标签':'上传标签草稿'):'管理曲目标签'),tagButton('关闭',()=>dialog.close()));dialog.append(head);
   const body=tagNode('div',undefined,'modal-body');dialog.append(body);
-  const intro=tagNode('p',config.uploads?'先保存为上传草稿，确认入库后才应用。公共词条须由管理员维护。':'先选择范围并预览，再明确确认执行。个人标签只对自己可见。','notice');body.append(intro);
+  const intro=tagNode('p',config.uploads?'先保存为上传草稿，确认入库后才应用。公共词条可由成员创建，别名与合并由管理员维护。':'先选择范围并预览，再明确确认执行。个人标签只对自己可见。','notice');body.append(intro);
   const controls=tagNode('div',undefined,'tag-editor-controls');body.append(controls);
   const scope=tagNode('select');scope.id='tagScope';scope.setAttribute('aria-label','标签作用域');
   for(const [value,label] of [['personal','个人标签'],['public','公共标签']]){const option=tagNode('option',label);option.value=value;scope.append(option)}

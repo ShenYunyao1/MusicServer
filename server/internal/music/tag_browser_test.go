@@ -16,9 +16,19 @@ func TestTagEditorLiveBrowser(t *testing.T) {
 		t.Skip("live browser acceptance was not requested")
 	}
 	a, _ := tagHTTPAPI(t)
+	if err := os.WriteFile(filepath.Join(a.store.mediaRoot, "Other - Song.mp3"), []byte("abcdefghij"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.store.Scan(); err != nil {
+		t.Fatal(err)
+	}
 	auth := tagTestAuth(t, a.store, "admin")
 	_ = mustLinkTag(t, a.store, auth, "public", "Rock")
 	_ = mustLinkTag(t, a.store, auth, "personal", "My music")
+	if _, err := a.store.CreateTag(auth, TagInput{Scope: "public", GroupID: "language", Name: "日语", Aliases: []string{"日文", "Japanese"}}); err != nil {
+		t.Fatal(err)
+	}
+	readyMember(t, a, "tagger-member")
 	server := httptest.NewServer(a)
 	defer server.Close()
 	script, err := filepath.Abs("../../tests/tag-editor-live-ui.cjs")

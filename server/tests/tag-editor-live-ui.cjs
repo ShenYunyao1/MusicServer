@@ -10,6 +10,7 @@ async function main(){
   assert.ok(['127.0.0.1','localhost','[::1]'].includes(base.hostname),'This test only runs against a local isolated server');
   const browser=await chromium.launch({headless:true,executablePath:process.env.MUSIC_SERVER_BROWSER});
   const page=await browser.newPage({viewport:{width:1200,height:900}}),errors=[];
+  const settled=async text=>page.waitForFunction(text=>!compactTagger.busy&&!compactTagger.loading&&document.querySelector('#taggerMessage').textContent.includes(text),text);
   page.on('pageerror',error=>errors.push(error.message));
   try{
     await page.goto(base.href.replace(/\/$/,'')+'/#/library');
@@ -41,23 +42,47 @@ async function main(){
     await row.locator('[data-details]').click();
     await page.locator('#trackDetails [data-tag-feature="details"]').waitFor({state:'visible'});
     await page.locator('#trackDetails').getByRole('button',{name:'管理标签',exact:true}).click();
-    await page.locator('#tagEditorDialog').waitFor({state:'visible'});
-    assert.equal(await page.locator('#tagScope').inputValue(),'personal');
-    await page.locator('#tagGroup').selectOption(label.group_id);
-    await page.locator('[data-tag-operation="'+label.id+'"]').waitFor({state:'visible'});
-    await page.locator('[data-tag-operation="'+label.id+'"]').selectOption('add');
-    assert.deepEqual(await page.evaluate(id=>api('tracks/'+id+'/tags'),track.id),before.tags,'Selecting tags cannot change stored relationships');
-    await page.click('#tagEditorSave');
-    await page.locator('#tagEditorStart').waitFor({state:'visible'});
-    assert.deepEqual(await page.evaluate(id=>api('tracks/'+id+'/tags'),track.id),before.tags,'Preview/PATCH cannot apply a relationship');
-    await page.click('#tagEditorStart');
-    await page.waitForFunction(()=>document.querySelector('#tagEditorMessage').textContent.includes('已完成'));
+    await page.locator('#compactTagger').waitFor({state:'visible'});
+    assert.equal(await page.locator('#trackDetails').evaluate(dialog=>dialog.open),false,'The details modal must release the nonmodal tagger');
+    assert.equal(await page.locator('#taggerScope').inputValue(),'public');
+    await row.locator('[data-track-id]').check();
+    const otherID=await page.evaluate(id=>visibleTracks().find(track=>track.id!==id).id,track.id);
+    await page.locator('[data-track-id="'+otherID+'"]').check();
+    await page.waitForFunction(()=>document.querySelector('#taggerSummary').textContent.includes('2 首'));
+    await page.locator('#taggerPin').click();
+    await page.locator('[data-track-id="'+otherID+'"]').uncheck();
+    assert.ok((await page.locator('#taggerSummary').textContent()).includes('2 首'),'Pinned targets survive selection changes');
+    await page.locator('#taggerPin').click();
+    await page.waitForFunction(()=>document.querySelector('#taggerSummary').textContent.includes('1 首'));
+    await page.locator('#taggerScope').selectOption('personal');
+    await page.locator('#compactTagger [data-group="'+label.group_id+'"]').click();
+    await page.locator('[data-tagger-tag="'+label.id+'"]').click();
+    await settled('已添加 1 首');
+    assert.ok((await page.evaluate(id=>api('tracks/'+id+'/tags'),track.id)).personal.some(tag=>tag.id===label.id),'A click saves against the real store');
+    await page.locator('#taggerUndo').click();
+    await settled('已撤销 1 首');
+    assert.equal((await page.evaluate(id=>api('tracks/'+id+'/tags'),track.id)).personal.length,0);
+    await page.locator('[data-tagger-tag="'+label.id+'"]').click();
+    await settled('已添加 1 首');
+
+    // Alias search selects the canonical public term instead of creating a duplicate.
+    await page.locator('#taggerScope').selectOption('public');
+    await page.locator('#compactTagger [data-group="language"]').click();
+    await page.locator('#taggerSearch').fill('日文');
+    await page.locator('#taggerResults button[data-tagger-tag]').filter({hasText:'日语'}).waitFor({state:'visible'});
+    await page.waitForFunction(()=>!compactTagger.loading);
+    assert.equal(await page.locator('#taggerCreate').count(),0,'Exact aliases suppress duplicate creation');
+    await page.locator('#taggerSearch').press('Enter');
+    await settled('已添加 1 首');
+    assert.ok((await page.evaluate(id=>api('tracks/'+id+'/tags'),track.id)).public.some(tag=>tag.name==='日语'));
+    await page.locator('#taggerUndo').click();
+    await settled('已撤销 1 首');
     const after=await page.evaluate(async id=>({tags:await api('tracks/'+id+'/tags'),track:await api('tracks/'+id)}),track.id);
     assert.ok(after.tags.personal.some(tag=>tag.id===label.id),'Confirmed UI mutation must reach the real store');
-    assert.equal(after.tags.personal_version,before.tags.personal_version+1);
-    assert.equal(after.tags.public_version,before.tags.public_version);
-    for(const field of ['id','path','content_hash','genre','version','uploaded_by','owner_id'])assert.deepEqual(after.track[field],before.track[field],'Personal tag editing cannot change track '+field);
-    await page.locator('#tagEditorDialog').getByRole('button',{name:'关闭',exact:true}).first().click();
+    assert.equal(after.tags.personal_version,before.tags.personal_version+3);
+    assert.equal(after.tags.public_version,before.tags.public_version+2);
+    for(const field of ['id','path','content_hash','genre','uploaded_by','owner_id'])assert.deepEqual(after.track[field],before.track[field],'Tag editing cannot change track '+field);
+    await page.locator('#compactTagger').getByRole('button',{name:'关闭',exact:true}).click();
 
     // A local upload draft uses the same real dictionary but does not create a
     // batch, a track or a relationship before upload confirmation.
@@ -74,8 +99,50 @@ async function main(){
     assert.deepEqual(await page.evaluate(()=>api('tracks')),beforeUploads,'Saving an upload draft cannot create a track');
     assert.ok(await page.evaluate(id=>state.uploads[0].tagDraft.personal.add_ids.includes(id),label.id));
     assert.deepEqual(await page.evaluate(id=>api('tracks/'+id+'/tags'),track.id),after.tags,'Upload draft cannot modify an existing relationship');
+
+    const member=await browser.newPage({viewport:{width:1200,height:900}});
+    member.on('pageerror',error=>errors.push(error.message));
+    await member.goto(base.href+'#/library');await member.waitForFunction(()=>!document.querySelector('#username').disabled);
+    await member.fill('#username','tagger-member');await member.fill('#password','personal password for tagger-member');await member.click('#loginButton');
+    await member.waitForFunction(()=>state.user?.username==='tagger-member'&&tagFeatureEnabled());
+    await member.locator('#trackUntagged').click();
+    await member.waitForFunction(()=>browseState.tracks?.total===2&&getActiveTrackFilter().untagged_public===true);
+    assert.equal(await member.locator('#trackUntagged').getAttribute('aria-pressed'),'true');
+    await member.locator('[data-library-track="'+track.id+'"]').click({button:'right'});
+    await member.locator('#contextMenu').getByRole('button',{name:'管理标签',exact:true}).click();
+    await member.locator('#taggerSearch').fill('Member Created Live');
+    await member.locator('#taggerCreate').waitFor({state:'visible'});
+    await member.locator('#taggerSearch').press('Enter');
+    await member.waitForFunction(()=>!compactTagger.busy&&!compactTagger.loading&&document.querySelector('#taggerMessage').textContent.includes('已添加 1 首'));
+    const memberTag=await member.evaluate(async id=>(await api('tracks/'+id+'/tags')).public.find(t=>t.name==='Member Created Live'),track.id);
+    assert.ok(memberTag?.id,'Members can create and apply a public term to another owner’s track');
+    await member.waitForFunction(id=>browseState.tracks?.total===1&&!document.querySelector('[data-library-track="'+id+'"]'),track.id);
+    assert.equal(await member.locator('[data-library-track="'+otherID+'"]').count(),1,'Immediate revision refresh removes the newly classified track from untagged results');
+    await member.locator('#trackUntagged').click();
+    await member.waitForFunction(()=>browseState.tracks?.total===2&&getActiveTrackFilter().untagged_public===undefined);
+    const denied=await member.evaluate(async tag=>{try{await api('tags/'+tag.id,'PATCH',{name:'Forbidden rename'},undefined,tag.version);return 0}catch(error){return error.status}},memberTag);
+    assert.equal(denied,403,'Public dictionary governance remains administrator-only');
+    await page.evaluate(async id=>{
+      const rock=(await api('tags?scope=public&group_id=genre&q=Rock')).items.find(t=>t.name==='Rock');
+      const current=await api('tracks/'+id+'/tags');
+      await api('tracks/'+id+'/tags','PATCH',{scope:'public',add_ids:[rock.id],remove_ids:[]},undefined,current.public_version);
+    },track.id);
+    await member.locator('#taggerUndo').click();
+    await member.waitForFunction(()=>!compactTagger.busy&&document.querySelector('#taggerMessage').textContent.includes('拒绝覆盖'));
+    const preserved=await member.evaluate(id=>api('tracks/'+id+'/tags'),track.id);
+    assert.ok(preserved.public.some(t=>t.id===memberTag.id)&&preserved.public.some(t=>t.name==='Rock'),'Undo must preserve intervening real backend changes');
+    await member.setViewportSize({width:390,height:844});
+    if(process.env.MUSIC_SERVER_TAG_SCREENSHOTS){
+      const directory=process.env.MUSIC_SERVER_TAG_SCREENSHOTS;require('node:fs').mkdirSync(directory,{recursive:true});
+      await member.screenshot({path:require('node:path').join(directory,'tagger-mobile.png'),fullPage:true,animations:'disabled'});
+      await member.setViewportSize({width:1400,height:900});
+      await member.screenshot({path:require('node:path').join(directory,'tagger-desktop.png'),fullPage:true,animations:'disabled'});
+      await member.setViewportSize({width:390,height:844});
+    }
+    assert.ok(await member.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Tagger does not cause narrow-screen overflow');
+    await member.close();
     assert.deepEqual(errors,[],'Application page errors');
-    console.log('Live tag editor passed: real login, menu/detail entry, frozen preview/PATCH/start, stored personal tag, track identity, upload draft isolation.');
+    console.log('Live tagger passed: nonmodal selection/pin, immediate save/undo, alias Enter reuse, member public creation and governance boundary, track identity, narrow layout and upload draft isolation.');
   }finally{await browser.close()}
 }
 main().catch(error=>{console.error(error);process.exitCode=1});

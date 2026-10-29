@@ -193,6 +193,7 @@ jobs:
             python tests/schema-upgrade-process.py --old-server build/schema-preview/bridge/musicserver --new-server build/musicserver
             MUSIC_SERVER_TEST_TAG_BACKUP_ONLY=1 node tests/management-ui.cjs
             node tests/tag-editor-ui.cjs
+            node tests/tagger-ui.cjs
             node tests/track-filter-ui.cjs
             node tests/tag-ui.cjs
             node tests/tag-dictionary-ui.cjs

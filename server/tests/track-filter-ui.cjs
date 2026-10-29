@@ -37,6 +37,14 @@ async function fixture(browser,enabled=true){
   return page;
 }
 async function main(){const browser=await chromium.launch({headless:true,executablePath:process.env.MUSIC_SERVER_BROWSER});try{
+  const untaggedPage=await fixture(browser);await untaggedPage.evaluate(()=>initializeTrackFilters());
+  await untaggedPage.locator('#trackUntagged').click();
+  await untaggedPage.waitForFunction(()=>calls.some(c=>c.path==='track-query'&&c.body.filter.untagged_public===true));
+  assert.equal(await untaggedPage.locator('#trackUntagged').getAttribute('aria-pressed'),'true');
+  assert.equal(await untaggedPage.evaluate(()=>getActiveTrackFilter().untagged_personal),undefined,'Untagged means public classification, not personal data');
+  await untaggedPage.locator('#trackUntagged').click();
+  await untaggedPage.waitForFunction(()=>getActiveTrackFilter().untagged_public===undefined);
+  assert.equal(await untaggedPage.locator('#trackUntagged').getAttribute('aria-pressed'),'false');await untaggedPage.close();
   let dismissPage=await fixture(browser);
   await dismissPage.evaluate(()=>{
     const shell=document.createElement('div');shell.innerHTML='<dialog id="editor"><div id="modalBody"></div><div class="modal-foot"></div></dialog><dialog id="secretDialog"><span id="secretValue"></span></dialog><div id="contextMenu" hidden></div>';document.body.append(shell);

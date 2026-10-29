@@ -34,6 +34,7 @@ async function initializeTrackFilters(){
   filterOwner();const owner=state.user.id,epoch=trackFilterWorkspace.epoch;
   if(!await loadTagCapability()||owner!==state.user?.id||epoch!==trackFilterWorkspace.epoch)return false;
   const toolbar=document.querySelector('#page-tracks .track-toolbar');if(!toolbar)return false;
+  if(!$('trackUntagged')){const button=filterButton('未标签',()=>{const config=readTrackFilterRoute(),filter={...config.filter};if(filter.untagged_public===true)delete filter.untagged_public;else filter.untagged_public=true;return applyTrackFilter(filter,config.sort,config.direction)},'btn');button.id='trackUntagged';button.title='没有公共标签的曲目';button.dataset.trackFilterUi='untagged';(toolbar.querySelector('.filter-tabs')||toolbar).append(button)}
   if(!$('trackAdvancedFilter')){const button=filterButton('筛选与分类',()=>openTrackFilterEditor());button.id='trackAdvancedFilter';button.dataset.trackFilterUi='button';toolbar.append(button)}
   if(typeof openTagDictionary==='function'&&!$('trackTagDictionary')){const button=filterButton('标签词典',()=>openTagDictionary());button.id='trackTagDictionary';button.dataset.trackFilterUi='dictionary';toolbar.append(button)}
   if(!$('trackFilterChips')){const chips=filterNode('div',undefined,'track-filter-chips');chips.id='trackFilterChips';chips.dataset.trackFilterUi='chips';toolbar.append(chips)}
@@ -44,6 +45,7 @@ function renderTrackFilterChips(){
   const host=$('trackFilterChips');if(!host)return;host.replaceChildren();
   let config;try{config=readTrackFilterRoute()}catch(error){filterNotice(error.message,true);host.append(filterButton('清除无效条件',()=>applyTrackFilter({version:1,range:'all'},'title','asc')));return}
   const f=config.filter,groups=typeof tagWorkspace!=='undefined'?tagWorkspace.groups||[]:[];
+  if($('trackUntagged')){$('trackUntagged').classList.toggle('active',f.untagged_public===true);$('trackUntagged').setAttribute('aria-pressed',String(f.untagged_public===true))}
   const chip=(label,remove)=>{const button=filterButton(label+' ×',remove,'btn small filter-chip');host.append(button)};
   const update=next=>applyTrackFilter(next,config.sort,config.direction);
   (f.tags||[]).forEach((clause,index)=>{const group=groups.find(group=>group.id===clause.group_id)?.name||clause.group_id;
@@ -57,13 +59,13 @@ function applyFilterRedirects(filter,redirects){
   for(const clause of next.tags||[])for(const key of ['include_ids','exclude_ids'])if(clause[key])clause[key]=[...new Set(clause[key].map(id=>targets.get(id)||id))];
   return next;
 }
-async function loadFilteredTracks(offset=0){
+async function loadFilteredTracks(offset=0,{fresh=false}={}){
   browseReset();filterOwner();const generation=++browseState.generations.tracks,epoch=trackFilterWorkspace.epoch,owner=state.user?.id,route=location.hash.split('?')[0];
   const current=()=>generation===browseState.generations.tracks&&owner===state.user?.id&&epoch===trackFilterWorkspace.epoch&&route===location.hash.split('?')[0];
   let config,key;
   try{
     config=readTrackFilterRoute();key=JSON.stringify(config);const previous=browseState.tracks;
-    const input={...config,offset,limit:typeof browsePageSize==='number'?browsePageSize:50};if(offset&&previous?.filterKey===key)input.baseline=previous.baseline;
+    const input={...config,offset,limit:typeof browsePageSize==='number'?browsePageSize:50};if(offset&&!fresh&&previous?.filterKey===key)input.baseline=previous.baseline;
     let page;
     try{page=await api('track-query','POST',input)}catch(error){
       if(error.code!=='FILTER_SNAPSHOT_CHANGED'||!current())throw error;

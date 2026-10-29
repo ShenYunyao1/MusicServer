@@ -16,6 +16,7 @@ function renderTrackTagSummary(track){
   return host;
 }
 function tagSyncDraftOpen(){
+  if(typeof compactTagger!=='undefined'&&compactTagger?.busy)return true;
   return Boolean(document.querySelector('dialog[open]:not(#trackDetails)'))||Boolean(state.playlistEditing||state.playlistCreating||state.playlistTrackSortBusy||state.playlistSortBusy);
 }
 async function pollTagChanges(){
@@ -41,16 +42,24 @@ async function pollTagChanges(){
       const groups=await api('tag-groups');if(!current()||tagSyncDraftOpen())return;tagWorkspace.groups=groups;
     }
     if(typeof trackFilterWorkspace!=='undefined'){trackFilterWorkspace.labels.clear();trackFilterWorkspace.baseline=null}
+    const keepTaggerPage=typeof compactTagger!=='undefined'&&compactTagger&&typeof loadFilteredTracks==='function';
+    let offset=keepTaggerPage?(browseState.tracks?.offset||0):0;
     if(state.page==='tracks'&&typeof readTrackFilterRoute==='function'){
-      const config=readTrackFilterRoute();writeTrackFilterRoute(config.filter,config.sort,config.direction,0);
+      const config=readTrackFilterRoute();writeTrackFilterRoute(config.filter,config.sort,config.direction,offset);
     }
-    const route=location.hash,page=state.page,generation=typeof browseState!=='undefined'?browseState.generations.tracks:0;
+    let route=location.hash,loads=1;const page=state.page,generation=typeof browseState!=='undefined'?browseState.generations.tracks:0;
     if(page==='tracks'&&typeof loadBrowseTracks==='function'){
-      const result=await loadBrowseTracks(0);
+      let result=keepTaggerPage?await loadFilteredTracks(offset,{fresh:true}):await loadBrowseTracks(0);
+      if(result&&offset>0&&!result.items.length&&current()&&route===location.hash&&state.page===page){
+        offset=Math.floor(Math.max(0,result.total-1)/(result.limit||50))*(result.limit||50);
+        const config=readTrackFilterRoute();writeTrackFilterRoute(config.filter,config.sort,config.direction,offset);
+        route=location.hash;loads++;
+        result=await loadFilteredTracks(offset,{fresh:true});
+      }
       if(!current()||route!==location.hash||state.page!==page)return;
       // The loader owns request generation and ignores older results.
       if(!result)return;
-      if(typeof browseState!=='undefined'&&browseState.generations.tracks>generation+1)return;
+      if(typeof browseState!=='undefined'&&browseState.generations.tracks>generation+loads)return;
       renderTracks();
     }
     const detail=$('trackDetails');
@@ -68,3 +77,12 @@ async function pollTagChanges(){
 setInterval(()=>void pollTagChanges(),15000);
 window.addEventListener('online',()=>void pollTagChanges());
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)void pollTagChanges()});
+// Reuse revision-based refresh after an immediate edit; do not reload the whole
+// workspace or reset the user's selection while the tagger is in use.
+let taggerRefreshTimer;
+document.addEventListener('tagger-saved',()=>{
+  clearTimeout(taggerRefreshTimer);
+  const owner=state.user?.id;
+  const refresh=()=>{if(state.user?.id!==owner)return;if(tagSyncWorkspace.pending){taggerRefreshTimer=setTimeout(refresh,100);return}void pollTagChanges()};
+  taggerRefreshTimer=setTimeout(refresh,0);
+});

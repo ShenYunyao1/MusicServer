@@ -23,6 +23,18 @@ async function main(){const browser=await chromium.launch({headless:true,executa
  await page.evaluate(()=>{const summary={items:[{id:'rock',name:'Rock',scope:'public',group_id:'genre'},{id:'a',name:'<img src=x onerror=alert(1)>',scope:'personal',group_id:'mood'}],total:8};$('host').append(renderTrackTagSummary({tag_summary:summary}))});
  assert.equal(await page.locator('#host img').count(),0);assert.match(await page.locator('#host').textContent(),/\+6/);await page.locator('#host button').first().click();assert.equal(await page.evaluate(()=>applied.id),'rock');
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+ await page.evaluate(async()=>{window.compactTagger={busy:false};browseState.tracks.offset=50;window.loadFilteredTracks=async(offset,options)=>{calls.push('fresh:'+offset+':'+options.fresh);browseState.generations.tracks++;return {items:[{}],offset,total:100,limit:50}};revision.personal++;await pollTagChanges()});
+ assert.ok(await page.evaluate(()=>calls.includes('fresh:50:true')),'Tagger refresh rereads the current page against a fresh baseline');
+ const beforeFallback=await page.evaluate(()=>renders);
+ await page.evaluate(async()=>{
+   window.readTrackFilterRoute=()=>({filter:{version:1},sort:'title',direction:'asc'});
+   window.writeTrackFilterRoute=(f,s,d,offset)=>history.replaceState(null,'','#/library?offset='+offset);
+   window.loadFilteredTracks=async(offset,options)=>{calls.push('fallback:'+offset);browseState.generations.tracks++;return {items:offset?[]:[{}],offset,total:45,limit:50}};
+   revision.personal++;await pollTagChanges();
+ });
+ assert.ok(await page.evaluate(()=>calls.includes('fallback:0')),'An empty last page falls back to a valid page');
+ assert.equal(await page.evaluate(()=>renders),beforeFallback+1,'Fallback renders its fresh result');
+ await page.evaluate(()=>{compactTagger=null});
  await page.evaluate(async()=>{delay=true;window.pending=pollTagChanges()});await page.waitForFunction(()=>typeof release==='function');await page.evaluate(async()=>{clearTagSyncWorkspace();state.user={id:'bob'};release();await pending});assert.equal(await page.evaluate(()=>tagSyncWorkspace.baseline),null);
  console.log('tag UI synchronization and summary contracts passed');
 }finally{await browser.close()}}

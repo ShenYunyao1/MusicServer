@@ -8,6 +8,7 @@ function visibleTracks() {
 }
 function updateTrackSelection() {
   $('trackSelectionStatus').textContent='';
+  if(typeof taggerSelectionChanged==='function')taggerSelectionChanged();
 }
 function renderTracks() {
   if(typeof loadTagCapability==='function')loadTagCapability();
