@@ -6,16 +6,28 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 )
 
 func TestApplyPersistsVersionOnlyRequestAndRejectsConcurrentApply(t *testing.T) {
+	for _, schema := range []int{7, 8} {
+		t.Run(strconv.Itoa(schema), func(t *testing.T) {
+			testApplyPersistsVersionOnlyRequest(t, schema)
+		})
+	}
+}
+
+func testApplyPersistsVersionOnlyRequest(t *testing.T, schema int) {
+	t.Helper()
 	root := t.TempDir()
 	m := NewManager(filepath.Join(root, "app"), func() string { return Repository })
 	defer m.Close()
+	m.installedSchema = schema
+	m.readCapabilities = func(string) (workerCapabilities, error) { return currentCapabilities(), nil }
 	m.ConfigureInstaller(filepath.Join(root, "queue"), filepath.Join(root, "job.json"))
 	m.status = Status{Repository: Repository, State: "available", Compatible: true, LatestVersion: "9.0.0"}
-	m.plan = &releasePlan{Manifest: Manifest{Version: "9.0.0", Schema: 7}, Repository: Repository}
+	m.plan = &releasePlan{Manifest: Manifest{Version: "9.0.0", Schema: schema}, Repository: Repository}
 	if err := m.Apply("8.0.0"); err == nil {
 		t.Fatal("stale selection accepted")
 	}

@@ -1,4 +1,4 @@
-# 音乐服务器 0.21.0
+# 音乐服务器 0.21.1
 
 Go 1.26+，SQLite schema 8，HTTP API `/api/v2`，内置中文管理页。支持 Windows 和 Linux。
 
@@ -349,7 +349,7 @@ Content-Type: application/json
 
 恢复到新的空目录：`musicserver backup restore --file /path/backup-UUID.tar.gz --destination /path/restored`（Windows 使用 `musicserver.exe`）。工具校验路径、类型、大小、摘要、schema 及数据库完整性，拒绝覆盖非空目录。输出 `restored/data/library.sqlite` 和原相对路径媒体；将程序放到 restored 根目录后可按默认路径启动，Linux 须重新配置部署路径和文件权限。恢复保留 UUID、账户、歌单及 Key，撤销旧会话、清除暂存记录、关闭自动备份并重定位媒体根目录。仅数据库备份需另行提供匹配音频。可能恢复旧密码及旧 Key，须核对并按需轮换。schema 1–6 不支持本版恢复，不可直接覆盖运行中的数据库。
 
-默认检查公开仓库 `ShenYunyao1/MusicServer`；`update_repository` 可指定检查来源。启动及每 6 小时只检查正式 Release 的签名元数据，不下载、不安装。Windows 支持检查与手工替换。Ubuntu 配置独立 systemd 更新器后，管理员可以显式选择兼容版本，自动完成验证签名与包哈希、停止服务、最终数据库备份、切换程序和重新启动；健康检查失败会恢复旧程序及数据库。跨 schema 更新拒绝自动安装。自动安装固定信任官方仓库与内置公钥，不能通过网页改为任意程序源。详细目录、权限、恢复和发布流程见 [Ubuntu 部署说明](deploy/README.md)。
+默认检查公开仓库 `ShenYunyao1/MusicServer`；`update_repository` 可指定检查来源。启动及每 6 小时只检查正式 Release 的签名元数据，不下载、不安装。Windows 支持检查与手工替换。Ubuntu 配置独立 systemd 更新器后，管理员可以显式选择兼容版本，自动完成验证签名与包哈希、停止服务、最终数据库备份、切换程序和重新启动；健康检查失败会恢复旧程序及数据库。跨 schema 自动安装仅支持签名清单明确声明且独立 root 更新器具备能力的 7→8；其他路径继续拒绝。自动安装固定信任官方仓库与内置公钥，不能通过网页改为任意程序源。详细目录、权限、恢复和发布流程见 [Ubuntu 部署说明](deploy/README.md)。
 
 ## 验证
 
