@@ -173,6 +173,8 @@ func (a *API) accountAuth(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	switch {
+	case path == "avatar" || path == "avatar/content":
+		a.avatarHTTP(response, request)
 	case path == "me" && request.Method == "GET":
 		user, err := readUser(a.store.db, auth.userID)
 		if err != nil {

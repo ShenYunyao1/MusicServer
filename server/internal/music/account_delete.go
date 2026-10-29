@@ -59,6 +59,9 @@ func (s *Store) DeleteUser(id string, options MutationOptions) error {
 		if err := deleteAccountTagRows(tx, id); err != nil {
 			return err
 		}
+		if _, err := tx.Exec("DELETE FROM meta WHERE key=?", "user_avatar/"+id); err != nil {
+			return err
+		}
 		user.DeletedAt = persistedTime(time.Now())
 		user.AuthVersion++
 		user.Version++
