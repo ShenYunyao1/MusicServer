@@ -171,10 +171,6 @@ func (s *Store) stageAudioWithAssetsContext(ctx context.Context, name string, re
 	if err := s.checkSpace(filepath.Dir(s.dataPath), 1<<20); err != nil {
 		return UploadPreview{}, err
 	}
-	file, err := root.OpenFile(relative, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil {
-		return UploadPreview{}, err
-	}
 	s.activeStages[relative] = true
 	s.stageMu.Unlock()
 	locked = false
@@ -182,33 +178,57 @@ func (s *Store) stageAudioWithAssetsContext(ctx context.Context, name string, re
 	settings := s.Settings()
 	max := settings.MaxUploadBytes
 	writeStarted := time.Now()
-	count, copyErr := io.Copy(storageWriter{s, s.mediaRoot, file}, io.LimitReader(contextReader{ctx, reader}, max+1))
-	closeErr := file.Close()
+	count, copyErr := s.materializeUpload(ctx, root, relative, reader, max)
 	metrics.Bytes = count
 	timings["write_ms"] = time.Since(writeStarted).Milliseconds()
-	if copyErr != nil || closeErr != nil || count > max {
-		_ = root.Remove(relative)
+	if copyErr != nil || count > max {
+		// materializeUpload cleans its own failed writes; an O_EXCL failure
+		// does not grant ownership of the existing path.
+		if copyErr == nil {
+			_ = root.Remove(relative)
+		}
 		if count > max {
 			return UploadPreview{}, errors.New("file exceeds configured upload limit")
 		}
-		return UploadPreview{}, errors.Join(copyErr, closeErr)
+		return UploadPreview{}, copyErr
+	}
+	setUploadPhase(ctx, "probing")
+	existing, duplicate, lookupErr := s.existingUpload(ctx, root, relative)
+	if lookupErr != nil {
+		_ = root.Remove(relative)
+		return UploadPreview{}, lookupErr
 	}
 	_ = s.activity.Emit("upload.probing", metrics)
 	probeStarted := time.Now()
-	technical, probeErr := validatedAudioContext(ctx, filepath.Join(s.mediaRoot, filepath.FromSlash(relative)), settings.FFprobePath)
+	var technical audioTechnical
+	var probeErr error
+	var validationMarker string
+	knownValid := duplicate && s.db.QueryRow("SELECT value FROM meta WHERE key=?", "validated_audio/"+existing.ContentHash).Scan(&validationMarker) == nil && validationMarker == "1"
+	if !knownValid {
+		technical, probeErr = validatedAudioContext(ctx, filepath.Join(s.mediaRoot, filepath.FromSlash(relative)), settings.FFprobePath)
+	}
 	timings["probe_ms"] = time.Since(probeStarted).Milliseconds()
 	if probeErr != nil {
 		_ = root.Remove(relative)
 		return UploadPreview{}, probeErr
 	}
 	metadataStarted := time.Now()
-	track, metadata, err := s.readTrackWithTechnical(ctx, filepath.Join(s.mediaRoot, filepath.FromSlash(relative)), name, settings, &technical)
+	setUploadPhase(ctx, "metadata")
+	track, metadata := existing, audioMetadata{}
+	if !duplicate {
+		track, metadata, err = s.readTrackWithTechnical(ctx, filepath.Join(s.mediaRoot, filepath.FromSlash(relative)), name, settings, &technical)
+	}
 	timings["metadata_ms"] = time.Since(metadataStarted).Milliseconds()
 	if err != nil {
 		_ = root.Remove(relative)
 		return UploadPreview{}, err
 	}
 	record := stagedRecord{Track: track, Overrides: map[string]string{}, Cover: metadata.Cover, Sidecar: lyrics, GenreValues: metadata.GenreValues}
+	if duplicate && track.CoverID != "" {
+		if asset, ok := s.Cover(track.CoverID); ok {
+			record.Cover = asset.Data
+		}
+	}
 	if metadata.Title == "" {
 		record.Overrides["title"] = track.Title
 	}
@@ -253,7 +273,10 @@ func (s *Store) stageAudioWithAssetsContext(ctx context.Context, name string, re
 		if err := checkStageUploadActor(tx, owner, options); err != nil {
 			return err
 		}
-		_, err := tx.Exec(`INSERT INTO upload_staging (id,original_name,size,content_hash,temp_path,track_json,created_at,expires_at,user_id) VALUES (?,?,?,?,?,?,?,?,?)`, id, filepath.Base(name), count, track.ContentHash, relative, string(encoded), persistedTime(created), persistedTime(expires), owner)
+		if _, err := tx.Exec("INSERT INTO meta(key,value) VALUES(?,'1') ON CONFLICT(key) DO UPDATE SET value='1'", "validated_audio/"+record.Track.ContentHash); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`INSERT INTO upload_staging (id,original_name,size,content_hash,temp_path,track_json,created_at,expires_at,user_id) VALUES (?,?,?,?,?,?,?,?,?)`, id, filepath.Base(name), count, record.Track.ContentHash, relative, string(encoded), persistedTime(created), persistedTime(expires), owner)
 		return err
 	}); err != nil {
 		_ = root.Remove(relative)
@@ -371,6 +394,15 @@ func (s *Store) commitUploadStageWithTags(id string, fields map[string]string, e
 	if err := checkStageUploadActor(s.db, stageOwner, options); err != nil {
 		return Track{}, false, err
 	}
+	if existing, found, err := s.commitExistingUpload(id, stageOwner, record.Track.ContentHash, edits, options); err != nil {
+		return Track{}, false, err
+	} else if found {
+		if root, err := os.OpenRoot(s.mediaRoot); err == nil {
+			_ = root.Remove(relative)
+			_ = root.Close()
+		}
+		return existing, true, nil
+	}
 	s.mediaMu.Lock()
 	defer s.mediaMu.Unlock()
 	root, err := os.OpenRoot(s.mediaRoot)
@@ -393,13 +425,11 @@ func (s *Store) commitUploadStageWithTags(id string, fields map[string]string, e
 		return Track{}, false, err
 	}
 	defer source.Close()
-	destination, err := root.OpenFile(final, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-	if err != nil {
-		return Track{}, false, err
+	publishedBytes, copyErr := s.materializeUpload(context.WithValue(context.Background(), uploadSourceKey{}, relative), root, final, source, preview.Size)
+	materialized := copyErr == nil
+	if copyErr == nil && publishedBytes != preview.Size {
+		copyErr = errors.New("staged audio size changed before commit")
 	}
-	_, copyErr := io.Copy(storageWriter{s, s.mediaRoot, destination}, source)
-	syncErr := destination.Sync()
-	closeErr := destination.Close()
 	lyricsPath := strings.TrimSuffix(final, filepath.Ext(final)) + ".lrc"
 	coverPath := ""
 	committed := false
@@ -407,7 +437,9 @@ func (s *Store) commitUploadStageWithTags(id string, fields map[string]string, e
 	coverCreated := false
 	defer func() {
 		if !committed {
-			_ = root.Remove(final)
+			if materialized {
+				_ = root.Remove(final)
+			}
 			if lyricsCreated {
 				_ = root.Remove(lyricsPath)
 			}
@@ -416,8 +448,8 @@ func (s *Store) commitUploadStageWithTags(id string, fields map[string]string, e
 			}
 		}
 	}()
-	if copyErr != nil || syncErr != nil || closeErr != nil {
-		return Track{}, false, errors.Join(copyErr, syncErr, closeErr)
+	if copyErr != nil {
+		return Track{}, false, copyErr
 	}
 	if record.Sidecar != "" {
 		file, err := root.OpenFile(lyricsPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)

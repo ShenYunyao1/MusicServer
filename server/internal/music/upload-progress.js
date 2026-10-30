@@ -5,7 +5,7 @@ function uploadProgressMarkup(upload){
  const p=upload.progress;if(!p)return '';
  const percent=p.total>0?Math.min(100,Math.floor(p.loaded*100/p.total)):0;
  if(p.phase==='sending')return '<progress max="100" value="'+percent+'" aria-label="上传进度"></progress><span>'+percent+'% · '+formatBytes(p.loaded)+' / '+(p.total?formatBytes(p.total):'计算中')+' · '+formatBytes(p.rate||0)+'/s</span>';
- if(p.phase==='waiting')return '<progress aria-label="等待服务器校验"></progress><span>文件已发送，等待服务器校验结果 · '+uploadDuration(performance.now()-p.waitStarted)+'</span>';
+ if(p.phase==='waiting'){const labels={queued:'排队等待校验',probing:'正在校验音频格式',metadata:'正在读取曲目信息',ready:'校验完成，正在准备入库',failed:'校验未完成'};return '<progress aria-label="等待服务器校验"></progress><span>文件已发送，'+(labels[p.serverPhase]||'等待服务器校验结果')+' · '+uploadDuration(performance.now()-p.waitStarted)+'</span>'}
  if(p.phase==='complete'){
   const timings=upload.preview?.timings||{};
   return '<span>发送耗时 '+uploadDuration(p.sendMS)+' · 服务器接收 '+uploadDuration(timings.receive_ms)+' · 校验 '+uploadDuration(timings.validation_ms??Math.max(0,(timings.total_ms||0)-(timings.receive_ms||0)))+'</span>';

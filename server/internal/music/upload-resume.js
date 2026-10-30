@@ -157,6 +157,7 @@ function resumeSHA256Fallback(buffer) {
 }
 
 async function resumeHash(bytes) {
+  if(typeof uploadHash==='function')return uploadHash(bytes);
   if (!crypto.subtle) return resumeSHA256Fallback(bytes);
   return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), value => value.toString(16).padStart(2, '0')).join('');
 }
@@ -247,6 +248,8 @@ async function applyResumePreview(upload, preview, owner, epoch) {
 }
 
 async function resumeFinishRequest(upload, task, input, owner, epoch) {
+  const stopPolling=beginUploadPhasePolling(upload,task,owner,epoch);
+  try {
   let body = input;
   for (let retries = 0; ; retries++) {
     resumeGuard(owner, epoch, upload);
@@ -262,6 +265,13 @@ async function resumeFinishRequest(upload, task, input, owner, epoch) {
       else if (task.state !== 'uploading' || task.offset !== task.size) throw new Error('服务器校验检查点发生变化，请重新继续上传');
     }
   }
+  } finally { stopPolling(); }
+}
+
+function beginUploadPhasePolling(upload,task,owner,epoch){
+ let stopped=false,timer;
+ const poll=async()=>{if(stopped||!resumeCurrent(owner,epoch,upload)||upload.resumePaused)return;try{const status=await resumeJSON('/'+task.id+'/status','GET',undefined,owner,epoch);if(!stopped&&resumeCurrent(owner,epoch,upload)&&upload.progress?.phase==='waiting'){upload.progress.serverPhase=status.phase;updateUploadProgress(upload)}}catch(_){}finally{if(!stopped&&resumeCurrent(owner,epoch,upload))timer=setTimeout(poll,1000)}};
+ timer=setTimeout(poll,500);return()=>{stopped=true;clearTimeout(timer)};
 }
 
 function resumeStageUpload(upload) {
@@ -289,6 +299,7 @@ function resumeStageUpload(upload) {
       if (resumeCurrent(owner, epoch, upload)) { applyResumeTask(upload, task); await persistResumeQueue(); }
       resumeGuard(owner, epoch, upload);
       if (task.state === 'ready') {
+        upload.flowReleaseTransfer?.();
         const preview = await resumeFinishRequest(upload, task, {}, owner, epoch);
         return await applyResumePreview(upload, preview, owner, epoch);
       }
@@ -319,6 +330,7 @@ function resumeStageUpload(upload) {
         }
       }
       resumeGuard(owner, epoch, upload);
+      upload.flowReleaseTransfer?.();
       const missing = Object.keys(upload.resumeMissingAttachments || {}).filter(kind => !upload[kind + 'File']);
       if (missing.length) throw new Error('封面或歌词附件需要重新选择，或明确选择不使用缺失附件');
       const input = { fields: upload.edits };

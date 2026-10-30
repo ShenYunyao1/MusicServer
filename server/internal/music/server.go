@@ -36,6 +36,7 @@ var usersPageScript []byte
 //go:embed tagger-ui.js tagger-ui.css
 //go:embed avatar-ui.js avatar-ui.css
 //go:embed upload-flow.js
+//go:embed upload-hash.js upload-hash-worker.js
 var workspaceAssets embed.FS
 
 type API struct {
@@ -171,6 +172,8 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		assets["/assets/storage-ui.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/upload-resume.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/upload-flow.js"] = "text/javascript; charset=utf-8"
+		assets["/assets/upload-hash.js"] = "text/javascript; charset=utf-8"
+		assets["/assets/upload-hash-worker.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/email-ui.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/email-ui.css"] = "text/css; charset=utf-8"
 		assets["/assets/storage-ui.css"] = "text/css; charset=utf-8"
@@ -333,6 +336,9 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	}
 	if strings.HasPrefix(request.URL.Path, "/api/v2/public/") || request.URL.Path == "/api/v2/subscriptions" || strings.HasPrefix(request.URL.Path, "/api/v2/subscriptions/") {
 		a.community(response, request)
+		return
+	}
+	if a.uploadPreflight(response, request) {
 		return
 	}
 	if !a.requireUploadEmail(response, request) {

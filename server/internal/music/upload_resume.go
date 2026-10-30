@@ -473,6 +473,10 @@ func resumeChecksum(header string) (string, bool) {
 }
 
 func (s *Store) finishResume(ctx context.Context, auth authContext, task resumableUpload, input resumableFinish, options MutationOptions) (UploadPreview, error) {
+	phaseKey := uploadPhaseIdentity{s, task.ID}
+	uploadPhases.Store(phaseKey, "queued")
+	defer uploadPhases.Delete(phaseKey)
+	ctx = context.WithValue(ctx, uploadPhaseKey{}, func(phase string) { uploadPhases.Store(phaseKey, phase) })
 	if task.State == "canceled" {
 		return UploadPreview{}, errResourceHidden
 	}
@@ -526,6 +530,7 @@ func (s *Store) finishResume(ctx context.Context, auth authContext, task resumab
 		}
 		defer file.Close()
 		ctx = context.WithValue(ctx, uploadActivityKey{}, activity.Fields{UserID: auth.userID, Bytes: task.Size, Timings: map[string]int64{"receive_ms": task.ReceiveMS}})
+		ctx = context.WithValue(ctx, uploadSourceKey{}, resumeFilePath(task.ID))
 		preview, err = s.stageAudioWithAssetsContext(context.WithValue(ctx, resumableStageIDKey{}, task.ID), task.Name, file, fields, uploadAssets{Lyrics: input.Lyrics, Cover: input.Cover, CoverSource: input.CoverSource}, options)
 		if err != nil {
 			return UploadPreview{}, err
@@ -717,6 +722,24 @@ func (a *API) resumableUploads(w http.ResponseWriter, r *http.Request) bool {
 		return true
 	}
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, resumableAPIPath+"/"), "/")
+	if len(parts) == 2 && validResumeID(parts[0]) && parts[1] == "status" {
+		if r.Method != "GET" {
+			w.Header().Set("Allow", "GET")
+			writeError(w, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+			return true
+		}
+		task, err := a.store.resumeOwned(parts[0], auth)
+		if err != nil {
+			writeResumeError(w, err)
+			return true
+		}
+		phase := task.State
+		if value, ok := uploadPhases.Load(uploadPhaseIdentity{a.store, task.ID}); ok {
+			phase = value.(string)
+		}
+		writeJSON(w, 200, map[string]any{"id": task.ID, "phase": phase, "state": task.State, "offset": task.Offset, "size": task.Size})
+		return true
+	}
 	if len(parts) > 2 || !validResumeID(parts[0]) || (len(parts) == 2 && parts[1] != "finish") {
 		writeResumeError(w, errResourceHidden)
 		return true
