@@ -8,6 +8,12 @@ $('uploadZone').after(uploadFlowControls);
 
 function uploadFlowCurrent(owner,epoch){return state.user?.id===owner&&resumeWorkspaceEpoch===epoch}
 function uploadFlowPending(upload){return !['完成','已去重'].includes(upload.status)&&!upload.resumeCanceled}
+async function commitUploadWithReceipt(id,payload,current){
+ try{return await api('uploads/stage/'+encodeURIComponent(id)+'/commit','POST',payload)}catch(error){
+  if(!current()||[401,403].includes(error.status))throw error;
+  try{return await api('uploads/receipts/'+encodeURIComponent(id))}catch(_){throw error}
+ }
+}
 function uploadFlowSummary(){
  const counts={added:0,reused:0,failed:0,review:0};
  for(const u of state.uploads){if(u.status==='完成')counts.added++;if(u.status==='已去重')counts.reused++;if(u.status==='失败')counts.failed++;if(u.stageId&&u.status==='待确认')counts.review++}

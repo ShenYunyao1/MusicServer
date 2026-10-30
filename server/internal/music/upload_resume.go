@@ -859,6 +859,9 @@ func (s *Store) InitializeResumableUploads() error {
 // CleanupResumableUploads skips a task while a chunk/finish/cancel owns its lock.
 // The resume subdirectory is deliberately excluded from normal stage sweeping.
 func (s *Store) CleanupResumableUploads() error {
+	if err := s.cleanupUploadReceipts(); err != nil {
+		return err
+	}
 	ids, err := s.resumeIDs()
 	if err != nil {
 		return err

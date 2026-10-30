@@ -171,6 +171,9 @@ func (s *Store) stageAudioWithAssetsContext(ctx context.Context, name string, re
 	if err := s.checkSpace(filepath.Dir(s.dataPath), 1<<20); err != nil {
 		return UploadPreview{}, err
 	}
+	if s.activeStages[relative] {
+		return UploadPreview{}, errors.New("upload staging path is already active")
+	}
 	s.activeStages[relative] = true
 	s.stageMu.Unlock()
 	locked = false
@@ -536,6 +539,9 @@ func (s *Store) commitUploadStageWithTags(id string, fields map[string]string, e
 			if err != nil {
 				return err
 			}
+			if err := recordUploadReceipt(tx, id, stageOwner, track.ID, true); err != nil {
+				return err
+			}
 			_, err = tx.Exec("DELETE FROM upload_staging WHERE id=?", id)
 			return err
 		}
@@ -593,6 +599,9 @@ func (s *Store) commitUploadStageWithTags(id string, fields map[string]string, e
 			return err
 		}
 		if _, err := tx.Exec("DELETE FROM upload_staging WHERE id=?", id); err != nil {
+			return err
+		}
+		if err := recordUploadReceipt(tx, id, stageOwner, track.ID, false); err != nil {
 			return err
 		}
 		return auditMutation(tx, "track.upload", track.ID, nil, track, options)

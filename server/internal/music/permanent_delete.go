@@ -189,6 +189,9 @@ func (s *Store) PurgeUser(id string, options MutationOptions) error {
 		if err := deleteAccountTagRows(tx, id); err != nil {
 			return err
 		}
+		if _, err := tx.Exec("DELETE FROM meta WHERE key LIKE 'upload_receipt/%' AND json_extract(value,'$.owner')=?", id); err != nil {
+			return err
+		}
 		// Preserve shared contributions while releasing their author foreign keys.
 		for _, table := range []string{"track_tags", "track_tag_overrides"} {
 			var exists bool

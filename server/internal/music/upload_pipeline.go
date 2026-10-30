@@ -180,6 +180,9 @@ func (s *Store) commitExistingUpload(id, owner, hash string, edits *UploadTagEdi
 		if err != nil {
 			return err
 		}
+		if err := recordUploadReceipt(tx, id, owner, track.ID, true); err != nil {
+			return err
+		}
 		_, err = tx.Exec("DELETE FROM upload_staging WHERE id=?", id)
 		return err
 	})
