@@ -185,6 +185,7 @@ jobs:
           elif [ "$SUITE" = realtime ]; then
             MUSIC_SERVER_TEST_REALTIME_ONLY=1 node tests/management-ui.cjs
           elif [ "$SUITE" = browse ]; then
+            node tests/library-pagination-contract.cjs
             node tests/browse-ui.cjs
           elif [ "$SUITE" = email ]; then
             CGO_ENABLED=0 go test -c -o build/email-browser-fixture ./internal/music

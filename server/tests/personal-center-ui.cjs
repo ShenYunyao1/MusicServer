@@ -68,10 +68,10 @@ async function main() {
     await page.click('[data-page="tracks"]');await page.waitForFunction(()=>state.page==='tracks');
     assert.equal(nativeDialogs,0,'Discarded drafts do not leave a native navigation guard');
     await page.locator('#accountMenu summary').click();await page.click('#personalCenter');await page.locator('#editProfile').waitFor();
-    await page.click('#accountBack');await page.waitForFunction(()=>location.hash==='#/library');
+    await page.click('#accountBack');await page.waitForFunction(()=>location.hash.split('?')[0]==='#/library');
     await page.goto(base+'/#/playlists/not-accessible');await page.locator('#routeError').waitFor({state:'visible'});
     await page.locator('#accountMenu summary').click();await page.click('#personalCenter');await page.locator('#editProfile').waitFor();await page.click('#accountBack');
-    assert.equal(await page.evaluate(()=>location.hash),'#/library','Return avoids an inaccessible detail');
+    assert.equal(await page.evaluate(()=>location.hash.split('?')[0]),'#/library','Return avoids an inaccessible detail');
     await page.goto(base+'/#/account/profile');await openProfile(page);
     const current=await page.evaluate(()=>state.user);
     await page.evaluate(async user=>api('auth/me','PATCH',{display_name:'并发更新'},undefined,user.version),current);

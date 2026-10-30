@@ -26,6 +26,7 @@ function writeTrackFilterRoute(filter,sort='title',direction='asc',offset=0){
   if(filter.q)values.set('q',filter.q);if(filter.range&&filter.range!=='all')values.set('filter',filter.range);
   if(Object.keys(copy).some(key=>key!=='version'))values.set('tf',JSON.stringify(copy));
   if(sort!=='title')values.set('sort',sort);if(direction!=='asc')values.set('dir',direction);if(offset)values.set('offset',String(offset));
+  if(typeof libraryWriteRouteValues==='function')libraryWriteRouteValues(values,offset);
   history.replaceState(null,'',(location.hash.split('?')[0]||'#/library')+(values.size?'?'+values:''));
 }
 function filterNotice(text,error=false){const host=$('trackFilterMessage');if(host){host.textContent=text;host.classList.toggle('error',error);host.setAttribute('role',error?'alert':'status');if(error)host.append(document.createTextNode(' '),filterButton('重试读取',()=>loadFilteredTracks(0).then(page=>page&&typeof renderTracks==='function'&&renderTracks()).catch(()=>{}),'btn small'))}if(text)setStatus(text,error?'error':'ok')}
@@ -60,24 +61,30 @@ function applyFilterRedirects(filter,redirects){
   return next;
 }
 async function loadFilteredTracks(offset=0,{fresh=false}={}){
+  if(typeof libraryPaginationReadStarted==='function')libraryPaginationReadStarted();
   browseReset();filterOwner();const generation=++browseState.generations.tracks,epoch=trackFilterWorkspace.epoch,owner=state.user?.id,route=location.hash.split('?')[0];
   const current=()=>generation===browseState.generations.tracks&&owner===state.user?.id&&epoch===trackFilterWorkspace.epoch&&route===location.hash.split('?')[0];
   let config,key;
   try{
     config=readTrackFilterRoute();key=JSON.stringify(config);const previous=browseState.tracks;
-    const input={...config,offset,limit:typeof browsePageSize==='number'?browsePageSize:50};if(offset&&!fresh&&previous?.filterKey===key)input.baseline=previous.baseline;
+    const input={...config,offset,limit:typeof libraryPageSize==='function'?libraryPageSize():typeof browsePageSize==='number'?browsePageSize:50};if(offset&&!fresh&&previous?.filterKey===key)input.baseline=previous.baseline;
+    const requestPage=()=>typeof libraryPageRequest==='function'?libraryPageRequest('track-query','POST',input):api('track-query','POST',input);
     let page;
-    try{page=await api('track-query','POST',input)}catch(error){
+    try{page=await requestPage()}catch(error){
       if(error.code!=='FILTER_SNAPSHOT_CHANGED'||!current())throw error;
-      delete input.baseline;input.offset=0;page=await api('track-query','POST',input);
-      if(current()){writeTrackFilterRoute(config.filter,config.sort,config.direction,0);filterNotice('曲库或标签数据已更新，已重新读取第一页。')}
+      delete input.baseline;input.offset=typeof libraryPageSize==='function'?offset:0;page=await requestPage();
+      if(current()){writeTrackFilterRoute(config.filter,config.sort,config.direction,input.offset);filterNotice('曲库或标签数据已更新，已重新读取当前页。')}
     }
     if(!current())return null;
+    if(page.total>0&&page.offset>=page.total){input.offset=Math.floor((page.total-1)/input.limit)*input.limit;input.baseline=page.baseline;page=await requestPage();if(!current())return null}
+    if(!page.total)page.offset=0;
+    if(typeof libraryCanonicalPage==='function')libraryCanonicalPage(page.offset,page.limit);
     if($('trackFilterMessage')?.classList.contains('error')){filterNotice('');setStatus('筛选已更新','ok')}
     if(page.redirects?.length){config.filter=applyFilterRedirects(config.filter,page.redirects);writeTrackFilterRoute(config.filter,config.sort,config.direction,page.offset);key=JSON.stringify(config);filterNotice('部分标签已合并，筛选已明确替换为目标标签。')}
     page.items=browseReuse(page.items||[],previous?.items);page.query=config.filter.q||'';page.filter=config.filter.range||'all';page.filterKey=key;page.revision=page.baseline.library;
     browseState.tracks=page;trackFilterWorkspace.baseline=page.baseline;browseCacheTracks();browseCachePlaylists();renderTrackFilterChips();return page;
   }catch(error){
+    if(error.name==='AbortError')return null;
     if(current()){browseState.tracks={items:[],total:0,offset:0,limit:50,query:config?.filter.q||'',filter:config?.filter.range||'all',filterKey:key,error:error.message};browseCacheTracks();filterNotice(error.code==='FILTER_REFERENCE_INVALID'?'筛选引用已失效，请编辑条件；没有扩大结果范围。':error.message,true);if(typeof renderTracks==='function')renderTracks()}
     throw error;
   }

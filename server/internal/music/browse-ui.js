@@ -15,10 +15,11 @@ function browseReset(){
   for(const kind of ['tracks','playlists','member']){browseState.generations[kind]++;clearTimeout(browseState.timers[kind])}
 }
 function browseRouteQuery(){return new URLSearchParams(location.hash.split('?')[1]||'')}
-function browseRouteOffset(){return Math.max(0,Number.parseInt(browseRouteQuery().get('offset'),10)||0)}
+function browseRouteOffset(){if(location.hash.split('?')[0]==='#/library'&&typeof libraryReadRouteOffset==='function')return libraryReadRouteOffset();return Math.max(0,Number.parseInt(browseRouteQuery().get('offset'),10)||0)}
 function browseSetRoute(query,offset,filter){
   const values=new URLSearchParams();if(query)values.set('q',query);if(offset)values.set('offset',offset);if(filter&&filter!=='all')values.set('filter',filter);
   if(location.hash.split('?')[0]==='#/library')for(const key of ['tf','sort','dir']){const value=browseRouteQuery().get(key);if(value)values.set(key,value)}
+  if(location.hash.split('?')[0]==='#/library'&&typeof libraryWriteRouteValues==='function')libraryWriteRouteValues(values,offset);
   history.replaceState(null,'',location.hash.split('?')[0]+(values.size?'?'+values:''));
 }
 function browseReuse(items,old=[]){const byID=new Map(old.map(item=>[item.id,item]));return items.map(item=>{const previous=byID.get(item.id);return previous&&JSON.stringify(previous)===JSON.stringify(item)?previous:item})}
@@ -43,15 +44,19 @@ function browseCachePlaylists(){
 }
 async function browseFetchPage(kind,path,params={}){
   browseReset();const generation=++browseState.generations[kind],userID=state.user?.id,route=location.hash.split('?')[0];
-  let values=new URLSearchParams({limit:String(browsePageSize),offset:String(params.offset||0)});
+  let values=new URLSearchParams({limit:String(kind==='tracks'&&typeof libraryPageSize==='function'?libraryPageSize():browsePageSize),offset:String(params.offset||0)});
   for(const [key,value]of Object.entries(params))if(value!==undefined&&value!==null&&value!=='')values.set(key,String(value));
   let page;
-  try{page=await api(path+'?'+values)}catch(error){
+  const fetchPage=()=>kind==='tracks'&&typeof libraryPageRequest==='function'?libraryPageRequest(path+'?'+values):api(path+'?'+values);
+  try{page=await fetchPage()}catch(error){
+    if(error.name==='AbortError')return null;
     if(error.code!=='BROWSE_RESTART')throw error;
-    values.delete('revision');values.set('offset','0');page=await api(path+'?'+values);
-    if(generation===browseState.generations[kind]&&route===location.hash.split('?')[0])browseSetRoute(params.q||'',0,params.filter);
+    values.delete('revision');if(kind!=='tracks')values.set('offset','0');page=await fetchPage();
+    if(kind!=='tracks'&&generation===browseState.generations[kind]&&route===location.hash.split('?')[0])browseSetRoute(params.q||'',0,params.filter);
   }
   if(generation!==browseState.generations[kind]||userID!==state.user?.id)return null;
+  if(kind==='tracks'&&page.total>0&&page.offset>=page.total){values.delete('revision');values.set('offset',String(Math.floor((page.total-1)/Number(values.get('limit')))*Number(values.get('limit'))));page=await fetchPage();if(generation!==browseState.generations[kind]||userID!==state.user?.id)return null}
+  if(kind==='tracks'){if(!page.total)page.offset=0;if(typeof libraryCanonicalPage==='function')libraryCanonicalPage(page.offset,page.limit)}
   const previous=browseState[kind];page.items=browseReuse(page.items||[],previous?.items);page.query=params.q||'';page.filter=params.filter||'all';
   browseState[kind]=page;
   if(kind==='member'){
@@ -62,6 +67,7 @@ async function browseFetchPage(kind,path,params={}){
   browseCacheTracks();browseCachePlaylists();return page;
 }
 async function loadBrowseTracks(offset=browseRouteOffset(),revision){
+  if(typeof libraryPaginationReadStarted==='function')libraryPaginationReadStarted();
   // Pollers capture this loader's generation immediately after calling it.
   // Capability discovery belongs to account entry, never an awaited prelude.
   if(typeof trackFiltersEnabled==='function'&&trackFiltersEnabled())return loadFilteredTracks(offset);
@@ -195,7 +201,7 @@ openPlaylistTrackPicker=function(p){
   search.oninput=()=>{clearTimeout(timer);generation++;timer=setTimeout(()=>load().catch(error=>setStatus(error.message,'error')),220)};
   state.saveAction=async()=>{if(!selected.size)throw new Error('请选择当前页要添加的曲目');await api('playlists/'+encodeURIComponent(p.id)+'/tracks','POST',{track_ids:[...selected]},undefined,p.version);$('editor').close();await refreshCore()};$('editor').showModal();load().catch(error=>setStatus(error.message,'error'));
 };
-function browseRefreshBlocked(){return document.hidden||!state.user||state.playlistEditing||state.playlistCreating||state.playlistTrackSortBusy||state.playlistSortBusy||document.body.classList.contains('playlist-sorting')||Boolean(document.querySelector('dialog[open]'))||Boolean(document.activeElement?.matches('input,textarea,select,[contenteditable="true"]'))}
+function browseRefreshBlocked(){return Boolean(typeof libraryPagination!=='undefined'&&libraryPagination.busy)||document.hidden||!state.user||state.playlistEditing||state.playlistCreating||state.playlistTrackSortBusy||state.playlistSortBusy||document.body.classList.contains('playlist-sorting')||Boolean(document.querySelector('dialog[open]'))||Boolean(document.activeElement?.matches('input,textarea,select,[contenteditable="true"]'))}
 async function pollBrowseChanges(){
   if(browseState.polling||browseRefreshBlocked()||!['tracks','playlists','overview'].includes(state.page)||state.subscriptionsTab||state.invitationsTab)return;
   browseReset();const epoch=browseState.epoch,route=location.hash,page=state.page,detailID=state.playlistDetailId,

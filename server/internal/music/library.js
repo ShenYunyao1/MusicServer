@@ -56,7 +56,9 @@ function renderTracks() {
   $('selectAll').checked=rows.length>0&&rows.every(t=>state.selectedTrackIds.has(t.id));
   const page=typeof browseLibraryPage==='function'?browseLibraryPage():null;
   if($('trackCount'))$('trackCount').textContent='当前页 '+rows.length+' 首'+(page?' · 匹配 '+page.total+' 首':'')+' · 曲库 '+(state.browseSummary?.total??state.tracks.length)+' 首';
-  if(page)browseRenderPager($('page-tracks'),'browseTrackPager',page,offset=>run(async()=>{state.selectedTrackIds.clear();browseSetRoute($('trackSearch').value.trim(),offset,state.trackFilter);await loadBrowseTracks(offset,page.revision);renderTracks()}));
+  if($('trackCount'))$('trackCount').hidden=Boolean(page&&typeof renderLibraryPagination==='function');
+  if(page&&typeof renderLibraryPagination==='function')renderLibraryPagination(page);
+  else if(page)browseRenderPager($('page-tracks'),'browseTrackPager',page,offset=>run(async()=>{state.selectedTrackIds.clear();browseSetRoute($('trackSearch').value.trim(),offset,state.trackFilter);await loadBrowseTracks(offset,page.revision);renderTracks()}));
   updateTrackSelection();
 }
 async function openTrackDetails(track) {

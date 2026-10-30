@@ -20,7 +20,7 @@ module.exports=async function runMultiuserUI({browser,adminPage,base,audio,direc
    await page.locator('#loginScreen').waitFor({state:'visible'});
    await page.fill('#username',username);await page.fill('#password',password);await page.click('#loginButton');
    await page.waitForFunction(()=>document.querySelector('#status').textContent==='已登录');
-   assert.equal(await page.evaluate(()=>location.hash),'#/library');
+   assert.equal(await page.evaluate(()=>location.hash.split('?')[0]),'#/library');assert.equal(await page.evaluate(()=>new URLSearchParams(location.hash.split('?')[1]).get('page_size')),'50');
    await page.evaluate(()=>location.hash='#/admin/users');await page.locator('#routeError').waitFor({state:'visible'});
    await page.locator('#routeError a').click();await page.waitForFunction(()=>state.page==='tracks'&&document.querySelector('#routeError').hidden);
    assert.equal(await page.locator('[data-page="settings"]').isVisible(),false);

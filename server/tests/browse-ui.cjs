@@ -13,17 +13,17 @@ async function regression({page,directory}){
   page.on('request',observe);
   await page.evaluate(()=>location.hash='#/library');
   await page.waitForFunction(()=>state.page==='tracks'&&browseState.tracks?.total===102&&document.querySelectorAll('[data-library-track]').length===50);
-  assert.equal(await page.locator('#trackCount').textContent(),'当前页 50 首 · 匹配 102 首 · 曲库 102 首');
+  assert.equal(await page.locator('#trackCount').isVisible(),false,'Page controls replace the redundant range/count line');assert.match(await page.locator('#libraryPagerTop').textContent(),/共 102 首/);
   const first=page.locator('[data-library-track]').first();
   await first.evaluate(node=>window.browseFirstRow=node);
   await page.evaluate(()=>refreshCore());
   assert.equal(await first.evaluate(node=>node===window.browseFirstRow),true,'An unchanged refresh must reuse the row node');
   await page.locator('#selectAll').check();
   assert.equal(await page.evaluate(()=>state.selectedTrackIds.size),50);
-  await page.locator('#browseTrackPager button').last().click();
+  await page.locator('#browseTrackPager [data-page-action="next"]').click();
   await page.waitForFunction(()=>browseState.tracks.offset===50&&state.selectedTrackIds.size===0);
   assert.equal(await page.locator('[data-library-track]').count(),50);
-  assert.ok((await page.evaluate(()=>location.hash)).includes('offset=50'));
+  assert.ok((await page.evaluate(()=>location.hash)).includes('page=2'));
   await page.fill('#trackSearch','Browse 100');
   await page.waitForFunction(()=>browseState.tracks?.total===1&&document.querySelectorAll('[data-library-track]').length===1);
   assert.equal(await page.locator('#trackSearch').inputValue(),'Browse 100');
@@ -110,7 +110,7 @@ async function main(){
     const page=await browser.newPage({viewport:{width:1440,height:1100}}),errors=[];page.on('pageerror',error=>errors.push(error.message));
     await page.goto(base+'/#setup='+encodeURIComponent(token));await page.fill('#setupPassword','isolated browse password');await page.fill('#setupConfirm','isolated browse password');await page.click('#setupSubmit');await page.locator('#loginScreen').waitFor();await page.fill('#username','admin');await page.fill('#password','isolated browse password');await page.click('#loginButton');await page.waitForFunction(()=>state.user?.username==='admin');
     await waitForAsync(page,async()=>{const scan=await api('admin/scan/status');return scan.state==='completed'},null,{timeout:120000});await page.evaluate(()=>refreshCore());
-    await regression({page,directory});assert.deepEqual(errors,[]);console.log('Artifacts: '+directory);
+    await require('./library-pagination-ui.cjs')({page,directory});await regression({page,directory});assert.deepEqual(errors,[]);console.log('Artifacts: '+directory);
   }catch(error){console.error(logs);throw error}finally{await browser?.close();server.kill()}
 }
 if(require.main===module)main().catch(error=>{console.error(error);process.exitCode=1});
