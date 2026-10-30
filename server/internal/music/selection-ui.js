@@ -4,6 +4,29 @@
 // not become selection groups merely because they also use checkbox inputs.
 const selectionGroupSelector='#trackRows,.playlist-tracks,.key-grant-grid,.scope-grid,#userResources,[data-selection-group]';
 const selectionSummaries=new Map();let selectionGesture=null,selectionSuppressedClick=null,selectionRefreshFrame=0;
+const selectionFloat=document.createElement('aside');selectionFloat.id='selectionFloat';selectionFloat.className='selection-float';selectionFloat.hidden=true;selectionFloat.setAttribute('aria-label','当前页面选择');
+const selectionFloatText=document.createElement('span');selectionFloatText.id='selectionFloatText';selectionFloatText.setAttribute('role','status');
+const selectionFloatClear=document.createElement('button');selectionFloatClear.type='button';selectionFloatClear.className='selection-float-clear';selectionFloatClear.textContent='清空';selectionFloatClear.setAttribute('aria-label','清空当前页面选择');selectionFloat.append(selectionFloatText,selectionFloatClear);document.body.append(selectionFloat);
+function mainSelectionGroup(group){return Boolean(group.closest('.page.active')&&!group.closest('dialog'))}
+function positionSelectionFloat(){
+ if(selectionFloat.hidden)return;
+ const topbar=document.querySelector('.topbar'),top=topbar?Math.max(0,topbar.getBoundingClientRect().bottom):0,mobile=innerWidth<=900;
+ let desired=top+80;
+ if(mobile){const page=selectionFloat.group?.closest('.page'),toolbar=page?.querySelector('.track-toolbar,.toolbar'),bottom=toolbar?.getBoundingClientRect().bottom;desired=bottom&&bottom>top&&bottom<innerHeight*.6?bottom+12:top+12}
+ const player=document.querySelector('.preview-bar'),playerTop=player&&!player.hidden&&player.getClientRects().length?player.getBoundingClientRect().top:innerHeight;
+ const available=playerTop-selectionFloat.offsetHeight-12;
+ selectionFloat.style.top=Math.min(desired,Math.max(top+8,available))+'px';selectionFloat.style.visibility=available<top+8?'hidden':'';
+}
+function renderSelectionFloat(){
+ const group=[...document.querySelectorAll(selectionGroupSelector)].find(group=>mainSelectionGroup(group)&&group.getClientRects().length&&!group.closest('[hidden]')&&selectionInputs(group).some(input=>input.checked));
+ selectionFloat.group=group;const hidden=!group||Boolean(document.querySelector('dialog[open]'));if(selectionFloat.hidden!==hidden)selectionFloat.hidden=hidden;
+ if(selectionFloat.hidden)return;
+ const inputs=selectionInputs(group),text='已选 '+inputs.filter(input=>input.checked).length+' / 当前页 '+inputs.length+(group.matches('#trackRows,.playlist-tracks')?' 首':' 项');
+ if(selectionFloatText.textContent!==text)selectionFloatText.textContent=text;
+ positionSelectionFloat();
+}
+selectionFloatClear.onclick=()=>{cancelSelectionFloatGesture();const group=selectionFloat.group;if(!group?.isConnected||!mainSelectionGroup(group))return;for(const input of selectionInputs(group)){if(input.checked){input.checked=false;input.dispatchEvent(new Event('change',{bubbles:true}))}}refreshSelectionUI()};
+function cancelSelectionFloatGesture(){if(selectionGesture)endSelectionGesture(true)}
 function selectionIdentity(){return typeof state==='undefined'?null:(state.user?.id||'')+'/'+(typeof resumeWorkspaceEpoch==='undefined'?0:resumeWorkspaceEpoch)}
 function selectionGroup(input){return input?.closest?.(selectionGroupSelector)}
 function selectionInputs(group){return [...group.querySelectorAll('input[type="checkbox"]')].filter(input=>selectionGroup(input)===group&&input.id!=='selectAll'&&!input.hasAttribute('data-selection-all')&&!input.disabled&&!input.closest('[hidden]'))}
@@ -23,14 +46,17 @@ function refreshSelectionUI(){
  for(const group of document.querySelectorAll(selectionGroupSelector)){
   const inputs=selectionInputs(group);if(!inputs.length&&!group.matches('#trackRows,.playlist-tracks,[data-selection-group]')){const previous=selectionSummaries.get(group);if(previous){previous.remove();selectionSummaries.delete(group)}continue}
   const output=selectionSummary(group);if(!output)continue;
+  const hideSummary=mainSelectionGroup(group);if(output.hidden!==hideSummary)output.hidden=hideSummary;
   const text='已选 '+inputs.filter(input=>input.checked).length+' / 当前页 '+inputs.length+' 项';
   if(output.textContent!==text)output.textContent=text;
   group.dataset.selectionCount=String(inputs.filter(input=>input.checked).length);
  }
+ renderSelectionFloat();
 }
 function scheduleSelectionRefresh(){if(!selectionRefreshFrame)selectionRefreshFrame=requestAnimationFrame(refreshSelectionUI)}
-function selectionStartInput(target){
+function selectionStartInput(target,point){
  if(!(target instanceof Element))return null;
+ if(point&&typeof trackSelectionHit==='function'){const hit=trackSelectionHit(target,point.x,point.y);if(hit)return hit}
  const control=target.closest('input,button,a,textarea,select');
  if(control&&!control.matches('input[type="checkbox"]'))return null;
  const input=control||target.closest('label,td,[data-selection-hit]')?.querySelector('input[type="checkbox"]');
@@ -68,7 +94,7 @@ function endSelectionGesture(suppress){
 document.addEventListener('pointerdown',event=>{
  selectionSuppressedClick=null;
  if(event.button!==0||event.pointerType!=='mouse'){if(selectionGesture)endSelectionGesture(false);return}
- const input=selectionStartInput(event.target);if(!input)return;
+ const input=selectionStartInput(event.target,{x:event.clientX,y:event.clientY});if(!input)return;
  const point={x:event.clientX,y:event.clientY};selectionGesture={owner:selectionIdentity(),input,group:selectionGroup(input),checked:!input.checked,start:point,last:point,point,pointerId:event.pointerId,dragging:false,visited:new Set()};
 },true);
 document.addEventListener('pointermove',event=>{
@@ -83,10 +109,12 @@ document.addEventListener('contextmenu',()=>endSelectionGesture(false),true);
 document.addEventListener('keydown',event=>{if(event.key==='Escape')endSelectionGesture(true)},true);
 window.addEventListener('blur',()=>endSelectionGesture(false));
 window.addEventListener('hashchange',()=>endSelectionGesture(false));
-document.addEventListener('scroll',()=>{if(selectionGesture?.dragging)selectionMove(selectionGesture.point)},true);
+document.addEventListener('scroll',()=>{if(selectionGesture?.dragging)selectionMove(selectionGesture.point);positionSelectionFloat()},true);
+window.addEventListener('resize',positionSelectionFloat);
 document.addEventListener('click',event=>{
  if(event.detail&&selectionSuppressedClick&&performance.now()<selectionSuppressedClick.until&&selectionSuppressedClick.group.contains(event.target)){event.preventDefault();event.stopImmediatePropagation();selectionSuppressedClick=null}
 },true);
 document.addEventListener('change',scheduleSelectionRefresh,true);
-new MutationObserver(scheduleSelectionRefresh).observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['disabled','checked','hidden']});
+new MutationObserver(scheduleSelectionRefresh).observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['disabled','checked','hidden','open','class']});
+if(typeof ResizeObserver==='function'){const observer=new ResizeObserver(positionSelectionFloat);for(const element of [document.querySelector('.topbar'),document.querySelector('.preview-bar'),selectionFloat])if(element)observer.observe(element)}
 scheduleSelectionRefresh();

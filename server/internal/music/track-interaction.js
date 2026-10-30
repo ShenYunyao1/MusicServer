@@ -2,9 +2,17 @@
 
 let pendingTrackClick=null;
 function cancelTrackClick(){if(pendingTrackClick){clearTimeout(pendingTrackClick.timer);pendingTrackClick=null}}
+function trackSelectionHit(target,x,y){
+ const row=target.closest?.('[data-library-track],.playlist-track');if(!row)return null;
+ const input=row.querySelector('[data-track-id],[data-playlist-select]'),cover=row.querySelector('.track-cover'),rect=row.getBoundingClientRect();
+ return input&&!input.disabled&&cover&&x>=rect.left&&x<cover.getBoundingClientRect().left&&y>=rect.top&&y<=rect.bottom?input:null;
+}
 function bindTrackRowInteraction(row,{title,detail,play,toggle}){
  const isTitle=target=>title===target||title?.contains(target);
  const isBlank=target=>!target.closest('button,a,input,label,select,textarea,summary,[contenteditable="true"],.playlist-sequence,.track-cover');
+ row.addEventListener('pointerdown',event=>{if(event.button===0&&trackSelectionHit(event.target,event.clientX,event.clientY)){cancelTrackClick();event.stopPropagation()}},true);
+ row.addEventListener('touchstart',event=>{const touch=event.touches[0];if(touch&&trackSelectionHit(event.target,touch.clientX,touch.clientY)){cancelTrackClick();event.stopPropagation()}},{capture:true,passive:true});
+ row.addEventListener('click',event=>{if(event.button!==0||!trackSelectionHit(event.target,event.clientX,event.clientY))return;cancelTrackClick();if(event.target.matches('input[type="checkbox"]'))return;event.preventDefault();event.stopImmediatePropagation();toggle()},true);
  row.addEventListener('click',event=>{
   if(event.button!==0||(!isTitle(event.target)&&!isBlank(event.target)))return;
   event.preventDefault();cancelTrackClick();
@@ -16,7 +24,7 @@ function bindTrackRowInteraction(row,{title,detail,play,toggle}){
  row.addEventListener('dblclick',event=>{
   if(event.button!==0)return;
   if(isTitle(event.target)){event.preventDefault();cancelTrackClick();play()}
-  else if(isBlank(event.target)){event.preventDefault();cancelTrackClick();toggle()}
+  else if(isBlank(event.target)){event.preventDefault();cancelTrackClick();detail()}
  });
  row.addEventListener('keydown',event=>{if(event.defaultPrevented||event.target!==row)return;if(event.key==='Enter'){event.preventDefault();cancelTrackClick();detail()}else if(event.key===' '){event.preventDefault();cancelTrackClick();toggle()}});
 }
