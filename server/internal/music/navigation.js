@@ -120,6 +120,7 @@ const previewBar=document.createElement('div');previewBar.id='previewBar';previe
 const previewTitle=document.createElement('strong');previewTitle.id='previewTitle';
 const closePreview=makeButton('×',()=>{memberPlayer.pause();memberPlayer.removeAttribute('src');memberPlayer.load();previewBar.hidden=true});closePreview.setAttribute('aria-label','关闭播放预览');
 previewBar.append(previewTitle,memberPlayer,closePreview);document.querySelector('.app').append(previewBar);
+if(typeof initializeOnlinePlayer==='function')initializeOnlinePlayer(previewBar,memberPlayer);
 
 const maintenancePage=document.createElement('section');maintenancePage.id='page-maintenance';maintenancePage.className='page';
 maintenancePage.innerHTML='<div class="page-intro"><h1>曲库维护</h1></div>';

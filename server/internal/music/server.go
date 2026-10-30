@@ -40,6 +40,7 @@ var usersPageScript []byte
 //go:embed upload-batch.js upload-flow.css
 //go:embed selection-ui.js selection-ui.css track-interaction.js
 //go:embed library-pagination.js library-pagination.css
+//go:embed online-player.js online-player.css lyrics-parser.js
 var workspaceAssets embed.FS
 
 type API struct {
@@ -184,6 +185,9 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		assets["/assets/track-interaction.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/library-pagination.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/library-pagination.css"] = "text/css; charset=utf-8"
+		assets["/assets/online-player.js"] = "text/javascript; charset=utf-8"
+		assets["/assets/online-player.css"] = "text/css; charset=utf-8"
+		assets["/assets/lyrics-parser.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/email-ui.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/email-ui.css"] = "text/css; charset=utf-8"
 		assets["/assets/storage-ui.css"] = "text/css; charset=utf-8"

@@ -205,6 +205,9 @@ jobs:
           else
             node tests/dialog-dismiss-ui.cjs
             node tests/selection-ui.cjs
+            node tests/lyrics-parser-test.cjs
+            node tests/online-player-contract.cjs
+            MUSIC_SERVER_TEST_ONLINE_PLAYER_ONLY=1 node tests/management-ui.cjs
             MUSIC_SERVER_TEST_SELECTION_ONLY=1 node tests/management-ui.cjs
             node tests/upload-flow-contract.cjs
             node tests/upload-batch-contract.cjs

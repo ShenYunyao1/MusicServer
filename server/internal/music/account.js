@@ -36,9 +36,10 @@ $('firstPasswordForm').onsubmit=async event=>{
 };
 $('logoutFirstPassword').onclick=()=>run(async()=>{await api('auth/logout','POST');setLoggedOut()});
 const memberPlayer=document.createElement('audio');memberPlayer.id='memberPlayer';memberPlayer.controls=true;memberPlayer.hidden=true;memberPlayer.style.maxWidth='100%';document.querySelector('.content').prepend(memberPlayer);
-function playTrack(track){if(track.missing || track.removed)return;memberPlayer.src='/api/v2/media/'+encodeURIComponent(track.id);memberPlayer.hidden=false;$('previewBar').hidden=false;$('previewTitle').textContent=track.title||'未命名曲目';memberPlayer.play().catch(error=>setStatus(error.message,'error'))}
+function playTrack(track){if(typeof playOnlineTrack==='function')return playOnlineTrack(track);if(track.missing || track.removed)return;memberPlayer.src='/api/v2/media/'+encodeURIComponent(track.id);memberPlayer.hidden=false;$('previewBar').hidden=false;$('previewTitle').textContent=track.title||'未命名曲目';memberPlayer.play().catch(error=>setStatus(error.message,'error'))}
 
 function setLoggedOut() {
+  if(typeof closeOnlinePlayer==='function')closeOnlinePlayer();
 	if(typeof clearTagDictionaryWorkspace==='function')clearTagDictionaryWorkspace();
 	if(typeof clearTagSyncWorkspace==='function')clearTagSyncWorkspace();
 	if(typeof clearTrackFilterWorkspace==='function')clearTrackFilterWorkspace();
