@@ -156,7 +156,7 @@ async function realBrowserFlow({browser,page,base,directory,fs}){
     await verify(late,'late@example.invalid');assert.equal(await late.evaluate(async()=>(await api('auth/storage')).limit_bytes),2097152);
 
     await early.evaluate(()=>location.hash='#/uploads');await early.waitForFunction(()=>state.page==='upload');const audio=await fs.readFile(path.join(directory,'media','First.wav'));audio[44]=7;
-    await early.setInputFiles('#uploadInput',{name:'email-upload.wav',mimeType:'audio/wav',buffer:audio});await early.locator('[data-stage-upload]').click();await early.waitForFunction(()=>state.uploads[0]?.stageId);await early.locator('[data-confirm-upload]').click();await early.waitForFunction(()=>['完成','已去重'].includes(state.uploads[0]?.status));
+    await early.setInputFiles('#uploadInput',{name:'email-upload.wav',mimeType:'audio/wav',buffer:audio});await early.check('#uploadReview');await early.locator('[data-stage-upload]').click();await early.waitForFunction(()=>state.uploads[0]?.stageId);await early.locator('[data-confirm-upload]').click();await early.waitForFunction(()=>['完成','已去重'].includes(state.uploads[0]?.status));
     assert.equal(await early.evaluate(async()=>(await api('auth/storage')).used_bytes),audio.length,'Verified member uses the assigned audio quota');
     await ageChallenge(await early.evaluate(()=>state.user.id));
     await early.evaluate(()=>location.hash='#/account/security');await early.locator('#editEmail').click();await early.locator('#accountEmail').waitFor({state:'visible'});await early.fill('#accountEmail','changed@example.invalid');await early.click('#sendEmailCode');await early.waitForFunction(()=>document.querySelector('#emailProfileError').textContent.includes('400'));

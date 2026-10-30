@@ -103,6 +103,7 @@ async function main() {
     await page.reload();
     await page.waitForFunction(() => state.user?.username === 'admin' && state.tracks.length === 1);
     await page.waitForFunction(() => document.querySelector('#status').textContent === '已登录');
+    if(process.env.MUSIC_SERVER_TEST_UPLOAD_FLOW_ONLY==='1'){await require('./upload-flow-ui.cjs')({page,browser,base,directory});return}
     if(process.env.MUSIC_SERVER_TEST_REALTIME_ONLY==='1'){await require('./community-realtime-ui.cjs')({page,browser,base,directory});return}
     if(process.env.MUSIC_SERVER_TEST_SHARING_ONLY==='1'){await require('./sharing-ui.cjs')({page,browser,base,directory});return}
     if(process.env.MUSIC_SERVER_TEST_ACCOUNT_DELETE_ONLY==='1'){await require('./account-delete-ui.cjs')({page,browser,base,directory});return}
@@ -226,7 +227,7 @@ async function main() {
     assert.equal(await page.locator('.upload-editor').getAttribute('open'),null);
     await page.locator('.upload-editor > summary').click();await page.locator('[data-upload-field="title"]').waitFor({state:'visible'});
     await page.locator('.upload-editor > summary').click();
-    await page.locator('[data-stage-upload]').click();
+    await page.check('#uploadReview');await page.locator('[data-stage-upload]').click();
     await page.waitForFunction(() => state.uploads[0].stageId);
     await page.locator('[data-confirm-upload]').click();
     await page.waitForFunction(() => state.tracks.length === 2);

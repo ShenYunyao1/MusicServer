@@ -58,7 +58,7 @@ module.exports=async function runMultiuserUI({browser,adminPage,base,audio,direc
   await a.page.click('[data-page="upload"]');const upload=Buffer.from(audio);upload[44]=7;
   await a.page.setInputFiles('#uploadInput',{name:'Alice song.wav',mimeType:'audio/wav',buffer:upload});
   await a.page.waitForFunction(()=>state.uploads.length===1);
-  await a.page.locator('[data-stage-upload]').click();await a.page.waitForFunction(()=>state.uploads[0].stageId);
+  await a.page.check('#uploadReview');await a.page.locator('[data-stage-upload]').click();await a.page.waitForFunction(()=>state.uploads[0].stageId);
   await a.page.locator('[data-confirm-upload]').click();await a.page.waitForFunction(()=>state.uploads[0].status==='完成');
   await a.page.waitForFunction(()=>state.tracks.some(t=>t.title==='Alice song'));
   const track=await a.page.evaluate(()=>state.tracks.find(t=>t.title==='Alice song'));

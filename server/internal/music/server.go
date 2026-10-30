@@ -35,6 +35,7 @@ var usersPageScript []byte
 //go:embed management.css management.js navigation.js feedback.js library.js administration.js playlist-ui.js community.js sharing.js updater-ui.js setup.js upload-progress.js system-logs.js profile.js profile.css community-realtime.js backup-ui.js storage-ui.js storage-ui.css browse-ui.js browse-ui.css upload-resume.js email-ui.js email-ui.css tag-editor.js tag-editor.css track-filter-ui.js track-filter-ui.css tag-ui.js tag-ui.css tag-dictionary-ui.js tag-dictionary-ui.css
 //go:embed tagger-ui.js tagger-ui.css
 //go:embed avatar-ui.js avatar-ui.css
+//go:embed upload-flow.js
 var workspaceAssets embed.FS
 
 type API struct {
@@ -169,6 +170,7 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		assets["/assets/backup-ui.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/storage-ui.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/upload-resume.js"] = "text/javascript; charset=utf-8"
+		assets["/assets/upload-flow.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/email-ui.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/email-ui.css"] = "text/css; charset=utf-8"
 		assets["/assets/storage-ui.css"] = "text/css; charset=utf-8"

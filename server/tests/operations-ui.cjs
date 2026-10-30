@@ -1,6 +1,6 @@
 const assert=require('node:assert/strict');
 module.exports=async({page,audio})=>{
- await page.click('[data-page="upload"]');await page.waitForFunction(()=>state.page==='upload');
+ await page.click('[data-page="upload"]');await page.waitForFunction(()=>state.page==='upload');await page.check('#uploadReview');
  const data=Buffer.alloc(256*1024);audio.copy(data);data.writeUInt32LE(data.length-8,4);data.writeUInt32LE(data.length-44,40);data[data.length-1]=9;
  await page.setInputFiles('#uploadInput',{name:'Progress.wav',mimeType:'audio/wav',buffer:data});
  await page.waitForFunction(()=>state.uploads.length===1);
