@@ -187,7 +187,7 @@ openAddTracks=function(ids){
   state.saveAction=async()=>{const p=page?.items.find(p=>p.id===select.value);if(!p)throw new Error('请选择歌单');await api('playlists/'+encodeURIComponent(p.id)+'/tracks','POST',{track_ids:ids},undefined,p.version);state.selectedTrackIds.clear();$('editor').close();await refreshCore();setStatus('曲目已加入歌单','ok')};$('editor').showModal();load().catch(error=>setStatus(error.message,'error'));
 };
 const browseOriginalShowTrackMenu=showTrackMenu;
-showTrackMenu=function(event,track){browseOriginalShowTrackMenu(event,track);if((state.browseSummary?.playlist_count||0)>state.playlists.filter(p=>!p.system&&!p.read_only).length)$('contextMenu').append(makeButton('选择其他歌单…',()=>{hideContextMenu();openAddTracks([...state.selectedTrackIds])}))};
+showTrackMenu=function(event,track){browseOriginalShowTrackMenu(event,track);if((state.browseSummary?.playlist_count||0)>state.playlists.filter(p=>!p.system&&!p.read_only).length)$('contextMenu').append(makeButton('选择其他歌单…',()=>{hideContextMenu();openAddTracks(libraryContextIDs(track))}))};
 openPlaylistTrackPicker=function(p){
   if(p.system)return;const body=$('modalBody');body.replaceChildren();$('modalTitle').textContent='添加曲目到 '+(p.name||'歌单');
   const search=document.createElement('input');search.className='search';search.placeholder='搜索曲目';search.setAttribute('aria-label','搜索可添加曲目');const list=document.createElement('div');list.className='key-grant-grid';const pager=document.createElement('div'),selected=new Set(),epoch=browseState.epoch;body.append(search,list,pager);let generation=0,timer,page;

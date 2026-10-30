@@ -7,7 +7,7 @@ module.exports=async({page})=>{
  await page.locator('#trackRows tr').first().click({button:'right'});
  await page.locator('#contextMenu').waitFor({state:'visible'});
  const after=await page.locator('#trackRows').boundingBox();assert.equal(after.y,before.y,'Right-click must not move the track list');
- assert.equal(await page.evaluate(()=>state.selectedTrackIds.size),1);
+ assert.equal(await page.evaluate(()=>state.selectedTrackIds.size),0,'Right-click must not select a track');
  assert.ok((await page.locator('#contextMenu').textContent()).includes('添加至'));
  await page.keyboard.press('Escape');await page.locator('#trackRows tr').first().focus();await page.keyboard.press('Shift+F10');
  await page.locator('#contextMenu').waitFor({state:'visible'});await page.keyboard.press('Escape');

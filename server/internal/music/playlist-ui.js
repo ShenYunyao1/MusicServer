@@ -98,7 +98,17 @@ function playlistTrackActions(p,track,unavailable){
     {label:'下移曲目',disabled:index===ids.length-1||state.playlistTrackSortBusy,action:()=>shift(1)},
     {label:'移出歌单',action:()=>removePlaylistMember(p,track)}];
 }
-function showPlaylistTrackMenu(event,p,track,unavailable){showContextMenu(event,playlistTrackActions(p,track,unavailable))}
+function showPlaylistTrackMenu(event,p,track,unavailable){
+ const selection=state.playlistTrackSelection?.ids,ids=selection?.has(track.id)?[...selection]:[track.id];
+ if(ids.length<2){showContextMenu(event,playlistTrackActions(p,track,unavailable));return}
+ const unavailableIDs=new Set(p.unavailable_track_ids||[]),items=[{label:'曲目详情',action:()=>openPlaylistTrackDetails(p,track,unavailable)},{label:'添加所选 '+ids.length+' 首到我的歌单…',disabled:ids.some(id=>unavailableIDs.has(id)||state.tracks.find(t=>t.id===id)?.removed||state.tracks.find(t=>t.id===id)?.missing),action:()=>openAddTracks(ids)}];
+ if(!p.read_only)items.push({label:'移出所选 '+ids.length+' 首曲目',action:()=>removePlaylistMembers(p,ids)});
+ showContextMenu(event,items);
+}
+function removePlaylistMembers(p,ids){
+ if(!confirm('将所选 '+ids.length+' 首曲目移出此歌单？'))return;
+ run(async()=>{let version=p.version,completed=0;try{for(const id of ids){await api('playlists/'+p.id+'/tracks/'+id,'DELETE',undefined,undefined,version);completed++;if(completed<ids.length){const result=await api('playlists/'+p.id);version=(result.playlist||result).version}}}catch(error){throw new Error('已移出 '+completed+' / '+ids.length+' 首；'+error.message)}finally{state.playlistTrackSelection=null;await refreshCore()}});
+}
 function removePlaylistMember(p,track){
   if(!confirm('将“'+(track.title||'不可用曲目')+'”移出此歌单？'))return;
   run(async()=>{await api('playlists/'+p.id+'/tracks/'+track.id,'DELETE',undefined,undefined,p.version);await refreshCore();setStatus('曲目已移出歌单','ok')});
