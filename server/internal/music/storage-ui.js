@@ -82,6 +82,7 @@ function storageAccountTable(accounts,deleted){
   else{const percent=account.used_bytes/account.limit_bytes*100,bar=document.createElement('progress'),caption=document.createElement('span');bar.max=100;bar.value=Math.min(100,percent);bar.setAttribute('aria-label',account.username+' 已用额度');caption.textContent=Number(percent.toFixed(1))+'%'+(percent>100?' · 已超额':percent>=90?' · 接近上限':'');usage.className='storage-usage'+(percent>100?' exceeded':percent>=90?' near':'');usage.append(bar,caption)}
   const action=document.createElement('td');action.dataset.label=labels[4];
   if(deleted){action.textContent='只读';if(account.email&&account.account_version){const release=makeButton('释放邮箱占用',()=>run(async()=>{if(!confirm('释放此已删除账户的邮箱占用？历史账户和上传溯源将保留。'))return;await api('admin/users/'+account.id+'/release-email','POST',{},undefined,account.account_version);await loadDeletedAccountStorage(deletedStoragePage?.offset||0);setStatus('邮箱占用已释放','ok')}),'btn small');release.dataset.releaseEmail=account.id;action.append(release)}}else{const button=makeButton('调整额度',()=>run(()=>openStorageQuota(account.id)),'btn small');button.dataset.editQuota=account.id;action.append(button)}
+  if(deleted&&account.account_version){const purge=makeButton('完全删除',()=>purgeUserAccount({...account,version:account.account_version}),'btn small danger');purge.dataset.purgeUser=account.id;action.append(purge)}
   row.append(usage,action);body.append(row);
  }
  return table;

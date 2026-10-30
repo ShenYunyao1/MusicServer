@@ -87,6 +87,10 @@ func newStoreForSchema(dataPath, mediaRoot string, schema int) (*Store, error) {
 		}
 		return nil, err
 	}
+	if err := store.recoverPurgedMedia(); err != nil {
+		_ = store.db.Close()
+		return nil, err
+	}
 	if err := store.InitializeResumableUploads(); err != nil {
 		_ = store.db.Close()
 		return nil, err

@@ -1674,6 +1674,20 @@ func (a *API) maintenance(response http.ResponseWriter, request *http.Request) {
 	switch {
 	case path == "/api/v2/admin/removed" && request.Method == http.MethodGet:
 		writeJSON(response, 200, a.store.RemovedTracks())
+	case strings.HasPrefix(path, "/api/v2/admin/removed/") && request.Method == http.MethodDelete:
+		id := strings.TrimPrefix(path, "/api/v2/admin/removed/")
+		if err := a.store.PurgeTrack(id, mutationOptions(request)); err != nil {
+			switch {
+			case errors.Is(err, errTrackNotRemoved):
+				writeError(response, 409, "TRACK_NOT_REMOVED", err.Error())
+			case errors.Is(err, sql.ErrNoRows):
+				writeError(response, 404, "NOT_FOUND", "track not found")
+			default:
+				writeUserError(response, err)
+			}
+			return
+		}
+		response.WriteHeader(204)
 	case strings.HasPrefix(path, "/api/v2/admin/removed/") && request.Method == http.MethodPost:
 		id := strings.TrimPrefix(path, "/api/v2/admin/removed/")
 		if err := a.store.RestoreTrack(id, mutationOptions(request)); err != nil {

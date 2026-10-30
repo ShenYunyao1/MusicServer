@@ -47,7 +47,7 @@ function createUserRow(user){
    if(user.enabled&&!confirm('停用 '+user.username+'？浏览器会话将退出，Key 暂不可用但记录和统计保留。'))return;
    run(async()=>{try{await api('admin/users/'+user.id,'PATCH',{enabled:!user.enabled},undefined,user.version)}finally{await loadUsers()}});
   };
-  if(!user.enabled&&user.id!==state.user?.id){const button=document.createElement('button');button.className='btn small danger';button.dataset.userAction='delete';button.textContent='删除账户';button.title='先接管全部曲目和歌单，删除后不能重新启用';button.onclick=()=>deleteUserAccount(user);row.querySelector('.actions').append(button)}
+  if(!user.enabled&&user.id!==state.user?.id){const button=document.createElement('button');button.className='btn small danger';button.dataset.userAction='delete';button.textContent='删除账户';button.title='先接管全部曲目和歌单，删除后不能重新启用';button.onclick=()=>deleteUserAccount(user);const purge=makeButton('完全删除',()=>purgeUserAccount(user),'btn small danger');purge.dataset.userAction='purge';purge.title='无管理曲目、原始上传曲目、歌单和上传暂存时彻底删除并释放登录名和邮箱';row.querySelector('.actions').append(button,purge)}
   const quota=accountStorageCache.get(user.id),cell=row.querySelector('[data-user-quota]');
   if(quota){cell.replaceChildren();const amount=document.createElement('strong');amount.textContent=storageBytes(quota.used_bytes)+' / '+(quota.limit_bytes?storageBytes(quota.limit_bytes):'不限额');cell.append(amount);if(quota.limit_bytes){const progress=document.createElement('progress');progress.max=quota.limit_bytes;progress.value=Math.min(quota.limit_bytes,quota.used_bytes);progress.setAttribute('aria-label',user.username+' 已用额度');cell.append(progress)}}
   const quotaButton=makeButton('调整额度',()=>run(()=>openStorageQuota(user.id)),'btn small');quotaButton.dataset.editQuota=user.id;cell.append(quotaButton);
@@ -66,6 +66,10 @@ function deleteUserAccount(user){
    error.message=messages[error.code]||error.message;throw error;
   }
  });
+}
+function purgeUserAccount(user){
+ if(!confirm('完全删除账户“'+user.username+'”？此操作不能恢复，将释放登录名和邮箱，清理账户及私人数据，保留审计和公共标签贡献。必须先清空管理曲目、原始上传曲目、歌单和上传暂存。'))return;
+ run(async()=>{try{await api('admin/users/'+user.id+'/purge','DELETE',undefined,undefined,user.version||user.account_version);accountStorageCache.delete(user.id);if(state.managedUserID===user.id){state.managedUserID=null;state.userResources=[];$('userResources').replaceChildren();location.hash='#/admin/users'}await loadUsers();await loadDeletedAccountStorage();setStatus('账户已完全删除，登录名和邮箱可重新使用。','ok')}catch(error){if(error.code==='ACCOUNT_HAS_RESOURCES')error.message='仍有管理曲目、原始上传曲目、歌单或上传暂存；请先清理这些资产，再完全删除。';throw error}});
 }
 function openCreateMember(){
  const epoch=usersEpoch,owner=state.user?.id;

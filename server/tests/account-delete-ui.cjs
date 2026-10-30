@@ -63,7 +63,24 @@ module.exports=async function({page,browser,base,directory}){
     assert.equal(await page.evaluate(id=>state.playlists.some(p=>p.id===id&&p.owner_id===state.user.id),resources.playlist.id),true);
     assert.equal(await page.evaluate(id=>fetch('/api/v2/admin/users/'+id+'/keys').then(r=>r.status),account.user.id),404);
     await page.reload();await page.locator('#userList tr').first().waitFor();assert.equal(await page.locator('[data-user-id="'+account.user.id+'"]').count(),0);
+    // The transferred playlist is no longer owned by this identity, and it
+    // never uploaded a song: the retained tombstone can now be fully removed.
+    await page.locator('#storageDeleted summary').click();
+    const purgeHistorical=page.locator('[data-purge-user="'+account.user.id+'"]');await purgeHistorical.waitFor();
+    page.once('dialog',d=>d.dismiss());await purgeHistorical.click();assert.equal(await purgeHistorical.count(),1);
+    page.once('dialog',d=>d.accept());await purgeHistorical.click();await purgeHistorical.waitFor({state:'detached'});
+    const replacement=await page.evaluate(()=>api('admin/users','POST',{username:'Delete.User',quota_bytes:0,email_verification_required:false}));
+    await page.evaluate(async id=>{await loadUsers();const u=state.users.find(u=>u.id===id);await api('admin/users/'+id,'PATCH',{enabled:false},undefined,u.version);await loadUsers()},replacement.user.id);
+    const emptyRow=page.locator('[data-user-id="'+replacement.user.id+'"]');
+    page.once('dialog',d=>d.accept());await emptyRow.locator('[data-user-action="purge"]').click();await emptyRow.waitFor({state:'detached'});
+    // Exercise the actual downlisted-song action, not a direct deletion API.
+    const removed=await page.evaluate(async()=>{const p=await api('browse/tracks?limit=1');const t=p.items[0];await api('tracks/'+t.id,'DELETE',undefined,undefined,t.version);return t});
+    await page.goto(base+'/#/admin/library/removed');
+    const removedRow=page.locator('#removedResults .resource-item').filter({hasText:removed.title});await removedRow.waitFor();
+    page.once('dialog',d=>d.dismiss());await removedRow.getByRole('button',{name:'永久删除',exact:true}).click();assert.equal(await removedRow.count(),1);
+    page.once('dialog',d=>d.accept());await removedRow.getByRole('button',{name:'永久删除',exact:true}).click();await removedRow.waitFor({state:'detached'});
+    assert.equal((await page.request.get(base+'/api/v2/media/'+removed.id)).status(),404);
     assert.deepEqual(errors,[]);
-    console.log('Account deletion UI passed: direct Key deletion/bulk/isolation, cancel, disable/re-enable same Key, resource guard, stale version, transfer, delete from detail, retained playlist and reload.');
+    console.log('Account deletion UI passed: Key isolation, cancel, disable/re-enable, resource guard, stale version, transfer, soft delete/reload, historical and empty account purge, login name reuse, and downlisted track permanent deletion.');
   }finally{await context.close();page.off('pageerror',onError)}
 };

@@ -101,7 +101,8 @@ async function loadRemovedTracks(){
   try{
     const tracks=await api('admin/removed');container.replaceChildren();if(!tracks.length)container.textContent='暂无已下架曲目。';
     for(const track of tracks){const item=document.createElement('div');item.className='resource-item';const label=document.createElement('span');label.textContent=(track.title||track.id)+' · '+track.path;
-      const button=makeButton('恢复',()=>run(async()=>{button.disabled=true;try{await api('admin/removed/'+track.id,'POST',undefined,undefined,track.version);await refreshCore();await loadRemovedTracks();setStatus('曲目已恢复','ok')}finally{button.disabled=false}}),'btn small');item.append(label,button);container.append(item)}
+      const button=makeButton('恢复',()=>run(async()=>{button.disabled=true;try{await api('admin/removed/'+track.id,'POST',undefined,undefined,track.version);await refreshCore();await loadRemovedTracks();setStatus('曲目已恢复','ok')}finally{button.disabled=false}}),'btn small');
+      const purge=makeButton('永久删除',()=>{if(!confirm('永久删除曲目“'+(track.title||track.id)+'”？音频文件、所有歌单中的占位、备注和曲目标签关联将删除，无法恢复。'))return;run(async()=>{button.disabled=purge.disabled=true;try{await api('admin/removed/'+track.id,'DELETE',undefined,undefined,track.version);await refreshCore();await loadRemovedTracks();setStatus('曲目已永久删除','ok')}finally{button.disabled=purge.disabled=false}})},'btn small danger');item.append(label,button,purge);container.append(item)}
   }catch(error){container.textContent='读取失败：'+error.message;throw error}
 }
 async function loadAuditEntries(){
@@ -129,7 +130,7 @@ function renderManagedUserPage(){
   const storage=accountStorageCache.get(user.id);$('managedUserStorage').textContent=storage?'已用 '+storageBytes(storage.used_bytes)+' / '+(storage.limit_bytes?storageBytes(storage.limit_bytes):'不限额')+' · 按原始上传者统计':'正在读取账户容量…';
   const actions=$('userDetailActions');actions.replaceChildren($('refreshUsers'));
   const row=[...$('userList').children].find(el=>el.dataset.userId===user.id)||createUserRow(user);
-  for(const action of ['display','reset','enabled','delete']){
+  for(const action of ['display','reset','enabled','delete','purge']){
     const source=row?.querySelector('[data-user-action="'+action+'"]');if(!source)continue;
     const button=makeButton(source.textContent,()=>source.click(),source.className);button.dataset.accountAction=action;button.disabled=source.disabled;button.title=source.title;actions.append(button);
   }

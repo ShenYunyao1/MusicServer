@@ -86,6 +86,19 @@ func (a *API) adminUsers(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	parts := strings.Split(path, "/")
+	if len(parts) == 2 && parts[1] == "purge" && request.Method == "DELETE" {
+		options := mutationOptions(request)
+		if options.ExpectedVersion < 1 {
+			writeError(response, 428, "VERSION_REQUIRED", "If-Match is required")
+			return
+		}
+		if err := a.store.PurgeUser(parts[0], options); err != nil {
+			writeUserError(response, err)
+			return
+		}
+		response.WriteHeader(204)
+		return
+	}
 	if len(parts) == 1 && request.Method == "DELETE" {
 		options := mutationOptions(request)
 		if options.ExpectedVersion < 1 {

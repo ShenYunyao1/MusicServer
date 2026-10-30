@@ -169,7 +169,7 @@ async function main() {
     await page.click('[data-page="maintenance"]');
     await page.evaluate(async () => { const track = state.tracks[0]; await api('tracks/' + track.id, 'DELETE', undefined, undefined, track.version); await refreshCore(); });
     await page.locator('#maintenanceTabs a[href="#/admin/library/removed"]').click();await page.locator('#viewRemoved').click();
-    await page.locator('#removedResults button').click();
+    await page.locator('#removedResults').getByRole('button',{name:'恢复',exact:true}).click();
     await page.waitForFunction(() => state.tracks.length === 1);
     assert.equal(await page.evaluate(() => state.playlists.find(playlist => playlist.name === 'Browser playlist').track_notes[state.tracks[0].id]), 'Browser cue');
     await page.click('[data-page="settings"]');await page.locator('#settingsTabs a[href="#/admin/settings/backup"]').click();
