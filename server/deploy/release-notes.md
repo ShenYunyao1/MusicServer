@@ -1,4 +1,4 @@
-MusicServer 0.21.10 — 审计缺陷修复
+MusicServer 0.21.11 — 审计缺陷修复
 
 本版继续使用 schema 8，保留现有账户、Key、曲目UUID、歌单、标签、邮箱、额度及上传续传任务。已有schema 8可网页检查并确认更新，不清库、不重新导入媒体；更新后刷新网页。
 
@@ -18,15 +18,15 @@ MusicServer 0.21.10 — 审计缺陷修复
 
 本版的异常队列隔离、孤立queued恢复及无job维护标记安全恢复包含独立root worker改动。网页更新主程序不会更新worker，请维护者自行完成以下步骤；本次发布不会连接云端。
 
-1. 创建并下载完整备份，在网页安装0.21.10主程序，确认健康版本0.21.10／schema 8。
+1. 创建并下载完整备份，在网页安装0.21.11主程序，确认健康版本0.21.11／schema 8。
 2. 确认没有活动安装、回退或维护标记。未知中断状态先诊断，不删除状态强制继续。
-3. 下载正式0.21.10清单、签名及Linux归档，验签、校验大小／SHA-256，并解压至root拥有且其他用户不可写的目录。
-4. 在已验证解包目录执行 `sudo ./musicserver-updater -config /etc/musicserver/updater.json -refresh-worker 0.21.10`。检查能力文件中的版本／提交和定时恢复服务，完整说明见包内 `deploy/updater-maintenance.md`。
+3. 下载正式0.21.11清单、签名及Linux归档，验签、校验大小／SHA-256，并解压至root拥有且其他用户不可写的目录。
+4. 在已验证解包目录执行 `sudo ./musicserver-updater -config /etc/musicserver/updater.json -refresh-worker 0.21.11`。检查能力文件中的版本／提交和定时恢复服务，完整说明见包内 `deploy/updater-maintenance.md`。
 
 仍使用schema 7的旧Linux安装：
 
 1. 先备份并安装正式0.20.3／schema 7桥接主程序。
 2. 使用已验签的0.20.3包执行 `musicserver-updater -config /etc/musicserver/updater.json -refresh-worker 0.20.3`，核验7→8迁移能力。
-3. 按包内 `deploy/schema8-upgrade.md` 安装0.21.10，保留失败回退；schema 8稳定后再按上述步骤维护0.21.10 worker。不要用bootstrap覆盖已有安装，不手改数据库格式标记。
+3. 按包内 `deploy/schema8-upgrade.md` 安装0.21.11，保留失败回退；schema 8稳定后再按上述步骤维护0.21.11 worker。不要用bootstrap覆盖已有安装，不手改数据库格式标记。
 
-首次安装直接使用0.21.10。Windows保留原数据、停服备份后替换已验证程序；独立worker步骤仅适用于Linux/systemd。历史schema 1–6不自动迁移。
+首次安装直接使用0.21.11。Windows保留原数据、停服备份后替换已验证程序；独立worker步骤仅适用于Linux/systemd。历史schema 1–6不自动迁移。

@@ -1,8 +1,8 @@
-# 音乐服务器 0.21.10
+# 音乐服务器 0.21.11
 
 Go 1.26+，SQLite schema 8，HTTP API `/api/v2`，内置中文管理页。支持 Windows 和 Linux。
 
-本版修复审计发现的存储、认证、同步、标签、备份及界面缺陷。已运行schema 8的安装可直接网页更新主程序，不重复迁移或重新导入媒体；0.21.10的独立更新器恢复修复还需维护者按[更新器维护说明](deploy/updater-maintenance.md)手动更新root worker，网页不会替换该工具。schema 7原库启动前自动校验、创建旧格式快照并事务升级，保留账户、Key、歌单和曲目身份；旧schema 7 Linux安装先完成0.20.3桥接与独立更新器维护，完整命令见[schema 8升级步骤](deploy/schema8-upgrade.md)。
+本版修复审计发现的存储、认证、同步、标签、备份及界面缺陷。已运行schema 8的安装可直接网页更新主程序，不重复迁移或重新导入媒体；0.21.11的独立更新器恢复修复还需维护者按[更新器维护说明](deploy/updater-maintenance.md)手动更新root worker，网页不会替换该工具。schema 7原库启动前自动校验、创建旧格式快照并事务升级，保留账户、Key、歌单和曲目身份；旧schema 7 Linux安装先完成0.20.3桥接与独立更新器维护，完整命令见[schema 8升级步骤](deploy/schema8-upgrade.md)。
 
 固定产物路径、运行目录布局、编译打包与 Git 提交规则见 [服务器编译与运行目录规范](../Docs/服务器编译与运行目录规范.md)。
 

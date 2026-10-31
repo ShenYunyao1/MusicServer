@@ -6,7 +6,7 @@ import "runtime/debug"
 
 const (
 	// Version is the current music server API and management UI version.
-	Version = "0.21.10"
+	Version = "0.21.11"
 	Schema  = 8
 )
 
