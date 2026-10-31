@@ -1,5 +1,21 @@
 # 独立更新器维护与 schema 7 桥接
 
+## schema 8 安装的 0.21.10 恢复修复
+
+0.21.10 的异常队列隔离及维护标记恢复涉及独立 root worker。网页更新只替换主程序，不会替换 `/usr/local/lib/musicserver/musicserver-updater`，因此先在网页备份并安装 0.21.10 主程序，确认健康版本及schema 8，再手动维护worker。
+
+维护前确认没有活动安装、回退或维护标记；未知中断状态先按原恢复流程检查，不能删除标记强行继续。下载正式0.21.10的清单、签名和Linux amd64归档，以固定可信公钥验签并核对归档大小／SHA-256；将归档解压到root拥有且组／其他用户不可写的目录。不要以root执行未验证的下载程序。
+
+在已验证的0.21.10解包目录执行：
+
+```sh
+sudo ./musicserver-updater -config /etc/musicserver/updater.json -refresh-worker 0.21.10
+```
+
+命令会重新从固定仓库取得并验证候选身份，要求当前主程序同schema且不降级。完成后检查 `/var/lib/musicserver-update/capabilities.json` 中版本为0.21.10、提交号与正式发行一致，并确认 recovery timer 与 musicserver-update.path 正常。失败时保留诊断及旧worker，不手工改能力文件。此维护不改变媒体、数据库、systemd、Nginx或证书；没有SSH部署授权时由维护者自行执行。
+
+以下历史步骤只适用于仍在schema 7的安装；schema 8安装不要重新执行桥接或迁移。
+
 本页对应 0.20.3／schema 7 桥接版。旧 0.20.2 不包含新增维护命令；必须先安装正式 0.20.3 主程序，再另行安排 root 更新器维护。以下命令只使用经过签名验证的正式桥接资产；本次发行不代表已授权或执行云端维护。
 
 ## 升级顺序
