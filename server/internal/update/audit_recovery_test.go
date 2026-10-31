@@ -85,3 +85,42 @@ func TestMissingJobMaintenanceRecoversVerifiedInstalledState(t *testing.T) {
 		t.Fatal("verified orphan marker retained", err)
 	}
 }
+
+func TestPreviousReleaseResolvesManagedRootAlias(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "actual")
+	release := filepath.Join(root, "releases", "installed")
+	if err := os.MkdirAll(release, 0755); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(parent, "alias")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if err := os.Symlink(release, filepath.Join(root, "current")); err != nil {
+		t.Fatal(err)
+	}
+	manifest := Manifest{Version: "0.21.9", Commit: strings.Repeat("a", 40), Schema: 8}
+	if err := atomicJSON(filepath.Join(release, "build.json"), manifest, 0644); err != nil {
+		t.Fatal(err)
+	}
+	installer := Installer{Config: InstallConfig{Root: alias}}
+	_, build, err := installer.previous()
+	if err != nil || build.Commit != manifest.Commit {
+		t.Fatalf("same managed directory via alias rejected: %v", err)
+	}
+}
+
+func TestPreviousReleaseRejectsOutsideManagedDirectory(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, "releases"), 0755)
+	outside := filepath.Join(root, "releases-elsewhere")
+	os.MkdirAll(outside, 0755)
+	if err := os.Symlink(outside, filepath.Join(root, "current")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	installer := Installer{Config: InstallConfig{Root: root}}
+	if _, _, err := installer.previous(); err == nil {
+		t.Fatal("unmanaged directory accepted")
+	}
+}

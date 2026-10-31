@@ -91,8 +91,29 @@ func (i *Installer) previous() (string, Manifest, error) {
 	if err != nil {
 		return "", build, err
 	}
-	releases := filepath.Join(i.Config.Root, "releases") + string(os.PathSeparator)
-	if !strings.HasPrefix(current, releases) {
+	releases, err := os.Stat(filepath.Join(i.Config.Root, "releases"))
+	if err != nil {
+		return "", build, err
+	}
+	managed := false
+	if releases.IsDir() {
+		for parent := filepath.Dir(current); ; {
+			info, statErr := os.Stat(parent)
+			if statErr != nil {
+				return "", build, statErr
+			}
+			if os.SameFile(info, releases) {
+				managed = true
+				break
+			}
+			next := filepath.Dir(parent)
+			if next == parent {
+				break
+			}
+			parent = next
+		}
+	}
+	if !managed {
 		return "", build, errors.New("current release is outside managed releases directory")
 	}
 	data, err := os.ReadFile(filepath.Join(current, "build.json"))
