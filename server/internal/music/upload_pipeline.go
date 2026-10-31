@@ -132,27 +132,17 @@ func (s *Store) existingUpload(ctx context.Context, root *os.Root, path string) 
 	if _, err := io.Copy(h, contextReader{ctx, f}); err != nil {
 		return Track{}, false, err
 	}
-	var id string
-	err = s.db.QueryRow("SELECT id FROM tracks WHERE content_hash=? AND removed=0 AND missing=0 ORDER BY id LIMIT 1", hex.EncodeToString(h.Sum(nil))).Scan(&id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return Track{}, false, nil
-	}
-	if err != nil {
-		return Track{}, false, err
-	}
-	t, err := readTrackFrom(s.db, id, false)
-	return t, err == nil, err
+	return s.liveUploadDuplicate(s.db, hex.EncodeToString(h.Sum(nil)))
 }
 
 // Duplicate commits publish no audio/sidecars and never apply the caller's
 // metadata to the shared source. Tags retain their normal version checks.
 func (s *Store) commitExistingUpload(id, owner, hash string, edits *UploadTagEdits, options []MutationOptions) (Track, bool, error) {
 	var track Track
-	var candidate string
-	if err := s.db.QueryRow("SELECT id FROM tracks WHERE content_hash=? AND removed=0 AND missing=0 ORDER BY id LIMIT 1", hash).Scan(&candidate); errors.Is(err, sql.ErrNoRows) {
-		return track, false, nil
-	} else if err != nil {
+	if _, found, err := s.liveUploadDuplicate(s.db, hash); err != nil {
 		return track, false, err
+	} else if !found {
+		return track, false, nil
 	}
 	found, changed := false, false
 	transact := s.transaction
@@ -163,14 +153,14 @@ func (s *Store) commitExistingUpload(id, owner, hash string, edits *UploadTagEdi
 		if err := checkStageUploadActor(tx, owner, options); err != nil {
 			return err
 		}
-		var existing string
-		err := tx.QueryRow("SELECT id FROM tracks WHERE content_hash=? AND removed=0 AND missing=0 ORDER BY id LIMIT 1", hash).Scan(&existing)
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil
-		}
+		candidate, available, err := s.liveUploadDuplicate(tx, hash)
 		if err != nil {
 			return err
 		}
+		if !available {
+			return nil
+		}
+		existing := candidate.ID
 		found = true
 		changed, err = applyUploadTagsTx(tx, existing, edits, options)
 		if err != nil {

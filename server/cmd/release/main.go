@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 
 	"musicserver/internal/update"
 	"musicserver/internal/version"
@@ -75,17 +76,8 @@ func run() error {
 			if e != nil {
 				return e
 			}
-			revision, dirty := "", ""
-			for _, setting := range info.Settings {
-				if setting.Key == "vcs.revision" {
-					revision = setting.Value
-				}
-				if setting.Key == "vcs.modified" {
-					dirty = setting.Value
-				}
-			}
-			if revision != commit || dirty != "false" {
-				return fmt.Errorf("%s is stale or built from uncommitted changes; rebuild from this clean commit", name)
+			if err := validateReleaseBuild(info, platform, "amd64", commit); err != nil {
+				return fmt.Errorf("%s: %w", name, err)
 			}
 			data, e := os.ReadFile(filepath.Join(*input, name))
 			if e != nil {
@@ -135,6 +127,20 @@ func run() error {
 	fmt.Println("PACKAGING SUCCEEDED:", *output)
 	if !*sign {
 		fmt.Println("Unsigned local packages: automatic installers will reject them.")
+	}
+	return nil
+}
+
+func validateReleaseBuild(info *debug.BuildInfo, platform, arch, commit string) error {
+	settings := map[string]string{}
+	for _, setting := range info.Settings {
+		settings[setting.Key] = setting.Value
+	}
+	if settings["GOOS"] != platform || settings["GOARCH"] != arch {
+		return fmt.Errorf("binary target %s/%s does not match %s/%s", settings["GOOS"], settings["GOARCH"], platform, arch)
+	}
+	if settings["vcs.revision"] != commit || settings["vcs.modified"] != "false" {
+		return fmt.Errorf("binary is stale or built from uncommitted changes; rebuild from this clean commit")
 	}
 	return nil
 }

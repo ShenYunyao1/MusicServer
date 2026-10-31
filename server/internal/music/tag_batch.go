@@ -11,6 +11,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"musicserver/internal/activity"
+
 	"github.com/google/uuid"
 )
 
@@ -21,6 +23,8 @@ CREATE INDEX tag_batches_owner_expiry ON tag_batches(user_id,expires_at);`
 
 const tagBatchSize = 32
 const tagBatchMaxTracks = 5000
+
+var errTagBatchEmpty = errors.New("no tracks match the batch selection")
 
 type TagBatchQuery struct {
 	Search     string               `json:"q"`
@@ -79,8 +83,9 @@ type TagBatchSummary struct {
 	ExpiresAt string `json:"expires_at"`
 }
 type tagBatchRuntime struct {
-	mu      sync.Mutex
-	running map[string]bool
+	mu       sync.Mutex
+	running  map[string]bool
+	failures map[string]string
 	// Deterministic cancellation/revocation regression between committed chunks.
 	afterChunk func()
 }
@@ -259,7 +264,10 @@ func (s *Store) PreviewTagBatch(auth authContext, input TagBatchInput) (TagBatch
 				}
 			}
 		}
-		if len(ids) == 0 || len(ids) > tagBatchMaxTracks {
+		if len(ids) == 0 {
+			return errTagBatchEmpty
+		}
+		if len(ids) > tagBatchMaxTracks {
 			return errTagLimit
 		}
 		seen := map[string]bool{}
@@ -316,11 +324,21 @@ func (s *Store) GetTagBatch(auth authContext, id string) (TagBatch, error) {
 		if job.State == "running" && !s.tagBatches.running[id] {
 			job.State = "interrupted"
 			job.Error = "INTERRUPTED"
+			if failure := s.tagBatches.failures[id]; failure != "" {
+				job.State = "failed"
+				job.Error = failure
+			}
 			job.Version++
-			return saveTagBatch(tx, &job)
+			if err := saveTagBatch(tx, &job); err != nil {
+				return err
+			}
+			return nil
 		}
 		return nil
 	})
+	if err == nil && job.State != "running" {
+		delete(s.tagBatches.failures, id)
+	}
 	return job, err
 }
 
@@ -356,7 +374,12 @@ FROM tag_batches WHERE user_id=? AND expires_at>? ORDER BY created_at DESC,id DE
 			if item.State == "running" && !s.tagBatches.running[item.ID] {
 				item.State = "interrupted"
 				item.Version++
-				if _, err := tx.Exec("UPDATE tag_batches SET payload=json_set(payload,'$.state','interrupted','$.error','INTERRUPTED','$.version',?,'$.finished_at',?) WHERE id=? AND user_id=?", item.Version, persistedTime(time.Now()), item.ID, auth.userID); err != nil {
+				code := "INTERRUPTED"
+				if failure := s.tagBatches.failures[item.ID]; failure != "" {
+					item.State = "failed"
+					code = failure
+				}
+				if _, err := tx.Exec("UPDATE tag_batches SET payload=json_set(payload,'$.state',?,'$.error',?,'$.version',?,'$.finished_at',?) WHERE id=? AND user_id=?", item.State, code, item.Version, persistedTime(time.Now()), item.ID, auth.userID); err != nil {
 					return err
 				}
 				if err := pruneTagBatchHistory(tx, item.ID); err != nil {
@@ -366,6 +389,13 @@ FROM tag_batches WHERE user_id=? AND expires_at>? ORDER BY created_at DESC,id DE
 		}
 		return nil
 	})
+	if err == nil {
+		for _, item := range items {
+			if item.State != "running" {
+				delete(s.tagBatches.failures, item.ID)
+			}
+		}
+	}
 	return items, err
 }
 func (s *Store) EditTagBatch(auth authContext, id string, version int64, add, remove []string) (TagBatch, error) {
@@ -518,6 +548,10 @@ func (s *Store) StartTagBatch(auth authContext, id string, version int64) (TagBa
 		if job.State == "running" && !s.tagBatches.running[id] {
 			job.State = "interrupted"
 			job.Error = "INTERRUPTED"
+			if failure := s.tagBatches.failures[id]; failure != "" {
+				job.State = "failed"
+				job.Error = failure
+			}
 			job.Version++
 			interrupted = true
 			return saveTagBatch(tx, &job)
@@ -532,6 +566,9 @@ func (s *Store) StartTagBatch(auth authContext, id string, version int64) (TagBa
 			return errTagInvalid
 		}
 		if err := validateTagBatchEdits(tx, auth, job.Scope, job.AddIDs, job.RemoveIDs); err != nil {
+			if errors.Is(err, errResourceHidden) {
+				return errVersionConflict
+			}
 			return err
 		}
 		job.State = "running"
@@ -567,7 +604,20 @@ func (s *Store) runTagBatch(auth authContext, id string) {
 		if closed {
 			return
 		}
-		_, more, _ := s.processTagBatchChunk(auth, id)
+		_, more, err := s.processTagBatchChunk(auth, id)
+		if err != nil {
+			_ = s.activity.Emit("tag.batch_failed", activity.Fields{UserID: auth.userID, Reason: batchErrorCode(err)})
+			var persistedState string
+			stateErr := s.db.QueryRow("SELECT json_extract(payload,'$.state') FROM tag_batches WHERE id=? AND user_id=?", id, auth.userID).Scan(&persistedState)
+			if !more && (stateErr != nil || persistedState == "running") {
+				s.tagBatches.mu.Lock()
+				if s.tagBatches.failures == nil {
+					s.tagBatches.failures = map[string]string{}
+				}
+				s.tagBatches.failures[id] = batchErrorCode(err)
+				s.tagBatches.mu.Unlock()
+			}
+		}
 		if !more {
 			return
 		}

@@ -32,7 +32,7 @@ func (s *Store) updateStageCover(id string, data []byte, source string, options 
 	if err := checkStageUploadActor(s.db, owner, options); err != nil {
 		return UploadPreview{}, err
 	}
-	if source == "external" && record.Track.CoverSource == "embedded" {
+	if source == "external" && (record.Track.CoverSource == "embedded"||record.Track.CoverSource=="manual") {
 		return preview, nil
 	}
 	record.Cover = cover
@@ -52,7 +52,7 @@ func (s *Store) updateStageCover(id string, data []byte, source string, options 
 	}); err != nil {
 		return UploadPreview{}, err
 	}
-	return s.previewLocked(id, preview.OriginalName, record, preview.CreatedAt, preview.ExpiresAt), nil
+	return s.previewLocked(id, preview.OriginalName, record, preview.CreatedAt, preview.ExpiresAt)
 }
 func (a *API) stageCoverUpload(w http.ResponseWriter, r *http.Request, id string) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxEmbeddedCoverBytes+(1<<20))

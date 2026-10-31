@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/google/uuid"
+	"log"
 	_ "modernc.org/sqlite"
 	"musicserver/internal/version"
 	"net/url"
@@ -313,10 +314,16 @@ func (s *Store) transaction(run func(*sql.Tx) error) error {
 	return nil
 }
 func (s *Store) Revision() int64 {
+	result, err := s.ReadRevision()
+	if err != nil {
+		log.Printf("revision read failed: %v", err)
+	}
+	return result
+}
+func (s *Store) ReadRevision() (int64, error) {
 	var value string
 	if err := s.db.QueryRow("SELECT value FROM meta WHERE key='revision'").Scan(&value); err != nil {
-		return 0
+		return 0, err
 	}
-	result, _ := strconv.ParseInt(value, 10, 64)
-	return result
+	return strconv.ParseInt(value, 10, 64)
 }

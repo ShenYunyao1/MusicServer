@@ -27,7 +27,7 @@ func requireAdminActor(tx *sql.Tx, options []MutationOptions) error {
 	if err != nil || user.Role != "admin" || !user.Enabled || user.MustChangePassword {
 		return errResourceHidden
 	}
-	return nil
+	return validateAccountMutationSession(tx, options[0])
 }
 
 func (s *Store) UserResources(id, kind, relation string, offset, limit int, options ...MutationOptions) (any, error) {

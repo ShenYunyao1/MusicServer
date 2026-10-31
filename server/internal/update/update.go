@@ -126,6 +126,23 @@ func (m *Manager) ConfigureInstaller(queue, state string) {
 	m.workerState = state
 }
 
+func (m *Manager) recoverOrphanedQueueLocked() {
+	if m.status.State != "queued" || m.status.JobID == "" || m.queueDir == "" || m.workerState == "" {
+		return
+	}
+	var job Job
+	if data, err := os.ReadFile(m.workerState); err == nil && json.Unmarshal(data, &job) == nil && job.ID == m.status.JobID {
+		return
+	}
+	if m.jobActiveLocked() {
+		return
+	}
+	m.status.State = "error"
+	m.status.Message = "queued update request was interrupted before publication; check again"
+	m.status.JobID = ""
+	_ = atomicJSON(filepath.Join(m.dir, "status.json"), m.status, 0600)
+}
+
 func ValidateRepository(raw string) error {
 	if raw == "" {
 		return nil
@@ -140,6 +157,7 @@ func ValidateRepository(raw string) error {
 func (m *Manager) Status() Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.recoverOrphanedQueueLocked()
 	status := m.status
 	if m.plan == nil && status.Schema != 0 {
 		if err := m.workerCapabilityError(m.sourceSchema(), status.Schema); err != nil {
@@ -254,6 +272,7 @@ func (m *Manager) Start(ctx context.Context) {
 	go func() {
 		defer m.workers.Done()
 		m.mu.Lock()
+		m.recoverOrphanedQueueLocked()
 		hasJob := m.status.JobID != ""
 		m.mu.Unlock()
 		if !hasJob {

@@ -147,7 +147,7 @@ func (s *Store) stageAudioWithAssetsContext(ctx context.Context, name string, re
 	}()
 	timings["wait_ms"] = time.Since(waitStarted).Milliseconds()
 	if err := s.cleanupUploadStagesLocked(); err != nil {
-		return UploadPreview{}, err
+		log.Printf("upload staging cleanup deferred: %v", err)
 	}
 	id, err := randomToken(16)
 	if err != nil {
@@ -286,14 +286,20 @@ func (s *Store) stageAudioWithAssetsContext(ctx context.Context, name string, re
 		return UploadPreview{}, err
 	}
 	timings["persist_ms"] = time.Since(persistStarted).Milliseconds()
-	return s.previewLocked(id, filepath.Base(name), record, created, expires), nil
+	return s.previewLocked(id, filepath.Base(name), record, created, expires)
 }
 
-func (s *Store) previewLocked(id, name string, record stagedRecord, created, expires time.Time) UploadPreview {
+func (s *Store) previewLocked(id, name string, record stagedRecord, created, expires time.Time) (UploadPreview, error) {
 	preview := UploadPreview{ID: id, OriginalName: name, Size: record.Track.Size, ContentHash: record.Track.ContentHash, Track: record.Track, CreatedAt: created, ExpiresAt: expires, Validation: "audio_stream_verified"}
-	_ = s.db.QueryRow("SELECT id FROM tracks WHERE content_hash=? AND removed=0 AND missing=0 ORDER BY id LIMIT 1", record.Track.ContentHash).Scan(&preview.DuplicateOf)
-	s.uploadPreviewTags(&preview, record)
-	return preview
+	if candidate, found, err := s.liveUploadDuplicate(s.db, record.Track.ContentHash); err != nil {
+		return UploadPreview{}, err
+	} else if found {
+		preview.DuplicateOf = candidate.ID
+	}
+	if err := s.uploadPreviewTags(&preview, record); err != nil {
+		return UploadPreview{}, err
+	}
+	return preview, nil
 }
 
 func (s *Store) UploadStage(id string) (UploadPreview, bool, error) {
@@ -328,7 +334,8 @@ func (s *Store) uploadStageLocked(id string) (UploadPreview, stagedRecord, strin
 		return UploadPreview{}, record, "", err
 	}
 	createdAt, _ := parsePersistedTime(created)
-	return s.previewLocked(id, name, record, createdAt, expiresAt), record, path, nil
+	preview, err := s.previewLocked(id, name, record, createdAt, expiresAt)
+	return preview, record, path, err
 }
 
 func validStagePath(path string) bool {
@@ -417,6 +424,19 @@ func (s *Store) commitUploadStageWithTags(id string, fields map[string]string, e
 		return Track{}, false, err
 	}
 	final := "uploads/" + id + strings.ToLower(filepath.Ext(preview.OriginalName))
+	for _, path := range uploadOwnedPaths(final) {
+		if _, err := root.Lstat(path); err == nil {
+			return Track{}, false, errors.New("upload destination already exists; recovery required")
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return Track{}, false, err
+		}
+	}
+	if err := s.transaction(func(tx *sql.Tx) error {
+		_, err := tx.Exec("INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", "upload_publish/"+id, final)
+		return err
+	}); err != nil {
+		return Track{}, false, err
+	}
 	if err := s.checkSpace(filepath.Dir(s.dataPath), int64(len(record.Cover)+len(record.Sidecar))*2+(1<<20)); err != nil {
 		return Track{}, false, err
 	}
@@ -523,10 +543,12 @@ func (s *Store) commitUploadStageWithTags(id string, fields map[string]string, e
 		if err := checkStageUploadActor(tx, stageOwner, options); err != nil {
 			return err
 		}
-		var existingID string
-		err := tx.QueryRow("SELECT id FROM tracks WHERE content_hash=? AND removed=0 AND missing=0 ORDER BY id LIMIT 1", track.ContentHash).Scan(&existingID)
-		if err == nil {
-			track, err = readTrackFrom(tx, existingID, false)
+		candidate, available, err := s.liveUploadDuplicate(tx, track.ContentHash)
+		if err != nil {
+			return err
+		}
+		if available {
+			track, err = readTrackFrom(tx, candidate.ID, false)
 			if err != nil {
 				return err
 			}
@@ -543,9 +565,6 @@ func (s *Store) commitUploadStageWithTags(id string, fields map[string]string, e
 				return err
 			}
 			_, err = tx.Exec("DELETE FROM upload_staging WHERE id=?", id)
-			return err
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
 		var removed int
@@ -612,6 +631,9 @@ func (s *Store) commitUploadStageWithTags(id string, fields map[string]string, e
 		s.notifyCommunityCommit()
 	}
 	committed = !duplicate
+	if _, err := s.db.Exec("DELETE FROM meta WHERE key=?", "upload_publish/"+id); err != nil {
+		log.Printf("upload publication recovery marker cleanup: %v", err)
+	}
 	_ = source.Close()
 	if err := root.Remove(relative); err != nil && !errors.Is(err, os.ErrNotExist) {
 		log.Printf("remove committed upload staging file %q: %v", relative, err)
@@ -647,10 +669,9 @@ func (s *Store) CleanupUploadStages() error {
 	s.stageMu.Lock()
 	err := s.cleanupUploadStagesLocked()
 	s.stageMu.Unlock()
-	if err != nil {
-		return err
-	}
-	return s.CleanupResumableUploads()
+	resumeErr := s.CleanupResumableUploads()
+	assetErr := s.transaction(cleanupDetachedAssets)
+	return errors.Join(err, resumeErr, assetErr)
 }
 
 func (s *Store) cleanupUploadStagesLocked() error {

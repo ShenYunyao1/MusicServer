@@ -212,7 +212,8 @@ func (s *Store) Scan() (int, error) {
 		s.scanStatus.Errors = append(s.scanStatus.Errors, err.Error())
 	}
 	s.scanMu.Unlock()
-	return len(s.Tracks()), err
+	tracks, readErr := s.ReadTracks(false)
+	return len(tracks), errors.Join(err, readErr)
 }
 
 func (s *Store) runScan(ctx context.Context, full bool, options []MutationOptions) (changedResult int, scanErr error) {
@@ -287,6 +288,15 @@ func (s *Store) runScan(ctx context.Context, full bool, options []MutationOption
 			return err
 		}
 		relative = filepath.ToSlash(relative)
+		if generatedUploadPath(relative) {
+			var exists bool
+			if err := s.db.QueryRow("SELECT EXISTS(SELECT 1 FROM tracks WHERE path=?)", relative).Scan(&exists); err != nil {
+				return err
+			}
+			if !exists {
+				return nil
+			}
+		}
 		s.mediaMu.RLock()
 		defer s.mediaMu.RUnlock()
 		seen[relative] = true

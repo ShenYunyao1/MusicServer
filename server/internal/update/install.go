@@ -271,7 +271,33 @@ func (i *Installer) rollback(ctx context.Context, j *Job, reason string) error {
 func (i *Installer) Recover(ctx context.Context) error {
 	j, err := i.loadJob()
 	if os.IsNotExist(err) {
-		return nil
+		if _, markerErr := os.Lstat(i.maintenance()); os.IsNotExist(markerErr) {
+			return nil
+		} else if markerErr != nil {
+			return markerErr
+		}
+		_, installed, identityErr := i.previous()
+		if identityErr != nil {
+			return fmt.Errorf("maintenance marker has no job; installed identity cannot be verified: %w", identityErr)
+		}
+		if i.CheckDatabase == nil || i.Healthy == nil {
+			return errors.New("maintenance marker has no job; database and service verification are required")
+		}
+		if err := i.CheckDatabase(i.Config.Database, installed.Schema); err != nil {
+			return fmt.Errorf("maintenance recovery database verification failed: %w", err)
+		}
+		if err := i.Healthy(ctx, installed); err != nil {
+			if i.Start == nil {
+				return fmt.Errorf("maintenance recovery health verification failed: %w", err)
+			}
+			if startErr := i.Start(ctx); startErr != nil {
+				return fmt.Errorf("maintenance recovery start failed: %w", startErr)
+			}
+			if healthErr := i.Healthy(ctx, installed); healthErr != nil {
+				return fmt.Errorf("maintenance recovery health verification failed: %w", healthErr)
+			}
+		}
+		return i.clearMaintenance()
 	}
 	if err != nil {
 		return err
@@ -312,14 +338,26 @@ func (i *Installer) RunQueued(ctx context.Context) error {
 			continue
 		}
 		var r Request
+		if info, e := queue.Lstat(name); e != nil || !info.Mode().IsRegular() || info.Size() > 4096 {
+			if err := quarantineQueueEntry(queue, name); err != nil {
+				return errors.Join(e, err)
+			}
+			continue
+		}
 		f, e := queue.Open(name)
 		if e != nil {
-			return e
+			if err := quarantineQueueEntry(queue, name); err != nil {
+				return errors.Join(e, err)
+			}
+			continue
 		}
 		info, e := f.Stat()
 		if e != nil || !info.Mode().IsRegular() || info.Size() > 4096 {
 			f.Close()
-			return errors.New("invalid queue entry")
+			if err := quarantineQueueEntry(queue, name); err != nil {
+				return err
+			}
+			continue
 		}
 		e = json.NewDecoder(io.LimitReader(f, 4097)).Decode(&r)
 		f.Close()
@@ -344,6 +382,10 @@ func (i *Installer) RunQueued(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func quarantineQueueEntry(queue *os.Root, name string) error {
+	return queue.Rename(name, name+".invalid-"+time.Now().UTC().Format("20060102T150405.000000000"))
 }
 
 func replaceLink(root, target string) error {

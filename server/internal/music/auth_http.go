@@ -147,10 +147,7 @@ func (a *API) accountAuth(response http.ResponseWriter, request *http.Request) {
 			writeError(response, 429, "AUTH_BUSY", "login busy; retry later")
 			return
 		}
-		ip, _, err := net.SplitHostPort(request.RemoteAddr)
-		if err != nil {
-			ip = request.RemoteAddr
-		}
+		ip := a.requestClientIP(request)
 		user, session, token, err := a.store.Login(body.Username, body.Password, ip)
 		if err != nil {
 			if errors.Is(err, errLoginLimited) {

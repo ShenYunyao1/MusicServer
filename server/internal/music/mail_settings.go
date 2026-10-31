@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"musicserver/internal/activity"
 	"net"
 	"net/mail"
 	"os"
@@ -295,6 +296,7 @@ func (s *Store) UpdateMailSettings(input MailSettingsInput, options MutationOpti
 	defer s.mail.mu.Unlock()
 	var result MailSettings
 	var createdPath string
+	var retiredSecret string
 	err = s.transaction(func(tx *sql.Tx) error {
 		if err := requireAdminActor(tx, []MutationOptions{options}); err != nil {
 			return err
@@ -317,6 +319,7 @@ func (s *Store) UpdateMailSettings(input MailSettingsInput, options MutationOpti
 		}
 		secretID := current.SecretID
 		if input.Password != "" {
+			retiredSecret = current.SecretID
 			secretID, err = randomToken(16)
 			if err != nil {
 				return err
@@ -342,6 +345,18 @@ func (s *Store) UpdateMailSettings(input MailSettingsInput, options MutationOpti
 	})
 	if err != nil && createdPath != "" {
 		_ = os.Remove(createdPath)
+	}
+	if err == nil && retiredSecret != "" && validResumeID(retiredSecret) {
+		root, openErr := os.OpenRoot(s.mailSecretsDirectory())
+		if openErr == nil {
+			removeErr := root.Remove(retiredSecret + ".json")
+			_ = root.Close()
+			if removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				_ = s.activity.Emit("mail.failed", activity.Fields{Reason: "MAIL_UNAVAILABLE"})
+			}
+		} else {
+			_ = s.activity.Emit("mail.failed", activity.Fields{Reason: "MAIL_UNAVAILABLE"})
+		}
 	}
 	return result, err
 }

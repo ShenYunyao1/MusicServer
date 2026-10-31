@@ -51,6 +51,7 @@ type BackupArchive struct {
 	FileCount    int       `json:"file_count"`
 	MissingCount int       `json:"missing_count"`
 	Automatic    bool      `json:"automatic"`
+	Error        string    `json:"error,omitempty"`
 }
 type backupInput struct {
 	BackupFile

@@ -142,6 +142,11 @@ func (s *Store) MergeTags(auth authContext, sourceID, targetID string, sourceVer
 		if source.Deleted || target.Deleted || source.MergedInto != "" || target.MergedInto != "" {
 			return errTagInvalid
 		}
+		if used, err := tagUsedByActiveBatch(tx, sourceID); err != nil {
+			return err
+		} else if used {
+			return errTagInUse
+		}
 		var terms int
 		if err = tx.QueryRow("SELECT count(*) FROM tag_aliases WHERE tag_id=? OR tag_id=?", sourceID, targetID).Scan(&terms); err != nil {
 			return err

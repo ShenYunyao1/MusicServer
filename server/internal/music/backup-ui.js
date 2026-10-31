@@ -34,7 +34,7 @@ function renderBackupJob(job){
  progress.hidden=!active;
  const phases={snapshot:'创建数据库快照',checking:'检查备份清单',packing:'归档与校验',completed:'完成'};
  if(active){if(job.total>0)progress.value=Math.min(100,Math.floor(job.bytes*100/job.total));else progress.removeAttribute('value');$('backupResult').textContent=(job.state==='cancelling'?'正在取消任务…':phases[job.phase]||'正在备份')+(job.total>0?' · '+formatBytes(job.bytes)+' / '+formatBytes(job.total):'')}
- else if(job.state==='completed')$('backupResult').textContent='备份已创建并验证：'+job.archive.name+(job.archive.missing_count?' · 原库有 '+job.archive.missing_count+' 个缺失音频，请查看清单。':' · 可从列表下载。');
+ else if(job.state==='completed')$('backupResult').textContent='备份已创建并验证：'+job.archive.name+(job.archive.missing_count?' · 原库有 '+job.archive.missing_count+' 个缺失音频，请查看清单。':' · 可从列表下载。')+(job.error?' · '+job.error:'');
  else if(job.state==='failed'||job.state==='cancelled')$('backupResult').textContent=(job.state==='cancelled'?'备份已取消：':'备份失败：')+(job.error||'请查看系统日志');
  else $('backupResult').textContent='尚无本次运行的备份任务。已有备份保留在下方列表。';
 }
@@ -45,7 +45,7 @@ function renderBackupArchives(items){
   const row=document.createElement('div');row.className='resource-item';row.dataset.backupId=archive.id;
   const label=document.createElement('div');label.className='resource-title';const title=document.createElement('strong');title.textContent=new Date(archive.created_at).toLocaleString()+' · '+(archive.include_media?'完整备份':'仅数据库');const meta=document.createElement('p');meta.className='status';meta.textContent=formatBytes(archive.size)+' · '+archive.file_count+' 个文件 · '+(archive.automatic?'自动':'手动')+(archive.missing_count?' · '+archive.missing_count+' 个原始缺失文件':'');label.append(title,meta);
   const actions=document.createElement('div');actions.className='actions';const download=document.createElement('a');download.className='btn small';download.href='/api/v2/admin/backups/'+archive.id+'/download';download.download=archive.name;download.textContent='下载';download.dataset.backupDownload=archive.id;
-  const remove=makeButton('删除',()=>{if(confirm('删除这份备份？不会删除曲库，已下载的副本不受影响。'))run(async()=>{await api('admin/backups/'+archive.id,'DELETE');await loadBackupManagement()})},'btn small danger');remove.dataset.backupDelete=archive.id;actions.append(download,remove);row.append(label,actions);list.append(row);
+  const remove=makeButton('删除',()=>{if(confirm('删除这份备份？不会删除曲库，已下载的副本不受影响。'))run(async()=>{await api('admin/backups/'+archive.id,'DELETE');await loadBackupManagement()})},'btn small danger');remove.dataset.backupDelete=archive.id;if(archive.error){title.textContent='不可用备份';meta.textContent=archive.name+' · '+archive.error;actions.append(remove)}else actions.append(download,remove);row.append(label,actions);list.append(row);
  }
 }
 async function startManagedBackup(includeMedia){

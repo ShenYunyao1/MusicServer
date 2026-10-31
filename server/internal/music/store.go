@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -70,9 +71,17 @@ func NewStore(dataPath, mediaRoot string) (*Store, error) {
 	return newStoreForSchema(dataPath, mediaRoot, version.Schema)
 }
 
+func NewOfflineStore(dataPath, mediaRoot string) (*Store, error) {
+	return openStoreForSchema(dataPath, mediaRoot, version.Schema, false)
+}
+
 // A private target is used by old-format migration fixtures. Production entry
 // points always use version.Schema and never expose a downgrade option.
 func newStoreForSchema(dataPath, mediaRoot string, schema int) (*Store, error) {
+	return openStoreForSchema(dataPath, mediaRoot, schema, true)
+}
+
+func openStoreForSchema(dataPath, mediaRoot string, schema int, runtimeInitialization bool) (*Store, error) {
 	if strings.EqualFold(filepath.Ext(dataPath), ".json") {
 		return nil, errors.New("JSON data paths are unsupported; use a new SQLite database")
 	}
@@ -87,7 +96,14 @@ func newStoreForSchema(dataPath, mediaRoot string, schema int) (*Store, error) {
 		}
 		return nil, err
 	}
+	if !runtimeInitialization {
+		return store, nil
+	}
 	if err := store.recoverPurgedMedia(); err != nil {
+		_ = store.db.Close()
+		return nil, err
+	}
+	if err := store.recoverUploadPublications(); err != nil {
 		_ = store.db.Close()
 		return nil, err
 	}
@@ -339,11 +355,20 @@ func (s *Store) UpdateAPIKey(id string, request APIKeyUpdateRequest, options ...
 }
 
 func (s *Store) Tracks() []Track {
-	tracks, _ := queryJSON[Track](s.db, "SELECT payload FROM tracks WHERE removed=0 ORDER BY title,id")
+	tracks, err := s.ReadTracks(false)
+	if err != nil {
+		log.Printf("tracks read failed: %v", err)
+	}
 	return tracks
 }
+func (s *Store) ReadTracks(removed bool) ([]Track, error) {
+	return queryJSON[Track](s.db, "SELECT payload FROM tracks WHERE removed=? ORDER BY title,id", removed)
+}
 func (s *Store) RemovedTracks() []Track {
-	tracks, _ := queryJSON[Track](s.db, "SELECT payload FROM tracks WHERE removed=1 ORDER BY title,id")
+	tracks, err := s.ReadTracks(true)
+	if err != nil {
+		log.Printf("removed tracks read failed: %v", err)
+	}
 	return tracks
 }
 func (s *Store) Track(id string) (Track, bool) {
@@ -354,7 +379,17 @@ func (s *Store) allTracks() ([]Track, error) {
 	return queryJSON[Track](s.db, "SELECT payload FROM tracks ORDER BY id")
 }
 func (s *Store) Playlists() []Playlist {
-	playlists, _ := queryJSON[Playlist](s.db, "SELECT payload FROM playlists ORDER BY id")
+	playlists, err := s.ReadPlaylists()
+	if err != nil {
+		log.Printf("playlists read failed: %v", err)
+	}
+	return playlists
+}
+func (s *Store) ReadPlaylists() ([]Playlist, error) {
+	playlists, err := queryJSON[Playlist](s.db, "SELECT payload FROM playlists ORDER BY id")
+	if err != nil {
+		return nil, err
+	}
 	sort.Slice(playlists, func(first, second int) bool {
 		if playlists[first].SortOrder != playlists[second].SortOrder {
 			return playlists[first].SortOrder < playlists[second].SortOrder
@@ -364,7 +399,7 @@ func (s *Store) Playlists() []Playlist {
 		}
 		return playlists[first].ID < playlists[second].ID
 	})
-	return playlists
+	return playlists, nil
 }
 func (s *Store) Playlist(id string) (Playlist, bool) {
 	playlist, err := readPlaylistFrom(s.db, id)
@@ -733,6 +768,11 @@ func (s *Store) UpdateSettings(settings ServerSettings, options ...MutationOptio
 	}
 	settings.MediaRoot = s.mediaRoot
 	return s.transaction(func(tx *sql.Tx) error {
+		if len(options) > 0 && options[0].UserID != "" {
+			if err := requireAdminActor(tx, options); err != nil {
+				return err
+			}
+		}
 		var before string
 		if err := tx.QueryRow("SELECT value FROM settings WHERE key='server'").Scan(&before); err != nil {
 			return err

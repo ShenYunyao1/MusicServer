@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 	"unicode"
@@ -18,6 +19,8 @@ const tagNameRunes = 64
 const tagAliasLimit = 32
 const publicTagLimit = 10000
 const personalTagLimit = 2000
+
+var errTagStorageLimit = fmt.Errorf("%w: retained dictionary storage limit reached", errTagLimit)
 
 func normalizeTagName(value string) (string, string, error) {
 	if !utf8.ValidString(value) || len(value) > 1024 {
@@ -427,7 +430,7 @@ func (s *Store) CreateTag(auth authContext, input TagInput) (Tag, error) {
 			}
 		}
 		var count int
-		if err := tx.QueryRow("SELECT count(*) FROM tags WHERE scope_id=? AND deleted=0", scopeID).Scan(&count); err != nil {
+		if err := tx.QueryRow("SELECT count(*) FROM tags WHERE scope_id=?", scopeID).Scan(&count); err != nil {
 			return err
 		}
 		limit := personalTagLimit
@@ -435,7 +438,7 @@ func (s *Store) CreateTag(auth authContext, input TagInput) (Tag, error) {
 			limit = publicTagLimit
 		}
 		if count >= limit {
-			return errTagLimit
+			return errTagStorageLimit
 		}
 		now := persistedTime(time.Now())
 		scope := "personal"
@@ -563,6 +566,11 @@ func (s *Store) DeleteTag(auth authContext, id string, expectedVersion int64) er
 			return err
 		}
 		if used {
+			return errTagInUse
+		}
+		if used, err := tagUsedByActiveBatch(tx, id); err != nil {
+			return err
+		} else if used {
 			return errTagInUse
 		}
 		if _, err := tx.Exec("UPDATE tags SET deleted=1,version=version+1,updated_at=? WHERE id=?", persistedTime(time.Now()), id); err != nil {

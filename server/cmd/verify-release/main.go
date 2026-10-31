@@ -59,6 +59,10 @@ func run() error {
 	if count == 0 {
 		return fmt.Errorf("no package found to verify")
 	}
-	fmt.Printf("Verified signed release %s (%s), schema %d\n", m.Version, m.Commit, m.Schema)
+	if count != len(m.Packages) {
+		fmt.Printf("Verified signed manifest %s (%s), schema %d; verified %d of %d declared packages (partial verification)\n", m.Version, m.Commit, m.Schema, count, len(m.Packages))
+	} else {
+		fmt.Printf("Verified signed release %s (%s), schema %d; all %d packages verified\n", m.Version, m.Commit, m.Schema, count)
+	}
 	return nil
 }

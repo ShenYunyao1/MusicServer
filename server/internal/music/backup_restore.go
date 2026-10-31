@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -80,19 +79,33 @@ func (s *Store) BackupArchives() ([]BackupArchive, error) {
 		}
 		file, err := os.Open(filepath.Join(s.backupDirectory(), entry.Name()))
 		if err != nil {
-			return nil, err
+			items = append(items, BackupArchive{ID: id, Name: entry.Name(), Error: "备份不可读取"})
+			continue
 		}
 		compressed, err := gzip.NewReader(file)
 		if err != nil {
 			file.Close()
-			return nil, fmt.Errorf("cannot read backup %s", id)
+			info, _ := entry.Info()
+			item := BackupArchive{ID: id, Name: entry.Name(), Error: "备份归档损坏"}
+			if info != nil {
+				item.Size = info.Size()
+				item.CreatedAt = info.ModTime()
+			}
+			items = append(items, item)
+			continue
 		}
 		manifest, readErr := readBackupManifest(tar.NewReader(compressed))
 		info, statErr := file.Stat()
 		compressed.Close()
 		file.Close()
 		if readErr != nil || statErr != nil || manifest.ID != id {
-			return nil, fmt.Errorf("invalid backup %s", id)
+			item := BackupArchive{ID: id, Name: entry.Name(), Error: "备份清单损坏或不匹配"}
+			if info != nil {
+				item.Size = info.Size()
+				item.CreatedAt = info.ModTime()
+			}
+			items = append(items, item)
+			continue
 		}
 		items = append(items, BackupArchive{ID: id, Name: entry.Name(), CreatedAt: manifest.CreatedAt, Size: info.Size(), IncludeMedia: manifest.IncludeMedia, FileCount: len(manifest.Files), MissingCount: len(manifest.MissingMedia), Automatic: manifest.Automatic})
 	}

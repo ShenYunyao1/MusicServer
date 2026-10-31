@@ -64,6 +64,8 @@ func tagGroupID(id string) bool {
 
 func writeTagError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, errTagBatchEmpty):
+		writeError(w, 409, "TAG_BATCH_EMPTY", "no tracks match this selection")
 	case errors.Is(err, errFilterReference):
 		writeError(w, 409, "FILTER_REFERENCE_INVALID", "review unavailable tags referenced by this filter")
 	case errors.Is(err, errFilterSnapshot):
@@ -82,6 +84,8 @@ func writeTagError(w http.ResponseWriter, err error) {
 		writeError(w, 409, "TAG_NAME_EXISTS", "name or alias already exists in this group and scope")
 	case errors.Is(err, errTagInUse):
 		writeError(w, 409, "TAG_IN_USE", "resource is still referenced")
+	case errors.Is(err, errTagStorageLimit):
+		writeError(w, 400, "TAG_LIMIT", "dictionary storage limit reached; retained deleted and merged entries count towards this limit")
 	case errors.Is(err, errTagLimit):
 		writeError(w, 400, "TAG_LIMIT", "tag limit exceeded")
 	case errors.Is(err, errTagInvalid):

@@ -100,6 +100,11 @@ func (s *Store) UpdateUser(id string, patch AccountPatch, options MutationOption
 			if _, err := tx.Exec("UPDATE sessions SET revoked_at=? WHERE user_id=? AND revoked_at=''", persistedTime(time.Now()), id); err != nil {
 				return err
 			}
+			if !user.Enabled {
+				if _, err := tx.Exec("UPDATE meta SET value=(SELECT id FROM users WHERE enabled=1 AND role='admin' ORDER BY created_at,id LIMIT 1) WHERE key='scan_owner_id' AND value=?", id); err != nil {
+					return err
+				}
+			}
 		}
 		if err := recordUserPlaylistChanges(tx, id); err != nil {
 			return err

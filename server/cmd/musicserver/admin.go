@@ -38,7 +38,7 @@ var readConsolePassword = func() (string, error) {
 
 func adminCommand(args []string) error {
 	if len(args) == 0 || (args[0] != "init" && args[0] != "reset-password") {
-		return errors.New("usage: musicserver admin init|reset-password [--data <database>] [--username admin] [--revoke-keys]")
+		return errors.New("usage: musicserver admin init|reset-password [--data <database>] [--media-root <directory>] [--username admin] [--revoke-keys]")
 	}
 	defaults, err := executableDefaults()
 	if err != nil {
@@ -46,6 +46,7 @@ func adminCommand(args []string) error {
 	}
 	flags := flag.NewFlagSet("admin "+args[0], flag.ContinueOnError)
 	data := flags.String("data", defaults.Data, "account database (default beside executable in data directory)")
+	mediaRoot := flags.String("media-root", defaults.MediaRoot, "media directory (offline account operations do not recover uploads)")
 	username := flags.String("username", "admin", "administrator username")
 	revoke := flags.Bool("revoke-keys", false, "also revoke this account's player keys on password reset")
 	if err := flags.Parse(args[1:]); err != nil {
@@ -60,7 +61,7 @@ func adminCommand(args []string) error {
 		return err
 	}
 	defer unlock()
-	store, err := music.NewStore(*data, defaults.MediaRoot)
+	store, err := music.NewOfflineStore(*data, resolveRuntimePath(defaults.MediaRoot, *mediaRoot))
 	if err != nil {
 		return err
 	}

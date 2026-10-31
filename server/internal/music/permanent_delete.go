@@ -22,8 +22,8 @@ func (s *Store) PurgeTrack(id string, options MutationOptions) error {
 		return err
 	}
 	defer root.Close()
-	var original, trash string
-	moved := false
+	type movedFile struct{ original, trash string }
+	var moved []movedFile
 	err = s.transaction(func(tx *sql.Tx) error {
 		if err := requireAdminActor(tx, []MutationOptions{options}); err != nil {
 			return err
@@ -43,6 +43,17 @@ func (s *Store) PurgeTrack(id string, options MutationOptions) error {
 		}
 		if !filepath.IsLocal(filepath.FromSlash(track.Path)) {
 			return errors.New("invalid media path")
+		}
+		paths := []string{track.Path}
+		if generatedUploadPath(track.Path) {
+			var shared bool
+			stem := strings.TrimSuffix(track.Path, filepath.Ext(track.Path))
+			if err := tx.QueryRow("SELECT EXISTS(SELECT 1 FROM tracks WHERE id<>? AND substr(path,1,length(?)+1)=?||'.')", id, stem, stem).Scan(&shared); err != nil {
+				return err
+			}
+			if !shared {
+				paths = uploadOwnedPaths(track.Path)
+			}
 		}
 		playlists, err := queryJSON[Playlist](tx, "SELECT p.payload FROM playlists p JOIN playlist_tracks m ON m.playlist_id=p.id WHERE m.track_id=?", id)
 		if err != nil {
@@ -71,36 +82,48 @@ func (s *Store) PurgeTrack(id string, options MutationOptions) error {
 		if err := auditMutation(tx, "track.purge", id, track, nil, []MutationOptions{options}); err != nil {
 			return err
 		}
-		original = filepath.FromSlash(track.Path)
-		trash = filepath.Join(".staging", "purge-"+id)
+		if err := cleanupDetachedAssets(tx); err != nil {
+			return err
+		}
 		if err := root.MkdirAll(".staging", 0700); err != nil {
 			return err
 		}
-		// Never overwrite an unresolved recovery file.
-		if _, err := root.Lstat(trash); err == nil {
-			return errors.New("pending media deletion requires recovery")
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return err
+		for index, path := range paths {
+			original := filepath.FromSlash(path)
+			suffix := ""
+			if index > 0 {
+				suffix = filepath.Ext(path)
+			}
+			trash := filepath.Join(".staging", "purge-"+id+suffix)
+			if _, err := root.Lstat(trash); err == nil {
+				return errors.New("pending media deletion requires recovery")
+			} else if !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			info, err := root.Lstat(original)
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			if !info.Mode().IsRegular() {
+				return errors.New("media is not a regular file")
+			}
+			if err := root.Rename(original, trash); err != nil {
+				return err
+			}
+			moved = append(moved, movedFile{original, trash})
 		}
-		if info, err := root.Lstat(original); errors.Is(err, os.ErrNotExist) {
-			return nil
-		} else if err != nil {
-			return err
-		} else if !info.Mode().IsRegular() {
-			return errors.New("media is not a regular file")
-		}
-		if err := root.Rename(original, trash); err != nil {
-			return err
-		}
-		moved = true
 		return nil
 	})
-	if moved {
+	for index := len(moved) - 1; index >= 0; index-- {
+		file := moved[index]
 		if err != nil {
-			return errors.Join(err, root.Rename(trash, original))
+			err = errors.Join(err, root.Rename(file.trash, file.original))
+		} else {
+			_ = root.Remove(file.trash)
 		}
-		// A failed unlink is safe: startup retries; this path is never scanned.
-		_ = root.Remove(trash)
 	}
 	return err
 }
@@ -131,6 +154,11 @@ func (s *Store) recoverPurgedMedia() error {
 			return errors.New("invalid purge recovery file")
 		}
 		id := strings.TrimPrefix(entry.Name(), "purge-")
+		suffix := ""
+		if len(id) > 36 {
+			suffix = id[36:]
+			id = id[:36]
+		}
 		path := filepath.Join(".staging", entry.Name())
 		track, err := readTrackFrom(s.db, id, true)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -142,13 +170,20 @@ func (s *Store) recoverPurgedMedia() error {
 		if err != nil {
 			return err
 		}
-		if !filepath.IsLocal(filepath.FromSlash(track.Path)) {
+		original := track.Path
+		if suffix != "" {
+			if !generatedUploadPath(track.Path) || !slices.Contains([]string{".lrc", ".jpg", ".png", ".gif", ".webp"}, suffix) {
+				return errors.New("invalid sidecar recovery path")
+			}
+			original = strings.TrimSuffix(track.Path, filepath.Ext(track.Path)) + suffix
+		}
+		if !filepath.IsLocal(filepath.FromSlash(original)) {
 			return errors.New("invalid recovery path")
 		}
-		if _, err := root.Lstat(filepath.FromSlash(track.Path)); !errors.Is(err, os.ErrNotExist) {
+		if _, err := root.Lstat(filepath.FromSlash(original)); !errors.Is(err, os.ErrNotExist) {
 			return errors.New("recovery destination already exists or is inaccessible")
 		}
-		if err := root.Rename(path, filepath.FromSlash(track.Path)); err != nil {
+		if err := root.Rename(path, filepath.FromSlash(original)); err != nil {
 			return err
 		}
 	}

@@ -119,7 +119,12 @@ func (s *Store) StartBackup(includeMedia, automatic bool, options MutationOption
 			})
 			if err == nil {
 				// Manual archives are never pruned by the automatic retention policy.
-				_ = s.pruneAutomaticBackups()
+				if pruneErr := s.pruneAutomaticBackups(); pruneErr != nil {
+					_ = s.activity.Emit("server.backup_prune_failed", activity.Fields{Reason: "storage"})
+					s.backupMu.Lock()
+					s.backupJob.Error = "备份已完成，但自动保留清理失败，请检查备份目录与系统日志。"
+					s.backupMu.Unlock()
+				}
 			}
 		}
 		s.backupMu.Lock()
@@ -182,6 +187,7 @@ func (s *Store) pruneAutomaticBackups() error {
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
 	kept := 0
+	var cleanupErrors []error
 	for _, item := range items {
 		if !item.Automatic {
 			continue
@@ -189,11 +195,11 @@ func (s *Store) pruneAutomaticBackups() error {
 		kept++
 		if kept > policy.KeepLast && s.backupReaders[item.ID] == 0 {
 			if err := os.Remove(filepath.Join(s.backupDirectory(), item.Name)); err != nil {
-				return err
+				cleanupErrors = append(cleanupErrors, err)
 			}
 		}
 	}
-	return nil
+	return errors.Join(cleanupErrors...)
 }
 func (s *Store) MaybeRunScheduledBackup(now time.Time) error {
 	policy, err := s.BackupPolicy()

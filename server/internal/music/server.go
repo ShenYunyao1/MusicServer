@@ -83,6 +83,11 @@ func (a *API) SetUpdater(manager *update.Manager) { a.updater = manager }
 func (a *API) SetMaintenance(check func() bool)   { a.updating = check }
 
 func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
+	if request.Method != "GET" && request.Method != "HEAD" && !strings.HasPrefix(request.URL.Path, "/api/v2/uploads") {
+		controller := http.NewResponseController(response)
+		_ = controller.SetReadDeadline(time.Now().Add(30 * time.Second))
+		defer controller.SetReadDeadline(time.Time{})
+	}
 	if a.updating != nil && a.updating() && request.URL.Path != "/api/v2/health" {
 		response.Header().Set("Cache-Control", "no-store")
 		response.Header().Set("Retry-After", "5")
@@ -393,25 +398,34 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	switch {
 	case request.URL.Path == "/api/v2/health":
 		if request.Method != http.MethodGet {
-			writeError(response, 405, "method not allowed")
+			methodNotAllowed(response, request)
 			return
 		}
 		commit, modified := version.Source()
-		writeJSON(response, http.StatusOK, map[string]any{"status": "ok", "version": version.Version, "schema": version.Schema, "revision": a.store.Revision(), "commit": commit, "modified": modified})
+		revision, err := a.store.ReadRevision()
+		if err != nil {
+			writeError(response, 503, "DATABASE_UNAVAILABLE", "database unavailable")
+			return
+		}
+		writeJSON(response, http.StatusOK, map[string]any{"status": "ok", "version": version.Version, "schema": version.Schema, "revision": revision, "commit": commit, "modified": modified})
 	case request.URL.Path == "/api/v2/sync":
 		a.sync(response, request)
 	case request.URL.Path == "/api/v2/playlists":
 		a.playlists(response, request)
 	case request.URL.Path == "/api/v2/playlists/order":
 		a.playlistOrder(response, request)
-	case request.URL.Path == "/api/v2/admin/removed" || strings.HasPrefix(request.URL.Path, "/api/v2/admin/removed/") || request.URL.Path == "/api/v2/admin/audit" || request.URL.Path == "/api/v2/admin/backups" || request.URL.Path == "/api/v2/admin/scan/status" || request.URL.Path == "/api/v2/admin/scan/cancel":
+	case request.URL.Path == "/api/v2/admin/removed" || strings.HasPrefix(request.URL.Path, "/api/v2/admin/removed/") || request.URL.Path == "/api/v2/admin/audit" || request.URL.Path == "/api/v2/admin/scan/status" || request.URL.Path == "/api/v2/admin/scan/cancel":
 		a.maintenance(response, request)
 	case request.URL.Path == "/api/v2/tracks":
 		if request.Method != http.MethodGet {
-			writeError(response, 405, "method not allowed")
+			methodNotAllowed(response, request)
 			return
 		}
-		tracks := a.store.Tracks()
+		tracks, err := a.store.ReadTracks(false)
+		if err != nil {
+			writeError(response, 503, "DATABASE_UNAVAILABLE", "tracks unavailable")
+			return
+		}
 		if authFromRequest(request).role != "admin" {
 			filtered := make([]Track, 0, len(tracks))
 			for _, track := range tracks {
@@ -464,7 +478,7 @@ func (a *API) playlistOrder(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	if request.Method != http.MethodPut {
-		writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+		methodNotAllowed(response, request)
 		return
 	}
 	var body struct {
@@ -486,7 +500,12 @@ func (a *API) playlistOrder(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	visible := []Playlist{}
-	for _, p := range a.store.Playlists() {
+	playlists, err := a.store.ReadPlaylists()
+	if err != nil {
+		writeError(response, 503, "DATABASE_UNAVAILABLE", "playlists unavailable")
+		return
+	}
+	for _, p := range playlists {
 		if p.System || p.OwnerID == authFromRequest(request).userID {
 			visible = append(visible, p)
 		}
@@ -516,7 +535,7 @@ func (a *API) adminSettings(response http.ResponseWriter, request *http.Request)
 		}
 		writeJSON(response, http.StatusOK, a.store.Settings())
 	default:
-		writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+		methodNotAllowed(response, request)
 	}
 }
 
@@ -533,6 +552,10 @@ func (a *API) adminUpdate(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if request.URL.Path == "/api/v2/admin/update/check" && request.Method == http.MethodPost {
+		if err := a.store.transaction(func(tx *sql.Tx) error { return requireAdminActor(tx, []MutationOptions{mutationOptions(request)}) }); err != nil {
+			writeError(response, 401, "AUTH_INVALID", "administrator session changed")
+			return
+		}
 		if !a.updater.Trigger() {
 			writeError(response, http.StatusConflict, "UPDATE_BUSY", "update check is already running")
 			return
@@ -549,6 +572,10 @@ func (a *API) adminUpdate(response http.ResponseWriter, request *http.Request) {
 			writeError(response, 400, "UPDATE_VERSION_REQUIRED", "select a checked release version")
 			return
 		}
+		if err := a.store.transaction(func(tx *sql.Tx) error { return requireAdminActor(tx, []MutationOptions{mutationOptions(request)}) }); err != nil {
+			writeError(response, 401, "AUTH_INVALID", "administrator session changed")
+			return
+		}
 		if err := a.updater.Apply(input.Version); err != nil {
 			writeError(response, 409, "UPDATE_NOT_READY", err.Error())
 			return
@@ -557,12 +584,12 @@ func (a *API) adminUpdate(response http.ResponseWriter, request *http.Request) {
 		emitActivity(a.store.activity, "update.applied", request, time.Now(), 0)
 		return
 	}
-	writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+	methodNotAllowed(response, request)
 }
 
 func (a *API) cover(response http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodGet && request.Method != http.MethodHead {
-		writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+		methodNotAllowed(response, request)
 		return
 	}
 	id := strings.TrimPrefix(request.URL.Path, "/api/v2/covers/")
@@ -573,14 +600,24 @@ func (a *API) cover(response http.ResponseWriter, request *http.Request) {
 	auth := authFromRequest(request)
 	if auth.role != "admin" {
 		allowed := false
-		for _, track := range a.store.Tracks() {
+		tracks, err := a.store.ReadTracks(false)
+		if err != nil {
+			writeError(response, 503, "DATABASE_UNAVAILABLE", "tracks unavailable")
+			return
+		}
+		for _, track := range tracks {
 			if track.CoverID == id && canReadTrack(auth, a.store, track.ID) {
 				allowed = true
 				break
 			}
 		}
 		if !allowed {
-			for _, playlist := range a.store.Playlists() {
+			playlists, err := a.store.ReadPlaylists()
+			if err != nil {
+				writeError(response, 503, "DATABASE_UNAVAILABLE", "playlists unavailable")
+				return
+			}
+			for _, playlist := range playlists {
 				if playlist.CoverID == id && canReadPlaylist(auth, a.store, playlist) {
 					allowed = true
 					break
@@ -625,10 +662,11 @@ func authFromRequest(request *http.Request) authContext {
 
 func (a *API) authenticate(request *http.Request) (authContext, bool) {
 	provided := request.Header.Get("X-API-Key")
-	_, keyHeader := request.Header["X-Api-Key"]
-	if provided != "" || keyHeader || request.Header.Get("Authorization") != "" {
+	authorization := request.Header.Get("Authorization")
+	bearer := strings.HasPrefix(strings.ToLower(authorization), "bearer ") || strings.EqualFold(authorization, "bearer")
+	if strings.TrimSpace(provided) != "" || bearer {
 		if provided == "" {
-			provided = strings.TrimPrefix(request.Header.Get("Authorization"), "Bearer ")
+			provided = strings.TrimSpace(authorization[len("Bearer"):])
 		}
 		key, ok := a.store.AuthenticateSecret(provided)
 		if !ok {
@@ -763,7 +801,7 @@ func canReadTrack(auth authContext, store *Store, id string) bool {
 
 func (a *API) sync(response http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodGet {
-		writeError(response, 405, "method not allowed")
+		methodNotAllowed(response, request)
 		return
 	}
 	limit, _ := strconv.Atoi(request.URL.Query().Get("limit"))
@@ -795,16 +833,17 @@ func (a *API) playlists(response http.ResponseWriter, request *http.Request) {
 		err := a.store.transaction(func(tx *sql.Tx) error {
 			auth := authFromRequest(request)
 			var err error
-			if !auth.session {
-				auth, err = currentKeyAuth(tx, auth)
-				if err != nil {
-					return err
-				}
+			auth, err = currentSyncObjectAuth(tx, auth)
+			if err != nil {
+				return err
 			}
 			playlists, err = playlistViews(tx, auth)
 			return err
 		})
 		if err != nil {
+			if writeObjectSyncError(response, err) {
+				return
+			}
 			writeError(response, 500, "READ_FAILED", "unable to read playlists")
 			return
 		}
@@ -825,13 +864,13 @@ func (a *API) playlists(response http.ResponseWriter, request *http.Request) {
 		options := mutationOptions(request)
 		options.CreateOnly = true
 		if err := a.store.PutPlaylist(playlist, options); err != nil {
-			writeError(response, http.StatusBadRequest, err.Error())
+			writePlaylistMutationError(response, err)
 			return
 		}
 		stored, _ := a.store.Playlist(playlist.ID)
 		writeJSON(response, http.StatusCreated, stored)
 	default:
-		writeError(response, http.StatusMethodNotAllowed, "method not allowed")
+		methodNotAllowed(response, request)
 	}
 }
 
@@ -839,7 +878,7 @@ func (a *API) playlist(response http.ResponseWriter, request *http.Request) {
 	id := strings.TrimPrefix(request.URL.Path, "/api/v2/playlists/")
 	if strings.HasSuffix(id, "/visibility") {
 		if request.Method != "PUT" {
-			writeError(response, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+			methodNotAllowed(response, request)
 			return
 		}
 		if !a.requireAccount(response, request) {
@@ -927,7 +966,7 @@ func (a *API) playlist(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if request.Method != http.MethodGet {
-		writeError(response, http.StatusMethodNotAllowed, "method not allowed")
+		methodNotAllowed(response, request)
 		return
 	}
 	tracks := make([]Track, 0, len(playlist.TrackIDs))
@@ -1038,7 +1077,7 @@ func (a *API) playlistTracks(response http.ResponseWriter, request *http.Request
 			return
 		}
 	}
-	writeError(response, http.StatusMethodNotAllowed, "method not allowed")
+	methodNotAllowed(response, request)
 }
 
 func (a *API) track(response http.ResponseWriter, request *http.Request) {
@@ -1089,7 +1128,7 @@ func (a *API) track(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if request.Method != http.MethodGet {
-		writeError(response, http.StatusMethodNotAllowed, "method not allowed")
+		methodNotAllowed(response, request)
 		return
 	}
 	writeJSON(response, http.StatusOK, publicTrack(track, authFromRequest(request)))
@@ -1100,7 +1139,7 @@ func (a *API) trackResource(response http.ResponseWriter, request *http.Request,
 		return
 	}
 	if request.Method != http.MethodPut {
-		writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+		methodNotAllowed(response, request)
 		return
 	}
 	parts := strings.Split(path, "/")
@@ -1173,7 +1212,7 @@ func uploadedResource(request *http.Request, field string, limit int64) ([]byte,
 
 func (a *API) media(response http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodGet && request.Method != http.MethodHead {
-		writeError(response, 405, "method not allowed")
+		methodNotAllowed(response, request)
 		return
 	}
 	id := strings.TrimPrefix(request.URL.Path, "/api/v2/media/")
@@ -1222,7 +1261,7 @@ func (a *API) scan(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if request.Method != http.MethodPost {
-		writeError(response, http.StatusMethodNotAllowed, "method not allowed")
+		methodNotAllowed(response, request)
 		return
 	}
 	status, err := a.store.StartScan(request.URL.Query().Get("full") == "true", mutationOptions(request))
@@ -1238,7 +1277,7 @@ func (a *API) upload(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if request.Method != http.MethodPost {
-		writeError(response, 405, "method not allowed")
+		methodNotAllowed(response, request)
 		return
 	}
 	maxUpload := a.store.Settings().MaxUploadBytes
@@ -1248,7 +1287,7 @@ func (a *API) upload(response http.ResponseWriter, request *http.Request) {
 	if maxUpload <= 0 {
 		maxUpload = 512 << 20
 	}
-	request.Body = http.MaxBytesReader(response, request.Body, maxUpload)
+	request.Body = http.MaxBytesReader(response, request.Body, maxUpload+(12<<20))
 	if err := request.ParseMultipartForm(8 << 20); err != nil {
 		if writeStorageError(response, err) {
 			return
@@ -1303,7 +1342,7 @@ func (a *API) stageUpload(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if request.Method != http.MethodPost {
-		writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+		methodNotAllowed(response, request)
 		return
 	}
 	started := time.Now()
@@ -1404,7 +1443,7 @@ func (a *API) stagedUpload(response http.ResponseWriter, request *http.Request) 
 			return
 		}
 		if request.Method != http.MethodGet {
-			writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+			methodNotAllowed(response, request)
 			return
 		}
 		asset, err := a.store.UploadStageCover(id)
@@ -1419,7 +1458,7 @@ func (a *API) stagedUpload(response http.ResponseWriter, request *http.Request) 
 	}
 	if len(parts) == 2 {
 		if request.Method != http.MethodPost {
-			writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+			methodNotAllowed(response, request)
 			return
 		}
 		request.Body = http.MaxBytesReader(response, request.Body, 2<<20)
@@ -1471,7 +1510,7 @@ func (a *API) stagedUpload(response http.ResponseWriter, request *http.Request) 
 			response.WriteHeader(http.StatusNoContent)
 		}
 	default:
-		writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+		methodNotAllowed(response, request)
 	}
 }
 
@@ -1481,7 +1520,7 @@ func (a *API) keys(response http.ResponseWriter, request *http.Request) {
 	}
 	if request.URL.Path == "/api/v2/auth/keys/stats" {
 		if request.Method != "GET" {
-			writeError(response, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+			methodNotAllowed(response, request)
 			return
 		}
 		stats := a.readCallStats(authFromRequest(request).userID)
@@ -1525,7 +1564,7 @@ func (a *API) keys(response http.ResponseWriter, request *http.Request) {
 			}
 			response.WriteHeader(204)
 		default:
-			writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+			methodNotAllowed(response, request)
 		}
 		return
 	}
@@ -1533,7 +1572,7 @@ func (a *API) keys(response http.ResponseWriter, request *http.Request) {
 	id := parts[0]
 	if len(parts) == 2 && parts[1] == "rotate" {
 		if request.Method != http.MethodPost {
-			writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+			methodNotAllowed(response, request)
 			return
 		}
 		rotated, err := a.store.RotateAPIKey(id, mutationOptions(request))
@@ -1570,7 +1609,7 @@ func (a *API) keys(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if request.Method != http.MethodDelete {
-		writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+		methodNotAllowed(response, request)
 		return
 	}
 	if err := a.store.RevokeAPIKey(id, mutationOptions(request)); errors.Is(err, os.ErrNotExist) {
@@ -1587,7 +1626,7 @@ func (a *API) adminStats(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if request.Method != http.MethodGet {
-		writeError(response, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+		methodNotAllowed(response, request)
 		return
 	}
 	stats := a.readCallStats(request.URL.Query().Get("user_id"))
@@ -1656,6 +1695,9 @@ func writeError(response http.ResponseWriter, status int, args ...string) {
 	} else if len(args) >= 2 {
 		code, message = args[0], args[1]
 	}
+	if status == http.StatusMethodNotAllowed {
+		code = "METHOD_NOT_ALLOWED"
+	}
 	errorValue := map[string]string{"code": code, "message": message}
 	response.Header().Set("X-Error-Code", code)
 	if requestID := response.Header().Get("X-Request-ID"); requestID != "" {
@@ -1698,7 +1740,12 @@ func (a *API) maintenance(response http.ResponseWriter, request *http.Request) {
 	path := request.URL.Path
 	switch {
 	case path == "/api/v2/admin/removed" && request.Method == http.MethodGet:
-		writeJSON(response, 200, a.store.RemovedTracks())
+		tracks, err := a.store.ReadTracks(true)
+		if err != nil {
+			writeError(response, 503, "DATABASE_UNAVAILABLE", "removed tracks unavailable")
+			return
+		}
+		writeJSON(response, 200, tracks)
 	case strings.HasPrefix(path, "/api/v2/admin/removed/") && request.Method == http.MethodDelete:
 		id := strings.TrimPrefix(path, "/api/v2/admin/removed/")
 		if err := a.store.PurgeTrack(id, mutationOptions(request)); err != nil {
@@ -1730,19 +1777,12 @@ func (a *API) maintenance(response http.ResponseWriter, request *http.Request) {
 			return
 		}
 		writeJSON(response, 200, result)
-	case path == "/api/v2/admin/backups" && request.Method == http.MethodPost:
-		path, err := a.store.Backup()
-		if err != nil {
-			writeError(response, 500, err.Error())
-			return
-		}
-		writeJSON(response, 201, map[string]string{"path": path})
 	case path == "/api/v2/admin/scan/status" && request.Method == http.MethodGet:
 		writeJSON(response, 200, a.store.ScanStatus())
 	case path == "/api/v2/admin/scan/cancel" && request.Method == http.MethodPost:
 		a.store.CancelScan()
 		writeJSON(response, 202, a.store.ScanStatus())
 	default:
-		writeError(response, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+		methodNotAllowed(response, request)
 	}
 }

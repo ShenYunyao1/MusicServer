@@ -183,7 +183,7 @@ go build -trimpath -buildvcs=auto -o ./build/musicserver.exe ./cmd/musicserver
 
 局域网 HTTP 页面支持新建歌单、上传和复制完整 Key。自动复制不可用时，页面会选中完整 Key 并提示手动复制，不会显示复制成功。没有私人歌单或没有勾选任何授权时，Key 仍可通过认证并返回空列表；要在播放器中看到全局曲库，需要显式授权系统 library。401 表示密钥无效、已过期/撤销或账户不可用，与歌单为空无关。若此前复制失败且一次性弹窗已关闭，请新建或轮换 Key，再将完整值填入播放器并应用设置；列表中的 Key ID 不能用于认证。
 
-公网部署继续通过 HTTPS 反向代理，并配置 `-public-url https://music.example.com` 或 `MUSIC_SERVER_PUBLIC_URL`，固定外部来源并使用 Secure Cookie。显式绑定公网 IP 不允许无 HTTPS 配置启动。代理后的登录 IP 限流以代理连接地址计，建议后端仅绑定回环或受限内部接口。
+公网部署继续通过 HTTPS 反向代理，并配置 `-public-url https://music.example.com` 或 `MUSIC_SERVER_PUBLIC_URL`，固定外部来源并使用 Secure Cookie。显式绑定公网 IP 不允许无 HTTPS 配置启动。后端应绑定回环或受限内部接口，防火墙禁止公网直接访问明文后端端口；`public-url` 固定浏览器来源，不等于关闭明文监听。只有固定HTTPS来源模式下的回环代理传入单值有效 `X-Forwarded-For` 才用于登录／注册／邮件限流；官方Nginx模板覆盖该头为直接来源，其他连接不信任转发头。
 
 忘记密码时停服后在终端执行（可选 `--revoke-keys` 同时撤销该账号播放器凭证）：
 

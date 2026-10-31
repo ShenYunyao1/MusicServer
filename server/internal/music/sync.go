@@ -15,12 +15,93 @@ import (
 )
 
 type syncCursor struct {
-	Mode     string `json:"mode"`
-	Position int64  `json:"position"`
-	Revision int64  `json:"revision"`
-	Last     string `json:"last"`
-	Binding  string `json:"binding"`
-	Expires  int64  `json:"expires"`
+	Mode           string   `json:"mode"`
+	Position       int64    `json:"position"`
+	Revision       int64    `json:"revision"`
+	Last           string   `json:"last"`
+	Binding        string   `json:"binding"`
+	Expires        int64    `json:"expires"`
+	OwnedPlaylists []string `json:"owned_playlists,omitempty"`
+	StableBinding  string   `json:"stable_binding,omitempty"`
+	TrackBinding   string   `json:"track_binding,omitempty"`
+}
+
+const syncKnownPlaylistLimit = 32
+
+func syncOwnedProof(auth authContext, playlists []Playlist, objects bool) ([]string, string, string) {
+	owned := []string{}
+	remaining := []Playlist{}
+	reduced := auth
+	reduced.allowedPlaylists = map[string]bool{}
+	ownedSet := map[string]bool{}
+	visibleTracks := map[string]bool{}
+	for _, p := range playlists {
+		if !canSyncPlaylist(auth, p) {
+			continue
+		}
+		for _, id := range p.TrackIDs {
+			visibleTracks[id] = true
+		}
+		if !p.System && !p.ReadOnly && p.OwnerID == auth.userID {
+			owned = append(owned, p.ID)
+			ownedSet[p.ID] = true
+		} else {
+			remaining = append(remaining, p)
+		}
+	}
+	if len(owned) > syncKnownPlaylistLimit {
+		return nil, "", ""
+	}
+	sort.Strings(owned)
+	for id, allowed := range auth.allowedPlaylists {
+		if allowed && !ownedSet[id] {
+			reduced.allowedPlaylists[id] = true
+		}
+	}
+	stable := syncProtocolBinding(reduced, remaining, objects) + "/owned-deletion-v1"
+	trackBinding := ""
+	if !auth.session && !objects {
+		ids := []string{}
+		for id := range visibleTracks {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		raw, _ := json.Marshal(ids)
+		trackBinding = hashBytes(raw)
+	}
+	return owned, stable, trackBinding
+}
+
+func syncDeletedOwned(tx *sql.Tx, auth authContext, parsed syncCursor, playlists []Playlist, objects bool) ([]string, bool, error) {
+	owned, stable, tracks := syncOwnedProof(auth, playlists, objects)
+	if parsed.StableBinding == "" || stable != parsed.StableBinding || tracks != parsed.TrackBinding || len(parsed.OwnedPlaylists) > syncKnownPlaylistLimit {
+		return nil, false, nil
+	}
+	previous := map[string]bool{}
+	for _, id := range parsed.OwnedPlaylists {
+		if previous[id] {
+			return nil, false, nil
+		}
+		previous[id] = true
+	}
+	for _, id := range owned {
+		if !previous[id] {
+			return nil, false, nil
+		}
+		delete(previous, id)
+	}
+	removed := []string{}
+	for id := range previous {
+		var retired bool
+		if err := tx.QueryRow("SELECT EXISTS(SELECT 1 FROM playlist_tombstones WHERE id=?)", id).Scan(&retired); err != nil {
+			return nil, false, err
+		}
+		if !retired {
+			return nil, false, nil
+		}
+		removed = append(removed, id)
+	}
+	return removed, len(removed) > 0, nil
 }
 
 var errSyncRestart = errors.New("library changed during pagination; restart snapshot")
@@ -86,6 +167,9 @@ func signCursor(cursor syncCursor, secret string) string {
 }
 func parseCursor(token, secret string) (syncCursor, error) {
 	var cursor syncCursor
+	if len(token) > 16384 {
+		return cursor, errors.New("sync cursor exceeds size limit")
+	}
 	parts := strings.Split(token, ".")
 	if len(parts) != 2 {
 		return cursor, errors.New("invalid sync cursor")
@@ -105,6 +189,9 @@ func parseCursor(token, secret string) (syncCursor, error) {
 	}
 	if err := json.Unmarshal(raw, &cursor); err != nil {
 		return cursor, err
+	}
+	if len(cursor.OwnedPlaylists) > syncKnownPlaylistLimit {
+		return cursor, errors.New("invalid sync playlist proof")
 	}
 	return cursor, nil
 }
@@ -144,16 +231,9 @@ func (s *Store) syncPage(auth authContext, token string, limit int, objects bool
 		return result, err
 	}
 	defer tx.Rollback()
-	if objects {
-		auth, err = currentSyncObjectAuth(tx, auth)
-		if err != nil {
-			return result, err
-		}
-	} else if !auth.session {
-		auth, err = currentKeyAuth(tx, auth)
-		if err != nil {
-			return result, err
-		}
+	auth, err = currentSyncObjectAuth(tx, auth)
+	if err != nil {
+		return result, err
 	}
 	var secret string
 	if err := tx.QueryRow("SELECT value FROM meta WHERE key='sync_secret'").Scan(&secret); err != nil {
@@ -174,7 +254,19 @@ func (s *Store) syncPage(auth authContext, token string, limit int, objects bool
 		if err != nil {
 			return result, err
 		}
-		if parsed.Binding == binding && parsed.Expires >= time.Now().Unix() {
+		bindingMatches := parsed.Binding == binding
+		if !bindingMatches && parsed.Mode == "delta" && parsed.Last == "" && parsed.Expires >= time.Now().Unix() {
+			removed, compatible, err := syncDeletedOwned(tx, auth, parsed, playlists, objects)
+			if err != nil {
+				return result, err
+			}
+			if compatible {
+				bindingMatches = true
+				parsed.Binding = binding
+				result.DeletedPlaylists = append(result.DeletedPlaylists, removed...)
+			}
+		}
+		if bindingMatches && parsed.Expires >= time.Now().Unix() {
 			cursor = parsed
 			if (cursor.Mode == "snapshot" || objects && cursor.Last == "paging") && cursor.Revision != result.Revision {
 				return result, errSyncRestart
@@ -186,6 +278,7 @@ func (s *Store) syncPage(auth authContext, token string, limit int, objects bool
 			if cursor.Mode == "delta" && (cursor.Position > result.Revision || (earliest.Valid && cursor.Position < earliest.Int64-1)) {
 				cursor = syncCursor{Mode: "snapshot", Revision: result.Revision, Binding: binding}
 				result.Reset = true
+				result.DeletedPlaylists = []string{}
 			}
 		} else {
 			result.Reset = true
@@ -340,6 +433,9 @@ func (s *Store) syncPage(auth authContext, token string, limit int, objects bool
 	slices.Sort(result.DeletedTracks)
 	slices.Sort(result.DeletedPlaylists)
 	slices.Sort(result.ChangedTrackIDs)
+	if cursor.Mode == "delta" {
+		cursor.OwnedPlaylists, cursor.StableBinding, cursor.TrackBinding = syncOwnedProof(auth, playlists, objects)
+	}
 	result.Cursor = signCursor(cursor, secret)
 	return result, tx.Commit()
 }

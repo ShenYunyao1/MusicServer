@@ -5,6 +5,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
 )
 
 func testPlayerIdentity(t *testing.T, api *API, secret string) authContext {
@@ -21,7 +24,22 @@ func testPlayerIdentity(t *testing.T, api *API, secret string) authContext {
 func testSyncIdentity(store *Store) authContext {
 	var id string
 	_ = store.db.QueryRow("SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1").Scan(&id)
-	return authContext{role: "admin", session: true, userID: id, keyID: "test-admin"}
+	var sessionID string
+	var authVersion int64
+	err := store.db.QueryRow("SELECT id,auth_version FROM sessions WHERE user_id=? AND revoked_at='' ORDER BY created_at DESC LIMIT 1", id).Scan(&sessionID, &authVersion)
+	if err != nil {
+		user, readErr := readUser(store.db, id)
+		if readErr != nil {
+			panic(readErr)
+		}
+		sessionID = uuid.NewString()
+		authVersion = user.AuthVersion
+		now := time.Now()
+		if _, err := store.db.Exec("INSERT INTO sessions VALUES(?,?,?,?,?,?,?,'')", sessionID, hashSecret(sessionID), id, authVersion, persistedTime(now), persistedTime(now), persistedTime(now.Add(sessionLifetime))); err != nil {
+			panic(err)
+		}
+	}
+	return authContext{role: "admin", session: true, userID: id, keyID: sessionID, authVersion: authVersion}
 }
 
 func syncSession(t *testing.T, api *API, token, cursor string) SyncResponse {

@@ -13,10 +13,12 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
+	"musicserver/internal/diskspace"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -640,8 +642,13 @@ func TestUploadRechecksDuplicateInsideCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	api.store.writeMu.Lock()
-	locked := true
+	locked := false
+	lockReady := make(chan struct{})
+	var once sync.Once
+	api.store.spaceProbe = func(string) (diskspace.Space, error) {
+		once.Do(func() { api.store.writeMu.Lock(); close(lockReady) })
+		return diskspace.Space{Total: 1 << 40, Available: 1 << 40}, nil
+	}
 	defer func() {
 		if locked {
 			api.store.writeMu.Unlock()
@@ -657,6 +664,14 @@ func TestUploadRechecksDuplicateInsideCommit(t *testing.T) {
 		track, duplicate, err := api.store.CommitUploadStage(preview.ID)
 		done <- outcome{track, duplicate, err}
 	}()
+	select {
+	case <-lockReady:
+		locked = true
+	case result := <-done:
+		t.Fatalf("upload stopped before publication: %v", result.err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("publication did not reach reserve check")
+	}
 	finalPath := filepath.Join(root, "uploads", preview.ID+".wav")
 	deadline := time.Now().Add(3 * time.Second)
 	for {
@@ -671,6 +686,9 @@ func TestUploadRechecksDuplicateInsideCommit(t *testing.T) {
 	existing := preview.Track
 	existing.OwnerID, existing.UploadedBy = api.store.Tracks()[0].OwnerID, api.store.Tracks()[0].UploadedBy
 	existing.ID, existing.Path, existing.Version = uuid.NewString(), "external.wav", 1
+	if err := os.WriteFile(filepath.Join(root, existing.Path), validTestAudio(t), 0600); err != nil {
+		t.Fatal(err)
+	}
 	tx, err := api.store.db.Begin()
 	if err != nil {
 		t.Fatal(err)

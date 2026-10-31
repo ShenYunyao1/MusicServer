@@ -9,7 +9,9 @@ import (
 	"errors"
 	"image"
 	"io"
+	"musicserver/internal/diskspace"
 	"net/http"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"time"
@@ -53,6 +55,11 @@ func (s *Store) savePlaylistEditor(id, name, description string, cover []byte, r
 			return result, errors.New("damaged playlist cover")
 		}
 		mime = "image/" + format
+	}
+	if len(cover) > 0 {
+		if err := s.checkSpace(filepath.Dir(s.dataPath), int64(len(cover))*2+(1<<20)); err != nil {
+			return result, err
+		}
 	}
 	err := s.transaction(func(tx *sql.Tx) error {
 		before, err := readPlaylistFrom(tx, id)
@@ -196,7 +203,41 @@ func saveCover(tx *sql.Tx, data []byte, mime string) error {
 	if len(data) == 0 || mime == "" {
 		return nil
 	}
-	_, err := tx.Exec("INSERT OR IGNORE INTO cover_assets VALUES(?,?,?)", hashBytes(data), mime, data)
+	if err := cleanupDetachedAssets(tx); err != nil {
+		return err
+	}
+	var exists bool
+	if err := tx.QueryRow("SELECT EXISTS(SELECT 1 FROM cover_assets WHERE id=?)", hashBytes(data)).Scan(&exists); err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	var total int64
+	if err := tx.QueryRow("SELECT COALESCE(SUM(length(data)),0) FROM cover_assets").Scan(&total); err != nil {
+		return err
+	}
+	if total+int64(len(data)) > 1<<30 {
+		return errors.New("封面资产总量达到1 GiB上限，请清理无用曲目或歌单封面")
+	}
+	var sequence int
+	var database, path string
+	if err := tx.QueryRow("PRAGMA database_list").Scan(&sequence, &database, &path); err != nil {
+		return err
+	}
+	space, err := diskspace.Read(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	policy := StoragePolicy{ReserveBytes: diskspace.DefaultReserve}
+	if err := readStorageJSON(tx, "storage_policy", &policy); err != nil {
+		return err
+	}
+	additional := uint64(len(data))*2 + (1 << 20)
+	if additional > space.Available || uint64(policy.ReserveBytes) > space.Available-additional {
+		return errStorageLow
+	}
+	_, err = tx.Exec("INSERT OR IGNORE INTO cover_assets VALUES(?,?,?)", hashBytes(data), mime, data)
 	return err
 }
 func (s *Store) SetTrackCover(id string, data []byte, options ...MutationOptions) error {
@@ -207,6 +248,9 @@ func (s *Store) setTrackCoverGuarded(id string, data []byte, guard func(sqlReade
 	validated, mime, ok := validateCover(data, "")
 	if !ok {
 		return errors.New("invalid cover (maximum 8 MiB and 20 MP)")
+	}
+	if err := s.checkSpace(filepath.Dir(s.dataPath), int64(len(validated))*2+(1<<20)); err != nil {
+		return err
 	}
 	return s.transaction(func(tx *sql.Tx) error {
 		if guard != nil {

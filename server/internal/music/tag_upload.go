@@ -97,24 +97,32 @@ func parseUploadCommit(r *http.Request) (map[string]string, *UploadTagEdits, err
 	return fields, edits, nil
 }
 
-func (s *Store) uploadPreviewTags(preview *UploadPreview, record stagedRecord) {
-	if requireTagsSchema(s.db) != nil {
-		return
+func (s *Store) uploadPreviewTags(preview *UploadPreview, record stagedRecord) error {
+	schema, err := sqliteSchemaIdentity(s.db)
+	if err != nil {
+		return err
+	}
+	if schema != 8 {
+		return nil
+	}
+	if err := requireTagsSchema(s.db); err != nil {
+		return err
 	}
 	preview.GenreValues = record.GenreValues
 	versions := &UploadTagVersions{PublicVersion: 1, PersonalVersion: 1}
 	if preview.DuplicateOf != "" {
 		public, err := trackTagVersion(s.db, preview.DuplicateOf, "public")
 		if err != nil {
-			return
+			return err
 		}
 		personal, err := trackTagVersion(s.db, preview.DuplicateOf, record.Track.OwnerID)
 		if err != nil {
-			return
+			return err
 		}
 		versions.PublicVersion, versions.PersonalVersion = public, personal
 	}
 	preview.TagVersions = versions
+	return nil
 }
 
 // Reconstruct the authenticated identity from the persisted session rather

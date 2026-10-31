@@ -56,8 +56,10 @@ var events = map[string]eventInfo{
 	"mail.queued": {"mail", "info", "验证邮件已排队"}, "mail.submitted": {"mail", "info", "邮件已提交投递服务"}, "mail.failed": {"mail", "warn", "邮件投递失败"},
 	"mail.verified": {"mail", "info", "账户邮箱验证完成"}, "mail.tested": {"mail", "info", "测试邮件已提交投递服务"},
 	"server.start": {"server", "info", "服务器启动"}, "server.stop": {"server", "info", "服务器停止"},
-	"server.cleanup_failed": {"server", "error", "清理过期暂存失败"},
-	"server.backup_started": {"server", "info", "开始创建备份"}, "server.backup_completed": {"server", "info", "备份创建完成"}, "server.backup_failed": {"server", "error", "备份失败或取消"},
+	"server.cleanup_failed":      {"server", "error", "清理过期暂存失败"},
+	"server.backup_prune_failed": {"server", "error", "备份已创建，但自动保留清理失败"},
+	"tag.batch_failed":           {"tag", "error", "标签批量任务执行失败"},
+	"server.backup_started":      {"server", "info", "开始创建备份"}, "server.backup_completed": {"server", "info", "备份创建完成"}, "server.backup_failed": {"server", "error", "备份失败或取消"},
 	"request.completed": {"http", "info", "请求处理完成"}, "request.slow": {"http", "warn", "请求处理时间较长"}, "request.failed": {"http", "error", "请求处理失败"},
 	"request.denied":   {"http", "warn", "请求被拒绝"},
 	"upload.receiving": {"upload", "info", "开始接收上传文件"}, "upload.received": {"upload", "info", "上传文件已接收，开始校验"},
@@ -127,6 +129,27 @@ func open(directory string, maxBytes int64, maxFiles, capacity int) (*Journal, e
 		return nil, err
 	}
 	j.file, j.size = f, info.Size()
+	if info.Size() > 0 {
+		reader, err := os.Open(j.path(0))
+		if err != nil {
+			_ = f.Close()
+			return nil, err
+		}
+		var last [1]byte
+		_, err = reader.ReadAt(last[:], info.Size()-1)
+		_ = reader.Close()
+		if err != nil {
+			_ = f.Close()
+			return nil, err
+		}
+		if last[0] != '\n' {
+			if _, err := f.WriteString("\n"); err != nil {
+				_ = f.Close()
+				return nil, err
+			}
+			j.size++
+		}
+	}
 	return j, nil
 }
 func (j *Journal) path(index int) string {
@@ -172,6 +195,7 @@ func (j *Journal) Emit(code string, fields Fields) error {
 	}
 	fields.Route = SafeRoute(fields.Route)
 	reasons := map[string]bool{"EMAIL_VERIFICATION_REQUIRED": true, "SMTP_CONNECT": true, "SMTP_TLS": true, "SMTP_TLS_REQUIRED": true, "SMTP_GREETING": true, "SMTP_AUTH": true, "SMTP_RECIPIENT": true, "SMTP_DATA": true, "MAIL_CANCELED": true, "MAIL_UNAVAILABLE": true, "MAIL_EXPIRED": true, "MAIL_ACCOUNT_UNAVAILABLE": true, "MAIL_SUPERSEDED": true, "MAIL_CONFIG_CHANGED": true, "UPLOAD_STORAGE": true, "CLIENT_CANCELED": true, "FFPROBE_REQUIRED": true, "AUDIO_INVALID": true, "UPLOAD_LIMIT": true, "AUTH_INVALID": true, "NOT_FOUND": true, "VERSION_CONFLICT": true, "CSRF_DENIED": true, "ORIGIN_DENIED": true, "KEY_CONCURRENCY_LIMIT": true, "ADMIN_REQUIRED": true, "INVALID_UPLOAD": true, "STAGE_FAILED": true, "COMMIT_FAILED": true}
+	reasons["TAG_FAILED"], reasons["TAG_INVALID"], reasons["TAG_LIMIT"], reasons["storage"] = true, true, true, true
 	if !reasons[fields.Reason] {
 		fields.Reason = ""
 	}
@@ -234,7 +258,7 @@ func SafeRoute(path string) string {
 	if len(parts) < 3 || parts[0] != "api" || parts[1] != "v2" {
 		return "/unknown"
 	}
-	groups := map[string]bool{"registration": true, "auth": true, "admin": true, "tracks": true, "playlists": true, "uploads": true, "sync": true, "media": true, "covers": true, "public": true, "subscriptions": true, "invitations": true, "setup": true, "health": true}
+	groups := map[string]bool{"registration": true, "auth": true, "admin": true, "tracks": true, "playlists": true, "uploads": true, "sync": true, "media": true, "covers": true, "public": true, "subscriptions": true, "invitations": true, "setup": true, "health": true, "community": true, "browse": true}
 	if !groups[parts[2]] {
 		return "/api/v2/unknown"
 	}
