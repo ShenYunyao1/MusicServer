@@ -7,6 +7,7 @@ async function fixture(browser,enabled=true){
   await page.goto('about:blank');
   await page.setContent('<!doctype html><html lang="zh-CN"><body><section id="page-tracks"><div class="track-toolbar"><input id="trackSearch"><input id="playlistSearch"><input id="selectAll" type="checkbox"></div><div id="trackRows"></div></section><div id="status"></div></body></html>');
   await page.evaluate(enabled=>{
+    history.replaceState(null,'','#/library');
     window.state={user:{id:'alice',role:'member'},trackFilter:'all',tracks:[],playlists:[],selectedTrackIds:new Set(),page:'tracks'};
     window.$=id=>document.getElementById(id);window.browsePageSize=50;
     window.browseState={epoch:0,generations:{tracks:0},tracks:null};window.browseReset=()=>{};

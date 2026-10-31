@@ -253,8 +253,14 @@ func TestLoginLimitsOriginsAndCredentialHeaders(t *testing.T) {
 	request.Header.Set("X-API-Key", "")
 	response = httptest.NewRecorder()
 	api.ServeHTTP(response, request)
+	if response.Code != 200 {
+		t.Fatal("empty key header suppressed the valid cookie session")
+	}
+	request.Header.Set("X-API-Key", "invalid-key")
+	response = httptest.NewRecorder()
+	api.ServeHTTP(response, request)
 	if response.Code != 401 {
-		t.Fatal("explicit empty key fell back to cookie")
+		t.Fatal("nonempty invalid key fell back to cookie")
 	}
 	for _, body := range []string{`{"name":"bad","role":"admin"}`, `{"name":"bad","scopes":["settings:manage"]}`} {
 		w := sessionRequest(api, token, "POST", "/api/v2/auth/keys", body)
