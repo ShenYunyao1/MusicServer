@@ -213,6 +213,7 @@ async function restoreWorkspaceRoute() {
       state.trackFilter=['all','mine','managed','orphan','missing'].includes(query.get('filter'))?query.get('filter'):'all';
       document.querySelectorAll('[data-filter]').forEach(el=>el.classList.toggle('active',el.dataset.filter===state.trackFilter));await loadBrowseView();if(generation!==routeGeneration)return;renderTracks();
     }
+    if(page==='upload')renderUploads();
     if(page==='keys'){await loadBrowseGrantPlaylists();if(generation!==routeGeneration)return;await loadKeys()}
     if(page==='logs')await loadSystemLogs();
     if(page==='stats')await loadStats();

@@ -1,6 +1,6 @@
 'use strict';
 
-let usersEpoch=0,usersGeneration=0,usersLoadGeneration=0,userListOffset=0,userListQuery='';
+let usersEpoch=0,usersGeneration=0,usersLoadGeneration=0,userResourceGeneration=0,userListOffset=0,userListQuery='';
 const usersNav=document.createElement('button');usersNav.dataset.page='users';usersNav.hidden=true;usersNav.innerHTML='<span class="nav-icon">♙</span><span class="nav-label">账户管理</span>';usersNav.onclick=()=>showPage('users');document.querySelector('.nav').append(usersNav);titles.users='账户管理';
 const usersPage=document.createElement('section');usersPage.className='page';usersPage.id='page-users';
 usersPage.innerHTML='<div class="page-intro"><div><h1>账户管理</h1></div><div class="actions"><button id="refreshUsers" class="btn">刷新</button><button id="createUser" class="btn primary">创建成员</button></div></div><div class="panel table-wrap user-account-panel"><div class="toolbar"><input id="userSearch" type="search" class="search" placeholder="搜索登录名或昵称" aria-label="搜索账户"><p id="userStorageStatus" class="status"></p></div><table class="data-table"><thead><tr><th>昵称 / 登录名</th><th>状态 / 邮箱</th><th>已用容量 / 上限</th><th>操作</th></tr></thead><tbody id="userList"></tbody></table><div id="usersPager" class="browse-pager"></div></div><details id="storageDeleted" class="panel storage-deleted"><summary>已删除账户占用</summary><p class="storage-caption">保留原始上传者的历史占用，接管不转移这部分统计。仅可显式释放已删除账户的邮箱占用。</p><div id="storageDeletedAccounts"></div></details><section id="userResourcesPanel" class="panel" hidden><h3 id="userResourcesTitle"></h3><div class="toolbar"><select id="userResourceKind" class="select"><option value="owned">当前管理曲目</option><option value="uploaded">原始上传曲目</option><option value="playlists">私人歌单</option><option value="keys">播放器 Key</option></select><button id="resourcesPrevious" class="btn">上一页</button><button id="resourcesNext" class="btn">下一页</button><span id="resourcesCount" class="status"></span></div><div id="userResources" class="table-wrap"></div><div id="transferControls" class="actions"><select id="transferTarget" class="select" aria-label="接管目标"></select><button id="transferSelected" class="btn">接管所选资源</button><button id="transferAll" class="btn danger">接管全部曲目与歌单</button></div><p class="status" id="resourceNotice"></p></section>';
@@ -93,9 +93,12 @@ function openResetUser(user){
 function managedUser(){return (state.users||[]).find(user=>user.id===state.managedUserID)}
 async function loadUserResources(){
  const user=managedUser();if(!user)return;
+ const generation=++userResourceGeneration,epoch=usersEpoch,owner=state.user?.id,offset=state.resourceOffset||0;
  const kind=$('userResourceKind').value,endpoint=kind==='owned'||kind==='uploaded'?'tracks?relation='+kind+'&':'playlists'===kind?'playlists?':'keys?';
- const result=await api('admin/users/'+user.id+'/'+endpoint+'offset='+(state.resourceOffset||0)+'&limit=50');
- if(state.page!=='users'||state.managedUserID!==user.id)return;
+ state.userResources=[];state.resourceTotal=0;state.userResourceKind=null;$('userResources').replaceChildren();$('resourcesCount').textContent='正在读取…';
+ const result=await api('admin/users/'+user.id+'/'+endpoint+'offset='+offset+'&limit=50');
+ if(generation!==userResourceGeneration||epoch!==usersEpoch||owner!==state.user?.id||state.page!=='users'||state.managedUserID!==user.id||$('userResourceKind').value!==kind||(state.resourceOffset||0)!==offset)return;
+ state.userResourceKind=kind;
  state.userResources=result.items;state.resourceTotal=result.total;
  $('userResourcesPanel').hidden=false;$('userResourcesTitle').textContent=user.username+' 的资源'+(user.enabled?'':'（账户已停用）');
  $('resourcesCount').textContent=(result.total?'第 '+((state.resourceOffset||0)+1)+'–'+Math.min((state.resourceOffset||0)+50,result.total)+' 条 / 共 '+result.total+' 条':'暂无资源');$('resourcesPrevious').disabled=!(state.resourceOffset>0);$('resourcesNext').disabled=(state.resourceOffset||0)+50>=result.total;
@@ -118,7 +121,7 @@ $('resourcesNext').onclick=()=>run(async()=>{state.resourceOffset=(state.resourc
 async function allUserResources(id,kind){let offset=0;const result=[];for(;;){const page=await api('admin/users/'+id+'/'+kind+'?limit=500&offset='+offset);result.push(...page.items);offset+=page.items.length;if(offset>=page.total)break;if(!page.items.length)throw new Error('资源分页发生变化，请刷新重试')}return result}
 async function transferUserResources(all){
  const user=managedUser(),target=(state.users||[]).find(candidate=>candidate.id===$('transferTarget').value);if(!user||!target)throw new Error('请选择接管目标');
- let tracks=[],playlists=[];
+ let tracks=[],playlists=[];if(!all&&state.userResourceKind!==$('userResourceKind').value)throw new Error('资源正在重新读取，请稍后选择');
  if(all){[tracks,playlists]=await Promise.all([allUserResources(user.id,'tracks'),allUserResources(user.id,'playlists')])}else {const selected=new Set([...$('userResources').querySelectorAll('[data-resource-id]:checked')].map(input=>input.dataset.resourceId));const items=state.userResources.filter(resource=>selected.has(resource.id));if($('userResourceKind').value==='owned')tracks=items;else playlists=items}
  if(!tracks.length&&!playlists.length)throw new Error('请选择要接管的资源');
  if(!confirm('将 '+user.username+' 的 '+tracks.length+' 首曲目、'+playlists.length+' 个歌单接管给 '+target.username+'？'))return;

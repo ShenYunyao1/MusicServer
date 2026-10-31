@@ -17,13 +17,14 @@ function parsePlayerLyrics(value){
  }
  const source=value.replace(/^\ufeff/,'').replace(/\r\n?/g,'\n').split('\n');
  const metadata=/^\[(?:ar|ti|al|by|re|ve|length|id):[^\]]*\]\s*$/i;
+ const extensionMetadata=/^\[(?!offset:)[A-Za-z][A-Za-z0-9_]*:/i;
  const offsetTag=/^\[offset:([+-]?\d+)\]\s*$/i;
  let offset=0;
  for(const raw of source){const match=raw.trim().match(offsetTag);if(match){const amount=Number(match[1]);if(Number.isSafeInteger(amount)&&Math.abs(amount)<=86400000)offset=amount}}
  const timed=[],notes=[],plain=[];
  for(const raw of source){
   let text=raw.trim();
-  if(metadata.test(text))continue;
+  if(metadata.test(text)||extensionMetadata.test(text))continue;
   const offsetMatch=text.match(offsetTag);
   if(offsetMatch&&Number.isSafeInteger(Number(offsetMatch[1]))&&Math.abs(Number(offsetMatch[1]))<=86400000)continue;
   const timestamps=[];

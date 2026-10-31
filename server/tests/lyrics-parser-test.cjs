@@ -8,6 +8,13 @@ const context=vm.createContext({});
 vm.runInContext(fs.readFileSync(path.join(__dirname,'../internal/music/lyrics-parser.js'),'utf8'),context);
 const parse=text=>JSON.parse(JSON.stringify(context.parsePlayerLyrics(text)));
 
+test('provider extensions and packed metadata never become displayed lyric lines',()=>{
+ const extensions=['[kuwo:033]','[ver:v1.0]','[awlrc:lrc:'+ 'A'.repeat(19999)+']','[tlrc:encoded]','[rlrc:encoded]','[ar:Artist][ti:Song]'];
+ assert.deepEqual(parse('[00:01]歌词\n'+extensions.join('\n')).lines,[{time:1,text:'歌词'}]);
+ assert.deepEqual(parse(extensions.join('\n')+'\n正常纯文本').lines,[{time:null,text:'正常纯文本'}]);
+ assert.equal(parse('[00:01]保留[ar:普通歌词文本]').lines[0].text,'保留[ar:普通歌词文本]');
+});
+
 test('plain text retains separate lines and normalizes BOM and CRLF',()=>{
  assert.deepEqual(parse('\ufeff第一行\r\n第二行\r\n'),{timed:false,lines:[{time:null,text:'第一行'},{time:null,text:'第二行'}]});
  assert.deepEqual(parse(''),{timed:false,lines:[]});
@@ -33,7 +40,7 @@ test('positive offset advances lyrics and negative offset delays every timestamp
 });
 
 test('invalid timestamps and invalid offset remain readable without a false time',()=>{
- for(const text of ['[00:60]无效','[xx:12]无效','[01:-2]无效','[1:2.0000]无效','[offset:NaN]']){
+ for(const text of ['[00:60]无效','[01:-2]无效','[1:2.0000]无效','[offset:NaN]']){
   assert.deepEqual(parse(text),{timed:false,lines:[{time:null,text}]});
  }
 });

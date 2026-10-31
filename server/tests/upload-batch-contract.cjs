@@ -6,9 +6,9 @@ async function until(check,label){for(let n=0;n<100;n++){if(check())return;await
 function upload(id){return {id,file:{name:id+'.wav',size:10},edits:{},status:'待暂存'}}
 function fixture(items){
  const elements=new Map(),calls=[],state={user:{id:'alice'},uploads:items,playlists:[],batch:0};
- function element(){return {value:'',checked:false,options:[],classList:{add(){}},after(){},append(){},replaceChildren(...items){this.options=items},add(item){this.options.push(item)},querySelector(){return null}}}
+ function element(){return {value:'',checked:false,options:[],classList:{add(){}},after(){},append(){},setAttribute(){},replaceChildren(...items){this.options=items},add(item){this.options.push(item)},querySelector(){return null}}}
  const get=id=>{if(!elements.has(id))elements.set(id,element());return elements.get(id)};
- const c={console,Map,WeakMap,Promise,Array,Math,JSON,Date,Option:function(text,value){this.text=text;this.value=value},document:{createElement:element,querySelector(){return null}},$:get,state,resumeWorkspaceEpoch:0,uploadFlowRun:null,uploadFlowControls:element(),
+ const c={console,Map,WeakMap,Promise,Array,Math,JSON,Date,URLSearchParams,Option:function(text,value){this.text=text;this.value=value},document:{createElement:element,querySelector(){return null}},$:get,state,resumeWorkspaceEpoch:0,uploadFlowRun:null,uploadFlowControls:element(),
   uploadFlowCurrent:(owner,epoch)=>state.user?.id===owner&&c.resumeWorkspaceEpoch===epoch,uploadFlowPending:u=>!['完成','已去重'].includes(u.status),
   renderUploads(){},parseLocalUpload:async()=>{},invalidateLocalParse:u=>{u.localGeneration=(u.localGeneration||0)+1;u.localPromise=null;return u.localGeneration},
   startUploadFlow:async items=>{calls.push(['start',items.map(u=>u.id)])},confirmUpload:async()=>{},confirmUploads:async()=>{},persistResumeQueue:async()=>{},run:action=>action(),
@@ -48,5 +48,9 @@ async function pagingAndParserLimit(){
  assert.equal(f.c.visibleUploadItems().length,50);const jobs=items.slice(0,5).map(u=>f.c.parseLocalUpload(u));await until(()=>reads.length===2,'two bounded parsers');assert.equal(max,2);
  while(reads.length<5){for(const read of reads)read.resolve();await new Promise(resolve=>setImmediate(resolve))}for(const read of reads)read.resolve();await Promise.all(jobs);assert.equal(max,2);
 }
-async function main(){const failures=[];for(const test of [restoreCommitted,retryAccountBoundary,parsingInvalidation,assignmentDoesNotRetransmit,pagingAndParserLimit]){try{await test();console.log('PASS '+test.name)}catch(error){failures.push(test.name+': '+error.message);console.error('FAIL '+test.name+': '+error.message)}}assert.deepEqual(failures,[],'batch contracts failed')}
+async function targetCatalogSurvivesViewCache(){
+ const u={...upload('targeted'),targetPlaylistID:'kept'},f=fixture([u]);f.state.playlists=[{id:'kept',name:'Kept playlist',owner_id:'alice'}];f.load();assert.equal(f.get('uploadTargetPlaylist').value,'kept');f.state.playlists=[];f.c.renderUploads();assert.equal(f.get('uploadTargetPlaylist').value,'kept','Filtering another page must not reset the queued target');
+ f.c.api=async url=>{assert.match(url,/browse\/playlists\?/);return {items:[{id:'page-2',name:'Off-page target',owner_id:'alice'}],offset:50,total:80}};await f.c.loadUploadTargets(50);assert.ok(f.get('uploadTargetPlaylist').options.some(p=>p.value==='page-2'));assert.equal(u.targetPlaylistID,'kept');
+}
+async function main(){const failures=[];for(const test of [restoreCommitted,retryAccountBoundary,parsingInvalidation,assignmentDoesNotRetransmit,pagingAndParserLimit,targetCatalogSurvivesViewCache]){try{await test();console.log('PASS '+test.name)}catch(error){failures.push(test.name+': '+error.message);console.error('FAIL '+test.name+': '+error.message)}}assert.deepEqual(failures,[],'batch contracts failed')}
 main().catch(error=>{console.error(error);process.exitCode=1});

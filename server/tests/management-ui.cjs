@@ -103,6 +103,7 @@ async function main() {
     await page.reload();
     await page.waitForFunction(() => state.user?.username === 'admin' && state.tracks.length === 1);
     await page.waitForFunction(() => document.querySelector('#status').textContent === '已登录');
+    if(process.env.MUSIC_SERVER_TEST_AUDIT_FRONTEND_ONLY==='1'){await require('./audit-frontend-ui.cjs')({page,browser,base,directory});return}
     if(process.env.MUSIC_SERVER_TEST_ONLINE_PLAYER_ONLY==='1'){await require('./online-player-ui.cjs')({page,browser,base,directory});return}
     if(process.env.MUSIC_SERVER_TEST_SELECTION_ONLY==='1'){await require('./track-interaction-ui.cjs')({page,browser,base,directory});return}
     if(process.env.MUSIC_SERVER_TEST_UPLOAD_FLOW_ONLY==='1'){await require('./upload-flow-ui.cjs')({page,browser,base,directory});return}

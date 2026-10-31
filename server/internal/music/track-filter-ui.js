@@ -90,6 +90,11 @@ async function loadFilteredTracks(offset=0,{fresh=false}={}){
   }
 }
 async function applyTrackFilter(filter,sort='title',direction='asc'){
+  if(location.hash.split('?')[0]!=='#/library'){
+    const values=new URLSearchParams(),copy=structuredClone(filter);delete copy.q;delete copy.range;
+    if(filter.q)values.set('q',filter.q);if(filter.range&&filter.range!=='all')values.set('filter',filter.range);if(Object.keys(copy).some(key=>key!=='version'))values.set('tf',JSON.stringify(copy));if(sort!=='title')values.set('sort',sort);if(direction!=='asc')values.set('dir',direction);
+    location.hash='#/library'+(values.size?'?'+values:'');return;
+  }
   if(!trackFiltersEnabled())return;state.trackFilter=filter.range||'all';if($('trackSearch'))$('trackSearch').value=filter.q||'';
   document.querySelectorAll('[data-filter]').forEach(button=>button.classList.toggle('active',button.dataset.filter===state.trackFilter));
   state.selectedTrackIds?.clear();trackFilterWorkspace.baseline=null;writeTrackFilterRoute(filter,sort,direction,0);
