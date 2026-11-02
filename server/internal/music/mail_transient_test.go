@@ -58,6 +58,68 @@ func TestMailTemporaryCredentialFailureRetriesWithoutLosingPayload(t *testing.T)
 	}
 }
 
+func TestMailCredentialReadsOutsideWriteTransaction(t *testing.T) {
+	a, auth, _ := mailTestSetup(t)
+	s := a.store
+	reads := 0
+	s.mail.secretReadHook = func() {
+		reads++
+		if !s.writeMu.TryLock() {
+			t.Error("credential file read holds database write mutex")
+		} else {
+			s.writeMu.Unlock()
+		}
+	}
+	defer func() { s.mail.secretReadHook = nil }()
+	if _, err := s.RequestEmailChallenge(auth, "outside-lock@example.com", "", "local"); err != nil {
+		t.Fatal(err)
+	}
+	code := mailChallengeCode(t, s, auth.userID)
+	var challenge emailChallenge
+	if err := mailReadJSON(s.db, "email_challenge/"+auth.userID, &challenge); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ProcessMailJobs(context.Background(), 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.VerifyEmailChallenge(auth, challenge.ID, code); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.QueueMailTest(auth, "outside-test@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ProcessMailJobs(context.Background(), 1); err != nil {
+		t.Fatal(err)
+	}
+	if reads == 0 {
+		t.Fatal("credential reads were not exercised")
+	}
+	admin, err := readUser(s.db, auth.userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := s.RegistrationPolicy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	setRegistration(t, s, admin, true, 0, policy.Version)
+	if _, err := s.RegisterAccount("outside-lock-member", "isolated registration password", "local"); err != nil {
+		t.Fatal(err)
+	}
+	ready := s.preparedMailReady()
+	if _, err := s.db.Exec("UPDATE settings SET value=json_set(value,'$.version',json_extract(value,'$.version')+1) WHERE key='mail_settings'"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.transaction(func(tx *sql.Tx) error {
+		if ready(tx) {
+			t.Error("old credential evidence accepted new settings")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestMailValidationQueryFailureRetriesAndStopsAfterThreeAttempts(t *testing.T) {
 	a, auth, messages := mailTestSetup(t)
 	s := a.store

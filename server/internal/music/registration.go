@@ -46,6 +46,7 @@ func (s *Store) UpdateRegistrationPolicy(input RegistrationPolicyInput, options 
 			return policy, err
 		}
 	}
+	mailReady := s.preparedMailReady()
 	err := s.transaction(func(tx *sql.Tx) error {
 		if err := requireAdminActor(tx, []MutationOptions{options}); err != nil {
 			return err
@@ -78,7 +79,7 @@ func (s *Store) UpdateRegistrationPolicy(input RegistrationPolicyInput, options 
 			if !policy.QuotaConfigured {
 				return errors.New("请先明确设置新注册默认额度")
 			}
-			if !s.mailReadyFrom(tx) {
+			if !mailReady(tx) {
 				return errRegistrationMail
 			}
 		}
@@ -104,6 +105,7 @@ type registrationCounter struct {
 // must not reset the one-hour registration budget. The global cap also bounds
 // how many distinct client-IP buckets can be created in one window.
 func (s *Store) reserveRegistration(ip string) error {
+	mailReady := s.preparedMailReady()
 	return s.transaction(func(tx *sql.Tx) error {
 		policy, err := readRegistrationPolicy(tx)
 		if err != nil {
@@ -112,7 +114,7 @@ func (s *Store) reserveRegistration(ip string) error {
 		if !policy.Enabled || !policy.QuotaConfigured {
 			return errRegistrationDisabled
 		}
-		if !s.mailReadyFrom(tx) {
+		if !mailReady(tx) {
 			return errRegistrationMail
 		}
 		now := time.Now().UTC()
@@ -157,6 +159,7 @@ func (s *Store) RegisterAccount(username, password, ip string) (User, error) {
 	if err := s.reserveRegistration(ip); err != nil {
 		return User{}, err
 	}
+	mailReady := s.preparedMailReady()
 	return s.createUserRecordInitialized(username, password, "member", "", false, false, nil, func(tx *sql.Tx, user *User) error {
 		policy, err := readRegistrationPolicy(tx)
 		if err != nil {
@@ -165,7 +168,7 @@ func (s *Store) RegisterAccount(username, password, ip string) (User, error) {
 		if !policy.Enabled || !policy.QuotaConfigured {
 			return errRegistrationDisabled
 		}
-		if !s.mailReadyFrom(tx) {
+		if !mailReady(tx) {
 			return errRegistrationMail
 		}
 		state := AccountEmailState{Required: true, QuotaSource: "registration", RegistrationQuotaBytes: policy.DefaultQuotaBytes, RegistrationPolicyVersion: policy.Version}

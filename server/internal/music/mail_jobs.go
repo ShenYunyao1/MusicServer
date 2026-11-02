@@ -13,10 +13,11 @@ import (
 )
 
 type mailRuntime struct {
-	mu      sync.Mutex
-	cancel  context.CancelFunc
-	wake    chan struct{}
-	started bool
+	secretReadHook func() // Private regression seam; never configured by HTTP.
+	mu             sync.Mutex
+	cancel         context.CancelFunc
+	wake           chan struct{}
+	started        bool
 	// Test injection stays private and is never exposed through configuration.
 	sendHook func(context.Context, MailSettings, mailSecret, mailEnvelope, string) error
 	roots    *x509.CertPool
@@ -98,7 +99,7 @@ func mailCleanup(tx *sql.Tx, now time.Time) error {
 	_, err := tx.Exec("DELETE FROM meta WHERE key LIKE 'email_challenge/%' AND julianday(json_extract(value,'$.expires_at'))<julianday(?)", persistedTime(now.Add(-24*time.Hour)))
 	return err
 }
-func (s *Store) enqueueMail(tx *sql.Tx, userID, challengeID string, envelope mailEnvelope, settings mailSettingsRecord) (mailJob, error) {
+func (s *Store) enqueueMail(tx *sql.Tx, userID, challengeID string, envelope mailEnvelope, settings mailSettingsRecord, keys ...[]byte) (mailJob, error) {
 	var job mailJob
 	var pending int
 	if err := mailCleanup(tx, time.Now()); err != nil {
@@ -111,7 +112,13 @@ func (s *Store) enqueueMail(tx *sql.Tx, userID, challengeID string, envelope mai
 		return job, errMailLimited
 	}
 	raw, _ := json.Marshal(envelope)
-	encrypted, err := s.encryptMailPayload(raw)
+	var encrypted string
+	var err error
+	if len(keys) > 0 {
+		encrypted, err = encryptMailPayloadWithKey(raw, keys[0])
+	} else {
+		encrypted, err = s.encryptMailPayload(raw)
+	}
 	if err != nil {
 		return job, err
 	}
@@ -129,6 +136,11 @@ func (s *Store) QueueMailTest(auth authContext, target string) (mailJob, error) 
 		return mailJob{}, err
 	}
 	var job mailJob
+	prepared, prepareErr := readMailSettings(s.db)
+	if prepareErr == nil {
+		_, prepareErr = s.mailCredential(prepared)
+	}
+	master, keyErr := s.mailMasterKey(false)
 	err = s.transaction(func(tx *sql.Tx) error {
 		if err := validateAccountSession(tx, auth); err != nil {
 			return err
@@ -143,13 +155,19 @@ func (s *Store) QueueMailTest(auth authContext, target string) (mailJob, error) 
 		if !settings.Configured {
 			return errMailUnavailable
 		}
-		if _, err = s.mailCredential(settings); err != nil {
-			return err
+		if prepareErr != nil {
+			return prepareErr
+		}
+		if keyErr != nil {
+			return keyErr
+		}
+		if settings.Version != prepared.Version || settings.SecretID != prepared.SecretID {
+			return errVersionConflict
 		}
 		if err = reserveMailLimits(tx, auth.userID, normalized, "admin-test", true); err != nil {
 			return err
 		}
-		job, err = s.enqueueMail(tx, auth.userID, "", mailEnvelope{To: normalized, Test: true}, settings)
+		job, err = s.enqueueMail(tx, auth.userID, "", mailEnvelope{To: normalized, Test: true}, settings, master)
 		if err != nil {
 			return err
 		}
@@ -205,6 +223,22 @@ func (s *Store) ProcessMailJobs(ctx context.Context, limit int) error {
 		var config mailSettingsRecord
 		var envelope mailEnvelope
 		var secret mailSecret
+		prepared, prepareErr := readMailSettings(s.db)
+		if prepareErr == nil {
+			secret, prepareErr = s.mailCredential(prepared)
+		}
+		var master []byte
+		if prepareErr == nil {
+			master, prepareErr = s.mailMasterKey(false)
+		}
+		var decodeErr error
+		if prepareErr == nil {
+			var raw []byte
+			raw, decodeErr = decryptMailPayloadWithKey(job.Payload, master)
+			if decodeErr == nil {
+				decodeErr = json.Unmarshal(raw, &envelope)
+			}
+		}
 		err = s.transaction(func(tx *sql.Tx) error {
 			if !time.Now().Before(job.ExpiresAt) {
 				reason = "MAIL_EXPIRED"
@@ -237,12 +271,13 @@ func (s *Store) ProcessMailJobs(ctx context.Context, limit int) error {
 				reason = "MAIL_CONFIG_CHANGED"
 				return nil
 			}
-			secret, err = s.mailCredential(config)
-			if err != nil {
-				return err
+			if prepareErr != nil {
+				return prepareErr
 			}
-			raw, err := s.decryptMailPayload(job.Payload)
-			if err != nil || json.Unmarshal(raw, &envelope) != nil {
+			if config.Version != prepared.Version || config.SecretID != prepared.SecretID {
+				return errVersionConflict
+			}
+			if decodeErr != nil {
 				reason = "MAIL_UNAVAILABLE"
 				return nil
 			}

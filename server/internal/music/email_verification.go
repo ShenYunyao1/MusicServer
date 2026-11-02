@@ -79,8 +79,14 @@ func reserveMailLimits(tx *sql.Tx, owner, email, ip string, test bool) error {
 	}
 	return nil
 }
-func (s *Store) emailCodeDigest(challenge emailChallenge, code string) (string, error) {
-	master, err := s.mailMasterKey(false)
+func (s *Store) emailCodeDigest(challenge emailChallenge, code string, keys ...[]byte) (string, error) {
+	var master []byte
+	var err error
+	if len(keys) > 0 {
+		master = keys[0]
+	} else {
+		master, err = s.mailMasterKey(false)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -136,13 +142,18 @@ func (s *Store) RequestEmailChallenge(auth authContext, target, currentPassword,
 		return EmailStatus{}, errCredentials
 	}
 	var initial AccountEmailState
+	mailReady := s.preparedMailReady()
+	master, err := s.mailMasterKey(false)
+	if err != nil {
+		return EmailStatus{}, err
+	}
 	// Count attempts before expensive password verification. Even failures spend
 	// the per-account/address/IP budget and cannot be used as a hash oracle.
 	err = s.transaction(func(tx *sql.Tx) error {
 		if err := validateAccountSession(tx, auth); err != nil {
 			return err
 		}
-		if !s.mailReadyFrom(tx) {
+		if !mailReady(tx) {
 			return errMailUnavailable
 		}
 		var err error
@@ -182,7 +193,7 @@ func (s *Store) RequestEmailChallenge(auth authContext, target, currentPassword,
 		if err != nil {
 			return err
 		}
-		if !s.mailReadyFrom(tx) {
+		if !mailReady(tx) {
 			return errMailUnavailable
 		}
 		var owner string
@@ -204,11 +215,11 @@ func (s *Store) RequestEmailChallenge(auth authContext, target, currentPassword,
 		code := fmt.Sprintf("%06d", number.Int64())
 		now := time.Now().UTC()
 		challenge = emailChallenge{ID: uuid.NewString(), UserID: auth.userID, Email: target, AuthVersion: auth.authVersion, CreatedAt: now, ExpiresAt: now.Add(mailChallengeTTL)}
-		challenge.Digest, err = s.emailCodeDigest(challenge, code)
+		challenge.Digest, err = s.emailCodeDigest(challenge, code, master)
 		if err != nil {
 			return err
 		}
-		job, err = s.enqueueMail(tx, auth.userID, challenge.ID, mailEnvelope{To: target, Code: code}, settings)
+		job, err = s.enqueueMail(tx, auth.userID, challenge.ID, mailEnvelope{To: target, Code: code}, settings, master)
 		if err != nil {
 			return err
 		}
@@ -247,6 +258,10 @@ func (s *Store) VerifyEmailChallenge(auth authContext, id, code string) (EmailSt
 		}
 	}
 	invalid := false
+	master, err := s.mailMasterKey(false)
+	if err != nil {
+		return EmailStatus{}, err
+	}
 	var verifiedJobID string
 	err = s.transaction(func(tx *sql.Tx) error {
 		if err := validateAccountSession(tx, auth); err != nil {
@@ -265,7 +280,7 @@ func (s *Store) VerifyEmailChallenge(auth authContext, id, code string) (EmailSt
 			return nil
 		}
 		verifiedJobID = challenge.JobID
-		digest, err := s.emailCodeDigest(challenge, code)
+		digest, err := s.emailCodeDigest(challenge, code, master)
 		if err != nil {
 			return err
 		}

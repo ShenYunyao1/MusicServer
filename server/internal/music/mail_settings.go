@@ -114,6 +114,9 @@ func (s *Store) mailSecretsDirectory() string {
 	return filepath.Join(filepath.Dir(s.dataPath), ".mail-secrets")
 }
 func (s *Store) readMailSecret(name string) ([]byte, error) {
+	if s.mail.secretReadHook != nil {
+		s.mail.secretReadHook()
+	}
 	directory := s.mailSecretsDirectory()
 	info, err := os.Lstat(directory)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
@@ -201,6 +204,9 @@ func (s *Store) encryptMailPayload(raw []byte) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return encryptMailPayloadWithKey(raw, master)
+}
+func encryptMailPayloadWithKey(raw, master []byte) (string, error) {
 	block, err := aes.NewCipher(mailDerivedKey(master, "outbox"))
 	if err != nil {
 		return "", err
@@ -220,6 +226,9 @@ func (s *Store) decryptMailPayload(value string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	return decryptMailPayloadWithKey(value, master)
+}
+func decryptMailPayloadWithKey(value string, master []byte) ([]byte, error) {
 	raw, err := base64.StdEncoding.DecodeString(value)
 	if err != nil {
 		return nil, errMailUnavailable
@@ -275,6 +284,21 @@ func (s *Store) mailReadyFrom(reader sqlReader) bool {
 	return err == nil
 }
 func (s *Store) MailReady() bool { return s.mailReadyFrom(s.db) }
+
+// Capture immutable credential evidence before acquiring the database write
+// mutex. The transaction must still compare the committed settings identity.
+func (s *Store) preparedMailReady() func(sqlReader) bool {
+	record, err := readMailSettings(s.db)
+	ready := err == nil && record.Configured && record.Tested
+	if ready {
+		_, err = s.mailCredential(record)
+		ready = err == nil
+	}
+	return func(reader sqlReader) bool {
+		current, err := readMailSettings(reader)
+		return ready && err == nil && current.Configured && current.Tested && current.Version == record.Version && current.SecretID == record.SecretID
+	}
+}
 func (s *Store) UpdateMailSettings(input MailSettingsInput, options MutationOptions) (MailSettings, error) {
 	host := strings.TrimSpace(input.Host)
 	from, err := normalizeMailAddress(input.FromAddress)
