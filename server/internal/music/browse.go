@@ -137,6 +137,11 @@ func (a *API) browse(response http.ResponseWriter, request *http.Request) {
 			if err := browsePlaylistTracks(tx, auth, parts[1], q, &page, request.URL.Query().Get("source")); err != nil {
 				return err
 			}
+			if request.URL.Query().Get("source") == "own" && auth.role == "admin" && page.Playlist["owner_id"] != auth.userID && page.Playlist["system"] != true {
+				if err := auditMutation(tx, "playlist.admin.read", parts[1], nil, map[string]any{"owner_id": page.Playlist["owner_id"], "offset": q.Offset, "limit": q.Limit, "source": "playback"}, []MutationOptions{mutationOptions(request)}); err != nil {
+					return err
+				}
+			}
 		case len(parts) == 3 && parts[0] == "playlists" && parts[2] == "tracks" && validID.MatchString(parts[1]):
 			if err := browsePlaylistTracks(tx, auth, parts[1], q, &page); err != nil {
 				return err

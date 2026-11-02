@@ -98,8 +98,12 @@ func (a *API) registration(w http.ResponseWriter, r *http.Request) {
 				MailReady bool `json:"mail_ready"`
 			}{policy, a.store.MailReady()})
 		default:
-			writeError(w, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+			methodNotAllowed(w, r)
 		}
+		return
+	}
+	if r.URL.Path == "/api/v2/registration" || r.URL.Path == "/api/v2/registration/config" {
+		methodNotAllowed(w, r)
 		return
 	}
 	writeError(w, 404, "NOT_FOUND", "registration endpoint not found")

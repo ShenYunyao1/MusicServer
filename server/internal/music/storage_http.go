@@ -11,6 +11,10 @@ import (
 )
 
 func writeStorageError(w http.ResponseWriter, err error) bool {
+	if errors.Is(err, errUploadSession) {
+		writeError(w, 401, "AUTH_INVALID", "current login is no longer valid")
+		return true
+	}
 	if errors.Is(err, errUploadTemporaryLimit) {
 		w.Header().Set("Retry-After", "60")
 		writeError(w, 429, "UPLOAD_TEMPORARY_LIMIT", err.Error())
@@ -29,6 +33,18 @@ func writeStorageError(w http.ResponseWriter, err error) bool {
 		return true
 	}
 	return false
+}
+
+func writeUploadBodyError(w http.ResponseWriter, err error, code, message string) {
+	if writeStorageError(w, err) {
+		return
+	}
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		writeError(w, 413, "UPLOAD_TOO_LARGE", message)
+		return
+	}
+	writeError(w, 400, code, message)
 }
 
 // Multipart parsing may spill to the OS temporary volume before StageAudio.
@@ -128,7 +144,7 @@ func (a *API) storage(w http.ResponseWriter, r *http.Request) {
 		}
 		_, err = a.store.SetStorageQuota(strings.TrimPrefix(path, "/quotas/"), quota.LimitBytes, quota.Version, mutationOptions(r))
 	} else {
-		writeError(w, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+		methodNotAllowed(w, r)
 		return
 	}
 	if err != nil {

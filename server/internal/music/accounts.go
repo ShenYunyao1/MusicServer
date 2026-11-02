@@ -371,6 +371,9 @@ func (s *Store) ResetPassword(username, password string, revokeKeys bool) error 
 func (s *Store) ChangePassword(user User, old, password string, options ...MutationOptions) error {
 	return s.replacePassword(user.Username, old, password, false, false, options)
 }
+
+var errPasswordSession = errors.New("password change session is no longer valid")
+
 func (s *Store) replacePassword(username, old, password string, local, revokeKeys bool, options []MutationOptions) error {
 	if !local && old == password {
 		return errors.New("new password must differ from the previous password")
@@ -394,6 +397,28 @@ func (s *Store) replacePassword(username, old, password string, local, revokeKey
 		return err
 	}
 	return s.transaction(func(tx *sql.Tx) error {
+		if !local {
+			current, err := readUser(tx, id)
+			if err != nil || !current.Enabled || current.DeletedAt != "" {
+				return errPasswordSession
+			}
+			if len(options) > 0 && options[0].ActorType == "session" {
+				option := options[0]
+				var valid bool
+				now := time.Now()
+				// Forced first-password sessions are valid here; other account
+				// mutations correctly reject MustChangePassword sessions.
+				if option.UserID != id {
+					return errPasswordSession
+				}
+				if err := tx.QueryRow("SELECT EXISTS(SELECT 1 FROM sessions WHERE id=? AND user_id=? AND auth_version=? AND revoked_at='' AND expires_at>? AND last_active_at>?)", option.CredentialID, id, current.AuthVersion, persistedTime(now), persistedTime(now.Add(-sessionIdle))).Scan(&valid); err != nil {
+					return err
+				}
+				if !valid {
+					return errPasswordSession
+				}
+			}
+		}
 		result, err := tx.Exec("UPDATE users SET password_hash=?,must_change_password=0,auth_version=auth_version+1,version=version+1,updated_at=? WHERE id=? AND password_hash=?", encoded, persistedTime(time.Now()), id, before)
 		if err != nil {
 			return err

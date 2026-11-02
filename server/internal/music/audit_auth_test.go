@@ -13,7 +13,7 @@ import (
 
 func TestAuditHTTPContractsAndUploadBoundary(t *testing.T) {
 	a, _ := testAPI(t)
-	for _, entry := range []struct{ path, allow string }{{"/api/v2/health", "GET"}, {"/api/v2/playlists", "GET, POST"}, {"/api/v2/admin/settings", "GET, PUT"}} {
+	for _, entry := range []struct{ path, allow string }{{"/api/v2/health", "GET"}, {"/api/v2/playlists", "GET, POST"}, {"/api/v2/admin/settings", "GET, PUT, PATCH"}} {
 		w := callAPI(a, "OPTIONS", entry.path, "")
 		if w.Code != 405 || w.Header().Get("Allow") != entry.allow || !strings.Contains(w.Body.String(), "METHOD_NOT_ALLOWED") {
 			t.Fatal(entry, w.Code, w.Header(), w.Body)

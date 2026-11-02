@@ -56,8 +56,12 @@ func (a *API) backups(w http.ResponseWriter, r *http.Request) {
 			}
 			writeJSON(w, 202, job)
 		default:
-			writeError(w, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+			methodNotAllowed(w, r)
 		}
+		return
+	}
+	if path == "policy" && r.Method != "PUT" {
+		methodNotAllowed(w, r)
 		return
 	}
 	if path == "policy" && r.Method == "PUT" {
@@ -75,18 +79,21 @@ func (a *API) backups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	parts := strings.Split(path, "/")
+	if len(parts) == 2 && parts[0] == "jobs" && r.Method != "DELETE" {
+		methodNotAllowed(w, r)
+		return
+	}
 	if len(parts) == 2 && parts[0] == "jobs" && r.Method == "DELETE" {
-		a.store.backupMu.Lock()
-		if a.store.backupJob.ID != parts[1] {
-			a.store.backupMu.Unlock()
-			writeError(w, 404, "BACKUP_JOB_NOT_FOUND", "backup task not found")
+		if err := a.store.CancelBackupJob(parts[1], mutationOptions(r)); err != nil {
+			if errors.Is(err, errBackupJobNotFound) {
+				writeError(w, 404, "BACKUP_JOB_NOT_FOUND", "backup task not found")
+			} else if errors.Is(err, errResourceHidden) {
+				writeError(w, 403, "ADMIN_REQUIRED", "administrator identity required")
+			} else {
+				writeError(w, 500, "BACKUP_CANCEL_FAILED", "unable to cancel backup")
+			}
 			return
 		}
-		if a.store.backupCancel != nil {
-			a.store.backupJob.State = "cancelling"
-			a.store.backupCancel()
-		}
-		a.store.backupMu.Unlock()
 		w.WriteHeader(204)
 		return
 	}
@@ -154,5 +161,5 @@ func (a *API) backups(w http.ResponseWriter, r *http.Request) {
 		http.ServeContent(w, r, name, info.ModTime(), file)
 		return
 	}
-	writeError(w, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+	methodNotAllowed(w, r)
 }

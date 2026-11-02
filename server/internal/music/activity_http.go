@@ -26,7 +26,7 @@ func (a *API) systemLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != "GET" {
-		writeError(w, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+		methodNotAllowed(w, r)
 		return
 	}
 	values := r.URL.Query()
@@ -55,7 +55,7 @@ func (a *API) systemLogs(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "INVALID_LEVEL", "invalid log level")
 		return
 	}
-	categories := map[string]bool{"server": true, "http": true, "upload": true, "scan": true, "update": true}
+	categories := map[string]bool{"server": true, "http": true, "upload": true, "scan": true, "update": true, "mail": true, "tag": true}
 	if q.Category != "" && !categories[q.Category] {
 		writeError(w, 400, "INVALID_CATEGORY", "invalid log category")
 		return

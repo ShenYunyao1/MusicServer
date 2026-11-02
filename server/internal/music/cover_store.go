@@ -141,7 +141,7 @@ func (s *Store) savePlaylistEditor(id, name, description string, cover []byte, r
 func (a *API) playlistEditor(response http.ResponseWriter, request *http.Request, id string) {
 	create := id == "" && request.Method == http.MethodPost
 	if !create && request.Method != http.MethodPut {
-		writeError(response, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+		methodNotAllowed(response, request)
 		return
 	}
 	if !a.requireAccount(response, request) {

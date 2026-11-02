@@ -35,6 +35,11 @@ module.exports=async({page,audio})=>{
  await page.selectOption('#logCategory','upload');
  await page.waitForFunction(()=>document.querySelector('#systemLogRows').textContent.includes('校验完成'));
  assert.match(await page.locator('#systemLogRows').textContent(),/接收.*ms.*音频探测.*ms|音频探测.*ms.*接收.*ms/s);
+ for(const category of ['mail','tag']){
+  const response=page.waitForResponse(r=>r.url().includes('/api/v2/admin/logs?')&&new URL(r.url()).searchParams.get('category')===category);
+  await page.selectOption('#logCategory',category);assert.equal((await response).status(),200);await page.waitForFunction(()=>!systemLogs.busy);
+  assert.equal(await page.locator('#logCategory').inputValue(),category);assert.ok(!(await page.locator('#systemLogsStatus').textContent()).includes('INVALID_CATEGORY'));
+ }
  await page.click('#pauseSystemLogs');assert.equal(await page.evaluate(()=>systemLogs.paused),true);
  await page.setViewportSize({width:390,height:844});await page.waitForFunction(()=>document.querySelector('.main').getBoundingClientRect().left<=1&&document.querySelector('#sidebar').getBoundingClientRect().right<=1);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
  await page.setViewportSize({width:1440,height:1100});

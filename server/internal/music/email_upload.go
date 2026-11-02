@@ -1,10 +1,21 @@
 package music
 
 import (
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 )
+
+var errUploadSession = errors.New("upload login is no longer valid")
+
+func uploadSessionError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%w: %w", errUploadSession, err)
+}
 
 func verificationUploadRequest(r *http.Request) bool {
 	if r.Method != http.MethodPost && r.Method != http.MethodPut && r.Method != http.MethodPatch {
@@ -46,7 +57,7 @@ func (b *emailUploadBody) Read(data []byte) (int, error) {
 	check := b.unchecked <= 0
 	if check {
 		if err := validateAccountSession(b.store.db, b.auth); err != nil {
-			return 0, err
+			return 0, uploadSessionError(err)
 		}
 		if err := checkUploadEmailPolicy(b.store.db, b.auth.userID); err != nil {
 			return 0, err
@@ -60,20 +71,20 @@ func (b *emailUploadBody) Read(data []byte) (int, error) {
 			return 0, policyErr
 		}
 		if sessionErr := validateAccountSession(b.store.db, b.auth); sessionErr != nil {
-			return 0, sessionErr
+			return 0, uploadSessionError(sessionErr)
 		}
 	}
 	return n, err
 }
 
 func checkStageUploadActor(reader sqlReader, owner string, options []MutationOptions) error {
-	if err := checkActorOwner(reader, owner, options); err != nil {
-		return err
-	}
 	if len(options) > 0 && options[0].ActorType == "session" {
 		if err := validateAccountMutationSession(reader, options[0]); err != nil {
-			return err
+			return uploadSessionError(err)
 		}
+	}
+	if err := checkActorOwner(reader, owner, options); err != nil {
+		return err
 	}
 	return checkUploadEmailPolicy(reader, owner)
 }

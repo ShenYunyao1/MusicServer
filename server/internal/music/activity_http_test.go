@@ -45,4 +45,17 @@ func TestSystemLogsAreAdminOnlyAndNeverContainCredentials(t *testing.T) {
 	if bad := sessionRequest(api, token, "GET", "/api/v2/admin/logs?limit=9999", ""); bad.Code != 400 {
 		t.Fatal("unbounded journal listing allowed")
 	}
+	for category, code := range map[string]string{"mail": "mail.failed", "tag": "tag.batch_failed"} {
+		if err := journal.Emit(code, activity.Fields{}); err != nil {
+			t.Fatal(err)
+		}
+		response := sessionRequest(api, token, "GET", "/api/v2/admin/logs?category="+category, "")
+		if response.Code != 200 {
+			t.Fatal(category, response.Code, response.Body)
+		}
+		var filtered activity.Page
+		if err := json.Unmarshal(response.Body.Bytes(), &filtered); err != nil || len(filtered.Entries) != 1 || filtered.Entries[0].Category != category {
+			t.Fatal("category filter lost events", category, err, filtered)
+		}
+	}
 }

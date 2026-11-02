@@ -123,7 +123,7 @@ func (a *API) accountAuth(response http.ResponseWriter, request *http.Request) {
 	path := strings.TrimPrefix(request.URL.Path, "/api/v2/auth/")
 	if path == "login" {
 		if request.Method != "POST" {
-			writeError(response, 405, "method not allowed")
+			methodNotAllowed(response, request)
 			return
 		}
 		if !a.validOrigin(request) {
@@ -237,6 +237,10 @@ func (a *API) accountAuth(response http.ResponseWriter, request *http.Request) {
 			err = a.store.ChangePassword(user, body.OldPassword, body.NewPassword, mutationOptions(request))
 		}
 		if err != nil {
+			if errors.Is(err, errPasswordSession) {
+				writeError(response, 401, "AUTH_INVALID", "current login is no longer valid")
+				return
+			}
 			writeError(response, 400, "PASSWORD_FAILED", err.Error())
 			return
 		}
@@ -271,6 +275,10 @@ func (a *API) accountAuth(response http.ResponseWriter, request *http.Request) {
 		}
 		response.WriteHeader(204)
 	default:
+		if accountAuthAllow(path) != "" {
+			methodNotAllowed(response, request)
+			return
+		}
 		writeError(response, 404, "NOT_FOUND", "endpoint not found")
 	}
 }

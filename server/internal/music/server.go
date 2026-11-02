@@ -1179,7 +1179,7 @@ func (a *API) trackResource(response http.ResponseWriter, request *http.Request,
 	}
 	request.Body = http.MaxBytesReader(response, request.Body, limit+(1<<20))
 	if err := request.ParseMultipartForm(1 << 20); err != nil {
-		writeError(response, http.StatusBadRequest, "INVALID_RESOURCE", "invalid resource upload")
+		writeUploadBodyError(response, err, "INVALID_RESOURCE", "invalid resource upload")
 		return
 	}
 	defer request.MultipartForm.RemoveAll()
@@ -1191,7 +1191,7 @@ func (a *API) trackResource(response http.ResponseWriter, request *http.Request,
 	auth := authFromRequest(request)
 	guard := func(reader sqlReader) error {
 		if err := validateAccountSession(reader, auth); err != nil {
-			return err
+			return uploadSessionError(err)
 		}
 		return checkUploadEmailPolicy(reader, auth.userID)
 	}
@@ -1310,10 +1310,7 @@ func (a *API) upload(response http.ResponseWriter, request *http.Request) {
 	}
 	request.Body = http.MaxBytesReader(response, request.Body, maxUpload+(12<<20))
 	if err := request.ParseMultipartForm(8 << 20); err != nil {
-		if writeStorageError(response, err) {
-			return
-		}
-		writeError(response, 400, "invalid upload or file exceeds configured limit")
+		writeUploadBodyError(response, err, "INVALID_UPLOAD", "invalid upload or file exceeds configured limit")
 		return
 	}
 	defer request.MultipartForm.RemoveAll()
@@ -1387,10 +1384,12 @@ func (a *API) stageUpload(response http.ResponseWriter, request *http.Request) {
 	body := &countedUploadBody{ReadCloser: request.Body}
 	request.Body = body
 	if err := request.ParseMultipartForm(8 << 20); err != nil {
-		if writeStorageError(response, err) {
-			return
+		// Authentication/policy denial is already logged by the HTTP layer;
+		// it is not an audio-validation failure.
+		if errors.Is(err, errUploadSession) || errors.Is(err, errEmailVerificationRequired) {
+			received = true
 		}
-		writeError(response, http.StatusBadRequest, "INVALID_UPLOAD", "invalid upload or file exceeds configured limit")
+		writeUploadBodyError(response, err, "INVALID_UPLOAD", "invalid upload or file exceeds configured limit")
 		return
 	}
 	defer request.MultipartForm.RemoveAll()
