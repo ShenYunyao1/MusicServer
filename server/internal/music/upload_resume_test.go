@@ -50,6 +50,40 @@ func resumeCreate(t *testing.T, api *API, user User, size int) resumableUpload {
 	return task
 }
 
+func TestResumablePersistsOwnedTargetAndRejectsForeignTarget(t *testing.T) {
+	a, _ := testAPI(t)
+	alice, _ := readyMember(t, a, "target-alice")
+	bob, _ := readyMember(t, a, "target-bob")
+	for _, u := range []User{alice, bob} {
+		if err := a.store.PutPlaylist(Playlist{ID: u.Username, Name: "Target"}, MutationOptions{UserID: u.ID}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, target := range []string{alice.Username, "", bob.Username, "library"} {
+		w := resumeCall(a, alice, "POST", "", []byte(fmt.Sprintf(`{"name":"resume.wav","size":100,"target_playlist_id":%q}`, target)), "")
+		if target == bob.Username || target == "library" {
+			if w.Code != 404 {
+				t.Fatal("foreign target accepted", w.Code, w.Body)
+			}
+			continue
+		}
+		if w.Code != 201 {
+			t.Fatal(w.Code, w.Body)
+		}
+		var task resumableUpload
+		if err := json.Unmarshal(w.Body.Bytes(), &task); err != nil {
+			t.Fatal(err)
+		}
+		if task.TargetPlaylistID == nil || *task.TargetPlaylistID != target {
+			t.Fatal("target response lost", w.Body)
+		}
+		restored, err := readResume(a.store.db, task.ID)
+		if err != nil || restored.TargetPlaylistID == nil || *restored.TargetPlaylistID != target {
+			t.Fatal("target checkpoint lost", err)
+		}
+	}
+}
+
 func TestResumableCheckpointReplayAndRecovery(t *testing.T) {
 	api, root := testAPI(t)
 	user, _, _ := loginTestAccount(t, api.store, "admin")

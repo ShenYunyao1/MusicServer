@@ -38,21 +38,22 @@ type resumableChunk struct {
 }
 
 type resumableUpload struct {
-	ID          string            `json:"id"`
-	OwnerID     string            `json:"-"`
-	Name        string            `json:"name"`
-	Size        int64             `json:"size"`
-	Offset      int64             `json:"offset"`
-	ChunkSize   int               `json:"chunk_size"`
-	Chunks      []resumableChunk  `json:"chunks"`
-	State       string            `json:"state"`
-	CreatedAt   time.Time         `json:"created_at"`
-	ExpiresAt   time.Time         `json:"expires_at"`
-	StageID     string            `json:"stage_id,omitempty"`
-	Fields      map[string]string `json:"fields,omitempty"`
-	Attachments map[string]string `json:"attachments,omitempty"`
-	ReceiveMS   int64             `json:"receive_ms,omitempty"`
-	Preview     *UploadPreview    `json:"-"`
+	ID               string            `json:"id"`
+	OwnerID          string            `json:"-"`
+	TargetPlaylistID *string           `json:"target_playlist_id,omitempty"`
+	Name             string            `json:"name"`
+	Size             int64             `json:"size"`
+	Offset           int64             `json:"offset"`
+	ChunkSize        int               `json:"chunk_size"`
+	Chunks           []resumableChunk  `json:"chunks"`
+	State            string            `json:"state"`
+	CreatedAt        time.Time         `json:"created_at"`
+	ExpiresAt        time.Time         `json:"expires_at"`
+	StageID          string            `json:"stage_id,omitempty"`
+	Fields           map[string]string `json:"fields,omitempty"`
+	Attachments      map[string]string `json:"attachments,omitempty"`
+	ReceiveMS        int64             `json:"receive_ms,omitempty"`
+	Preview          *UploadPreview    `json:"-"`
 }
 
 // Identity and preview are persisted, but are not exposed by task responses.
@@ -63,10 +64,11 @@ type resumableCheckpoint struct {
 }
 
 type resumableFinish struct {
-	Fields      map[string]string `json:"fields"`
-	Lyrics      []byte            `json:"lyrics"`
-	Cover       []byte            `json:"cover"`
-	CoverSource string            `json:"cover_source"`
+	TargetPlaylistID *string           `json:"target_playlist_id"`
+	Fields           map[string]string `json:"fields"`
+	Lyrics           []byte            `json:"lyrics"`
+	Cover            []byte            `json:"cover"`
+	CoverSource      string            `json:"cover_source"`
 }
 
 var resumableCreateMu sync.Mutex
@@ -279,7 +281,7 @@ func (s *Store) recoverResume(task resumableUpload, verify bool) error {
 	return nil
 }
 
-func (s *Store) createResume(auth authContext, name string, size int64, fields, attachments map[string]string) (resumableUpload, error) {
+func (s *Store) createResume(auth authContext, name string, size int64, fields, attachments map[string]string, target ...*string) (resumableUpload, error) {
 	name = filepath.Base(strings.ReplaceAll(name, "\\", "/"))
 	if name == "." || len(name) > 255 || !audioExtensions[strings.ToLower(filepath.Ext(name))] || size <= 0 || size > s.Settings().MaxUploadBytes {
 		return resumableUpload{}, errors.New("unsupported audio name or configured upload size limit exceeded")
@@ -310,6 +312,9 @@ func (s *Store) createResume(auth authContext, name string, size int64, fields, 
 	}
 	now := time.Now().UTC()
 	task := resumableUpload{ID: id, OwnerID: auth.userID, Name: name, Size: size, ChunkSize: resumableChunkSize, Chunks: []resumableChunk{}, State: "uploading", CreatedAt: now, ExpiresAt: now.Add(resumableTTL), Fields: fields, Attachments: attachments}
+	if len(target) > 0 {
+		task.TargetPlaylistID = target[0]
+	}
 	releaseBudget, err := s.reserveTemporaryUpload(auth.userID, id, size)
 	if err != nil {
 		return resumableUpload{}, err
@@ -337,6 +342,9 @@ func (s *Store) createResume(auth authContext, name string, size int64, fields, 
 	}
 	err = s.transaction(func(tx *sql.Tx) error {
 		if err := checkResumeUploadActor(tx, auth); err != nil {
+			return err
+		}
+		if err := validateResumeTarget(tx, auth.userID, task.TargetPlaylistID); err != nil {
 			return err
 		}
 		rows, err := tx.Query("SELECT value FROM meta WHERE key LIKE 'upload_resume/%'")
@@ -496,6 +504,20 @@ func (s *Store) finishResume(ctx context.Context, auth authContext, task resumab
 	ctx = context.WithValue(ctx, uploadPhaseKey{}, func(phase string) { uploadPhases.Store(phaseKey, phase) })
 	if task.State == "canceled" {
 		return UploadPreview{}, errResourceHidden
+	}
+	if task.TargetPlaylistID == nil && input.TargetPlaylistID != nil {
+		task.TargetPlaylistID = input.TargetPlaylistID
+		if err := s.transaction(func(tx *sql.Tx) error {
+			if err := checkResumeUploadActor(tx, auth); err != nil {
+				return err
+			}
+			if err := validateResumeTarget(tx, auth.userID, task.TargetPlaylistID); err != nil {
+				return err
+			}
+			return saveResume(tx, task, s.temporaryLimits())
+		}); err != nil {
+			return UploadPreview{}, err
+		}
 	}
 	if task.State == "ready" {
 		if task.Preview == nil || !time.Now().Before(task.Preview.ExpiresAt) {
@@ -693,16 +715,17 @@ func (a *API) resumableUploads(w http.ResponseWriter, r *http.Request) bool {
 		switch r.Method {
 		case http.MethodPost:
 			var input struct {
-				Name        string            `json:"name"`
-				Size        int64             `json:"size"`
-				Fields      map[string]string `json:"fields"`
-				Attachments map[string]string `json:"attachments"`
+				Name             string            `json:"name"`
+				Size             int64             `json:"size"`
+				Fields           map[string]string `json:"fields"`
+				Attachments      map[string]string `json:"attachments"`
+				TargetPlaylistID *string           `json:"target_playlist_id"`
 			}
 			if err := decodeResumeJSON(w, r, 3<<20, &input); err != nil {
 				writeResumeError(w, err)
 				return true
 			}
-			task, err := a.store.createResume(auth, input.Name, input.Size, input.Fields, input.Attachments)
+			task, err := a.store.createResume(auth, input.Name, input.Size, input.Fields, input.Attachments, input.TargetPlaylistID)
 			if err != nil {
 				writeResumeError(w, err)
 			} else {

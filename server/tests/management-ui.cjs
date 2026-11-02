@@ -51,7 +51,8 @@ async function main() {
     }
     assert.ok(ready, serverLog);
     browser = await chromium.launch({ headless: true, ...(process.env.MUSIC_SERVER_BROWSER?{executablePath:process.env.MUSIC_SERVER_BROWSER}:{}) });
-    const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
+    const context = await browser.newContext({ viewport: { width: 1440, height: 1100 } });
+    const page = await context.newPage();
     const pageErrors = [];
     page.on('pageerror', error => {pageErrors.push(error.message);console.error('Browser error: '+error.stack)});
     await page.goto(base);

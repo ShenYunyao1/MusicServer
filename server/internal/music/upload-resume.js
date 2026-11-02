@@ -2,6 +2,7 @@
 
 const resumeChunkBytes = 4 * 1048576;
 const resumeRuns = new Map();
+const resumeObservedDrafts = new Map();
 let resumeWorkspaceEpoch = 0, resumeSaveTimer, resumeDatabasePromise, resumeQueueWrite = Promise.resolve();
 
 function resumeDatabase() {
@@ -24,16 +25,42 @@ const resumeQueueStorage = {
       request.onerror = () => reject(request.error);
     });
   },
-  async write(owner, records) {
+  async write(owner, records, previous=[]) {
     const db = await resumeDatabase();
     return new Promise((resolve, reject) => {
       const transaction = db.transaction('queues', 'readwrite');
-      transaction.objectStore('queues').put(records, owner);
+      const store=transaction.objectStore('queues'),request=store.get(owner);
+      request.onsuccess=()=>{try{store.put(mergeResumeDrafts(Array.isArray(request.result)?request.result:[],records,previous),owner)}catch(_){transaction.abort()}};
       transaction.oncomplete = resolve;
       transaction.onerror = transaction.onabort = () => reject(transaction.error || new Error('无法保存上传队列元数据'));
     });
   },
 };
+
+function mergeResumeDrafts(latest, records, previous){
+  const clone=value=>JSON.parse(JSON.stringify(value)),equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+  const same=(a,b)=>a.id===b.id||Boolean(a.resumeId&&b.resumeId&&a.resumeId===b.resumeId);
+  const patch=(current,before,next)=>{
+    const result={...(current||{})};
+    for(const key of new Set([...Object.keys(before||{}),...Object.keys(next||{})])){
+      if(['__proto__','constructor','prototype'].includes(key)||equal(before?.[key],next?.[key]))continue;
+      if(!Object.hasOwn(next,key)){delete result[key];continue}
+      const value=next[key];
+      if(value&&typeof value==='object'&&!Array.isArray(value))result[key]=patch(result[key],before?.[key],value);
+      else result[key]=value;
+    }
+    return result;
+  };
+  let result=clone(latest);
+  for(const old of previous)if(!records.some(row=>same(row,old)))result=result.filter(row=>!same(row,old));
+  for(const row of records){
+    const before=previous.find(old=>same(old,row)),index=result.findIndex(item=>same(item,row));
+    if(before&&equal(before,row)||before&&index<0)continue;
+    if(index<0)result.push(clone(row));
+    else {const id=result[index].id;result[index]=patch(result[index],before||{},row);result[index].id=id}
+  }
+  return result;
+}
 
 function resumeFile(upload) {
   return typeof upload.sourceFile?.slice === 'function' ? upload.sourceFile : typeof upload.file?.slice === 'function' ? upload.file : null;
@@ -52,6 +79,7 @@ function resumeDraft(upload) {
     ignoreAutomaticCover: Boolean(upload.ignoreAutomaticCover), ignoreAutomaticLyrics: Boolean(upload.ignoreAutomaticLyrics),
     detailsOpen: Boolean(upload.detailsOpen), editorOpen: Boolean(upload.editorOpen),
     targetPlaylistID: upload.targetPlaylistID||'',targetLocked:Boolean(upload.targetLocked||upload.resumeId||upload.stageId||upload.commitResult),playlistAssigned:Boolean(upload.playlistAssigned),
+    targetConfirmed:!upload.targetNeedsSelection,
     commitResult:upload.commitResult?.track?.id?{track:{id:upload.commitResult.track.id},duplicate:Boolean(upload.commitResult.duplicate)}:undefined,
     assignmentError:upload.assignmentError||'',
   };
@@ -63,8 +91,11 @@ function persistResumeQueue() {
   if (!owner) return Promise.resolve(false);
   // A cancellation flag interrupts the sender before DELETE is acknowledged.
   // Keep its draft until the row is actually removed, including slow/failed DELETEs.
-  const records = state.uploads.filter(upload => !upload.resumeCompleted && !['完成', '已去重'].includes(upload.status)||upload.commitResult&&upload.targetPlaylistID&&!upload.playlistAssigned).map(resumeDraft);
-  resumeQueueWrite = resumeQueueWrite.catch(() => {}).then(() => resumeQueueStorage.write(owner, records)).then(() => true, error => {
+  const records = state.uploads.filter(upload => !upload.resumeCompleted && !['完成', '已去重'].includes(upload.status)||upload.commitResult&&(upload.targetNeedsSelection||upload.targetPlaylistID&&!upload.playlistAssigned)).map(resumeDraft);
+  resumeQueueWrite = resumeQueueWrite.catch(() => {}).then(async() => {
+    await resumeQueueStorage.write(owner,records,resumeObservedDrafts.get(owner)||[]);
+    resumeObservedDrafts.set(owner,JSON.parse(JSON.stringify(records)));return true;
+  }).then(() => true, error => {
     if (state.user?.id === owner) setStatus('队列元数据未能保存；刷新后编辑和附件需重新选择：' + error.message, 'error');
     return false;
   });
@@ -122,6 +153,7 @@ function validateResumeTask(task) {
 function applyResumeTask(upload, value) {
   const task = validateResumeTask(value);
   upload.resumeId = task.id; upload.resumeTask = task;
+  if(typeof task.target_playlist_id==='string'&&!upload.commitResult){upload.targetPlaylistID=task.target_playlist_id;upload.targetNeedsSelection=false;upload.targetLocked=true}
   upload.needsSourceFile = !resumeFile(upload);
   upload.progress = { ...(upload.progress || {}), phase: 'paused', loaded: task.offset, total: task.size, rate: 0 };
   return task;
@@ -295,7 +327,7 @@ function resumeStageUpload(upload) {
         const file = resumeFile(upload);
         if (!file) throw new Error('请选择原文件后继续');
         const attachments = {}; for (const kind of ['cover', 'lyrics']) if (upload[kind + 'File']?.file) attachments[kind] = upload[kind + 'File'].file.name;
-        task = await resumeJSON('', 'POST', { name: file.name, size: file.size, fields: upload.edits, attachments }, owner, epoch);
+        task = await resumeJSON('', 'POST', { name: file.name, size: file.size, fields: upload.edits, attachments, target_playlist_id:upload.targetPlaylistID||'' }, owner, epoch);
       } else task = await resumeJSON('/' + upload.resumeId, 'GET', undefined, owner, epoch);
       // Pause/cancel may arrive while creation is in flight. Retain the server
       // identity before honoring that flag so continue reuses it and cancel can
@@ -337,7 +369,7 @@ function resumeStageUpload(upload) {
       upload.flowReleaseTransfer?.();
       const missing = Object.keys(upload.resumeMissingAttachments || {}).filter(kind => !upload[kind + 'File']);
       if (missing.length) throw new Error('封面或歌词附件需要重新选择，或明确选择不使用缺失附件');
-      const input = { fields: upload.edits };
+      const input = { fields: upload.edits, target_playlist_id:upload.targetPlaylistID||'' };
       if (upload.lyricsFile?.file) input.lyrics = await resumeBase64(upload.lyricsFile.file, 2 * 1048576, '歌词附件');
       if (upload.coverFile?.file) { input.cover = await resumeBase64(upload.coverFile.file, 8 * 1048576, '封面附件'); input.cover_source = upload.coverFile.manual ? 'manual' : 'external'; }
       resumeGuard(owner, epoch, upload); upload.status = '等待校验'; upload.progress = { phase: 'waiting', loaded: task.size, total: task.size, rate: 0, waitStarted: performance.now(), sendMS: performance.now() - started }; renderUploads();
@@ -378,7 +410,7 @@ async function cancelResumeUpload(upload, restarting = false) {
   }
   if (!resumeCurrent(owner, epoch, upload)) return;
   if (restarting) resumeGuard(owner, epoch, upload);
-  upload.resumeId = null; upload.resumeTask = null; upload.stageId = null; upload.preview = null; upload.progress = null;
+  upload.resumeId = null; upload.resumeTask = null; upload.stageId = null; upload.preview = null; upload.progress = null;upload.targetLocked=false;upload.targetNeedsSelection=false;
   upload.resumeCanceled = false; upload.resumePaused = false; upload.status = '待暂存'; await persistResumeQueue();
 }
 
@@ -399,9 +431,12 @@ function clearResumeWorkspace() {
 async function restoreResumeQueue() {
   const owner = state.user?.id, epoch = resumeWorkspaceEpoch;
   if (!owner || state.user.must_change_password) return;
+  await resumeQueueWrite;
+  if (!resumeCurrent(owner, epoch)) return;
   let records = [], remote;
   try { records = await resumeQueueStorage.read(owner); } catch (error) { if (resumeCurrent(owner, epoch)) setStatus('队列编辑恢复失败：' + error.message, 'error'); }
   if (!resumeCurrent(owner, epoch)) return;
+  resumeObservedDrafts.set(owner,JSON.parse(JSON.stringify(records)));
   try { remote = await resumeJSON('', 'GET', undefined, owner, epoch); } catch (error) { if (resumeCurrent(owner, epoch)) setStatus('上传任务暂时无法恢复：' + error.message, 'error'); return; }
   if (!resumeCurrent(owner, epoch)) return;
   const items = remote?.items || [], byTask = new Map(records.filter(row => row.resumeId).map(row => [row.resumeId, row]));
@@ -414,7 +449,8 @@ async function restoreResumeQueue() {
     const upload = { ...describeFile(file, ++state.batch), id: saved.id || browserUUID(), path: saved.path || '', directory: saved.directory || '', file, sourceFile: null, needsSourceFile: true, edits: saved.edits || {}, preview: null, localPreview: null, localPromise: null, localStatus: '', stageId: null, status: '选择原文件继续', error: '', lyricsFile: null, coverFile: null, resumePaused: true, resumeMissingAttachments: saved.attachments || task?.attachments || {}, ignoreAutomaticCover: Boolean(saved.ignoreAutomaticCover), ignoreAutomaticLyrics: Boolean(saved.ignoreAutomaticLyrics), detailsOpen: saved.detailsOpen, editorOpen: saved.editorOpen };
     for (const name of ['title', 'artist', 'album', 'genre', 'comment', 'lyrics']) upload[name] = upload.edits[name] || '';
     if (saved.tagDraft) upload.tagDraft = JSON.parse(JSON.stringify(saved.tagDraft));
-    upload.targetPlaylistID=saved.targetPlaylistID||'';upload.targetLocked=Boolean(saved.targetLocked||task||saved.resumeId||saved.commitResult);upload.playlistAssigned=Boolean(saved.playlistAssigned);
+    const remoteTarget=typeof task?.target_playlist_id==='string',known=remoteTarget||saved.targetConfirmed===true||Boolean(saved.targetPlaylistID);
+    upload.targetPlaylistID=remoteTarget&&!saved.commitResult?task.target_playlist_id:saved.targetPlaylistID||'';upload.targetNeedsSelection=!known;upload.targetLocked=known&&Boolean(saved.targetLocked||task||saved.resumeId||saved.commitResult);upload.playlistAssigned=Boolean(saved.playlistAssigned);
     state.uploads.push(upload);
     if(saved.commitResult?.track?.id){upload.commitResult=saved.commitResult;upload.resumeCompleted=true;upload.needsSourceFile=false;upload.status=saved.commitResult.duplicate?'已去重':'完成';upload.assignmentError=saved.assignmentError||'加入目标歌单尚未完成';upload.error='已入库，仅加入歌单待重试';if(saved.resumeId){upload.resumeId=saved.resumeId;pendingReceiptCleanup.push(upload)}continue}
     if (task) {

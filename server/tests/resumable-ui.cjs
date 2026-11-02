@@ -81,6 +81,23 @@ function harness() {
 
 if (require.main === module) {
   const test = require('node:test');
+  test('queue merge preserves other tabs edits and rows, and never resurrects their deletion',()=>{
+    const h=harness(),base=[{id:'one',edits:{title:'old',artist:'old'},targetPlaylistID:''}],latest=[{id:'one',edits:{title:'from tab A',artist:'old'},targetPlaylistID:'a'},{id:'two',edits:{title:'new'}}];
+    const unchanged=h.context.mergeResumeDrafts(latest,base,base);assert.deepEqual(h.clone(unchanged),latest);
+    const edited=[{...base[0],edits:{...base[0].edits,artist:'from tab B'}}];
+    const merged=h.context.mergeResumeDrafts(latest,edited,base);assert.deepEqual(h.clone(merged[0]),{...latest[0],edits:{title:'from tab A',artist:'from tab B'}});assert.equal(merged.length,2);
+    assert.deepEqual(h.clone(h.context.mergeResumeDrafts([],edited,base)),[],'stale edit must not resurrect deleted task');
+    assert.deepEqual(h.clone(h.context.mergeResumeDrafts(latest,[],base)),[latest[1]],'delete only observed row');
+  });
+  test('canceling a checkpoint unlocks its upload target',async()=>{
+    const h=harness(),upload=h.upload(Buffer.alloc(12));upload.targetLocked=true;
+    await h.context.resumeStageUpload(upload);await h.context.cancelResumeUpload(upload);assert.equal(upload.targetLocked,false);
+  });
+  test('remote-only restoration retains saved target and flags unknown legacy target',async()=>{
+    const h=harness();h.tasks.set('a'.repeat(32),{id:'a'.repeat(32),name:'one.wav',size:10,offset:0,chunk_size:4194304,chunks:[],state:'uploading',target_playlist_id:'my-target'});
+    h.tasks.set('b'.repeat(32),{id:'b'.repeat(32),name:'two.wav',size:10,offset:0,chunk_size:4194304,chunks:[],state:'uploading'});
+    await h.context.restoreResumeQueue();assert.equal(h.state.uploads[0].targetPlaylistID,'my-target');assert.equal(h.state.uploads[0].targetNeedsSelection,false);assert.equal(h.state.uploads[1].targetNeedsSelection,true);
+  });
   test('resumable upload reads bounded chunks and reports cumulative confirmed progress', async () => {
     const h = harness(), upload = h.upload(Buffer.alloc(9 * 1048576, 5));
     const preview = await h.context.resumeStageUpload(upload);
@@ -214,6 +231,8 @@ if (require.main === module) {
 module.exports = async function resumableBrowserChecks({ page, directory }) {
   await page.goto(page.url().split('#')[0] + '#/uploads');
   await page.check('#uploadReview');
+  const target=await page.evaluate(async()=>{const p=await api('playlists','POST',{id:browserUUID(),name:'Resumed upload destination',track_ids:[]});await refreshCore();renderUploads();return p.id});
+  await page.selectOption('#uploadTargetPlaylist',target);
   const bytes = Buffer.alloc(5 * 1048576, 0);
   bytes.write('RIFF'); bytes.writeUInt32LE(bytes.length - 8, 4); bytes.write('WAVEfmt ', 8); bytes.writeUInt32LE(16, 16); bytes.writeUInt16LE(1, 20); bytes.writeUInt16LE(1, 22); bytes.writeUInt32LE(8000, 24); bytes.writeUInt32LE(16000, 28); bytes.writeUInt16LE(2, 32); bytes.writeUInt16LE(16, 34); bytes.write('data', 36); bytes.writeUInt32LE(bytes.length - 44, 40);
   await page.locator('#uploadInput').setInputFiles({ name: 'resumable-browser.wav', mimeType: 'audio/wav', buffer: bytes });
@@ -228,6 +247,7 @@ module.exports = async function resumableBrowserChecks({ page, directory }) {
   await page.waitForFunction(() => state.uploads.find(x => x.file.name === 'resumable-browser.wav')?.resumeTask?.offset === 4194304);
   await page.locator('[data-resume-pause]').last().click(); await delayed?.abort();
   await page.waitForFunction(() => state.uploads.find(x => x.file.name === 'resumable-browser.wav')?.status === '已暂停');
+  await verifyRemoteTarget(page,target);
   await page.evaluate(() => persistResumeQueue()); await page.reload();
   await page.waitForFunction(() => state.uploads.some(x => x.file.name === 'resumable-browser.wav' && x.needsSourceFile));
   const row = page.locator('.upload-item').filter({ hasText: 'resumable-browser.wav' });
@@ -243,5 +263,44 @@ module.exports = async function resumableBrowserChecks({ page, directory }) {
   assert.ok((await row.textContent()).includes('服务端已校验'));
   await page.screenshot({ path: path.join(directory, 'resumable-upload.png'), fullPage: true });
   await row.locator('[data-remove-upload]').click();
+  await verifyMultiTabDrafts(page,bytes);
   console.log('Resumable browser checks passed: confirmed prefix, pause, metadata reload, reselect, finish preview and cancellation.');
 };
+
+async function verifyRemoteTarget(page,target){
+ const context=await page.context().browser().newContext({storageState:await page.context().storageState()});
+ try{
+  const other=await context.newPage();await other.goto(page.url());
+  await other.waitForFunction(()=>state.uploads.some(u=>u.file.name==='resumable-browser.wav'));
+  const restored=await other.evaluate(()=>{const u=state.uploads.find(u=>u.file.name==='resumable-browser.wav');return {target:u.targetPlaylistID,needs:u.targetNeedsSelection}});
+  assert.deepEqual(restored,{target,needs:false},'fresh browser context must recover server target without IndexedDB');
+  const legacy=await other.evaluate(async()=>api('uploads/resumable','POST',{name:'legacy-target.wav',size:100}));
+  await other.reload();await other.waitForFunction(()=>state.uploads.some(u=>u.file.name==='legacy-target.wav'));
+  assert.equal(await other.evaluate(()=>state.uploads.find(u=>u.file.name==='legacy-target.wav').targetNeedsSelection),true);
+  await other.selectOption('#uploadTargetPlaylist',target);
+  assert.equal(await other.evaluate(()=>state.uploads.find(u=>u.file.name==='legacy-target.wav').targetNeedsSelection),false);
+  await other.evaluate(async id=>api('uploads/resumable/'+id,'DELETE'),legacy.id);
+ }finally{await context.close()}
+ console.log('Cross-device target recovery passed; legacy unknown targets require explicit choice.');
+}
+
+async function verifyMultiTabDrafts(page,bytes){
+ const filename='multitab-draft.wav';
+ await page.locator('#uploadInput').setInputFiles({name:filename,mimeType:'audio/wav',buffer:bytes.subarray(0,844)});
+ await page.waitForFunction(name=>state.uploads.some(u=>u.file.name===name&&!u.localPromise),filename);
+ await page.evaluate(async name=>{const u=state.uploads.find(u=>u.file.name===name);u.edits.title='original';await persistResumeQueue()},filename);
+ const second=await page.context().newPage();
+ try{
+  await second.goto(page.url().split('#')[0]+'#/uploads');
+  await second.waitForFunction(name=>state.uploads.some(u=>u.file.name===name),filename);
+  await page.evaluate(async name=>{state.uploads.find(u=>u.file.name===name).edits.title='tab A title';await persistResumeQueue()},filename);
+  await second.evaluate(async name=>{state.uploads.find(u=>u.file.name===name).edits.artist='tab B artist';renderUploads();await persistResumeQueue()},filename);
+  const saved=await page.evaluate(async name=>(await resumeQueueStorage.read(state.user.id)).find(u=>u.name===name),filename);
+  assert.equal(saved.edits.title,'tab A title');assert.equal(saved.edits.artist,'tab B artist');
+  await page.evaluate(async name=>{const u=state.uploads.find(u=>u.file.name===name);await removeUpload(u)},filename);
+  await second.evaluate(async()=>{renderUploads();await persistResumeQueue()});
+  const remaining=await page.evaluate(async name=>(await resumeQueueStorage.read(state.user.id)).some(u=>u.name===name),filename);
+  assert.equal(remaining,false,'stale tab render resurrected deleted draft');
+ }finally{await second.close()}
+ console.log('Real IndexedDB multi-tab merge passed: independent metadata edits retained; stale render cannot restore a deleted row.');
+}

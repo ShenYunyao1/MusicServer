@@ -9,8 +9,8 @@ uploadFlowControls.after(uploadBatchControls);
 const uploadDestination=document.createElement('section');uploadDestination.className='panel upload-destination';uploadDestination.id='uploadDestination';uploadDestination.setAttribute('aria-label','本次上传位置');uploadDestination.innerHTML='<div><h2>本次上传到</h2><p>选择自己的歌单，曲目入库后自动加入。已开始的任务保留原目标。</p></div><div class="upload-destination-controls"><select id="uploadTargetPlaylist" class="select" aria-label="本次上传到"><option value="">仅加入曲库</option></select><button id="createUploadPlaylist" type="button" class="btn">新建歌单</button><a id="openUploadPlaylist" hidden>打开目标歌单</a></div>';$('uploadZone').before(uploadDestination);
 const uploadTargetSearch=document.createElement('input');uploadTargetSearch.id='uploadTargetSearch';uploadTargetSearch.placeholder='搜索自己的歌单';uploadTargetSearch.setAttribute('aria-label','搜索目标歌单');uploadDestination.append(uploadTargetSearch);
 const uploadTargetPages=document.createElement('div');uploadTargetPages.className='actions';uploadTargetPages.id='uploadTargetPages';uploadDestination.append(uploadTargetPages);
-function uploadTargetMutable(u){return !u.targetLocked&&!u.resumeId&&!u.stageId&&!u.commitResult&&!u.inFlight&&uploadFlowPending(u)}
-function setUploadTarget(target){uploadTargetCatalog.selected=target;uploadTargetCatalog.hasSelection=true;for(const u of state.uploads.filter(uploadTargetMutable))u.targetPlaylistID=target;void persistResumeQueue();renderUploads()}
+function uploadTargetMutable(u){return !u.inFlight&&(u.targetNeedsSelection||!u.targetLocked&&!u.resumeId&&!u.stageId&&!u.commitResult&&uploadFlowPending(u))}
+function setUploadTarget(target){uploadTargetCatalog.selected=target;uploadTargetCatalog.hasSelection=true;for(const u of state.uploads.filter(uploadTargetMutable)){u.targetPlaylistID=target;u.targetNeedsSelection=false;if(u.commitResult){u.playlistAssigned=!target;u.assignmentError=target?'加入目标歌单尚未完成':'';u.error=u.assignmentError}}void persistResumeQueue();renderUploads()}
 async function createUploadTarget(name){
  const owner=state.user?.id,epoch=resumeWorkspaceEpoch;name=name.trim();if(!name||name.length>200)throw new Error('请输入1–200字的歌单名称');
  const p=await api('playlists','POST',{id:browserUUID(),name,track_ids:[]});if(!uploadFlowCurrent(owner,epoch))return;
@@ -70,7 +70,7 @@ parseLocalUpload=function(upload){if(uploadParseTasks.has(upload)){const pending
 
 async function assignUploadResults(items,owner=state.user?.id,epoch=resumeWorkspaceEpoch){
  const groups=new Map();
- for(const u of items){if(!u.commitResult?.track?.id||!u.targetPlaylistID||u.playlistAssigned)continue;if(!groups.has(u.targetPlaylistID))groups.set(u.targetPlaylistID,[]);groups.get(u.targetPlaylistID).push(u)}
+ for(const u of items){if(u.targetNeedsSelection||!u.commitResult?.track?.id||!u.targetPlaylistID||u.playlistAssigned)continue;if(!groups.has(u.targetPlaylistID))groups.set(u.targetPlaylistID,[]);groups.get(u.targetPlaylistID).push(u)}
  for(const[id,uploads]of groups){
   for(let i=0;i<uploads.length;i+=100){if(!uploadFlowCurrent(owner,epoch))return;const batch=uploads.slice(i,i+100);
    try{for(let retry=0;;retry++){try{const result=await api('playlists/'+encodeURIComponent(id));if(!uploadFlowCurrent(owner,epoch))return;const p=result.playlist||result;if(p.read_only||p.system||p.owner_id!==owner)throw new Error('目标歌单已删除或不可编辑');await api('playlists/'+encodeURIComponent(id)+'/tracks','POST',{track_ids:[...new Set(batch.map(u=>u.commitResult.track.id))]},undefined,p.version);break}catch(error){if(retry===0&&error.status===409)continue;throw error}}
@@ -89,8 +89,8 @@ startUploadFlow=async function(items=state.uploads.filter(uploadFlowPending)){
  await uploadBatchStart(items);if(uploadFlowCurrent(owner,epoch))await assignUploadResults(items,owner,epoch);
 };
 const uploadBatchConfirm=confirmUpload;
-confirmUpload=async function(upload){const owner=state.user?.id,epoch=resumeWorkspaceEpoch;lockUploadTarget(upload);const result=await uploadBatchConfirm(upload);if(uploadFlowCurrent(owner,epoch)&&!state.uploadBusy)await assignUploadResults([upload],owner,epoch);return result};
-function lockUploadTarget(upload){if(upload.targetLocked)return;if(upload.targetPlaylistID===undefined)upload.targetPlaylistID=$('uploadTargetPlaylist').value==='__mixed__'?'':$('uploadTargetPlaylist').value;upload.targetLocked=true;void persistResumeQueue()}
+confirmUpload=async function(upload){const owner=state.user?.id,epoch=resumeWorkspaceEpoch;lockUploadTarget(upload);if(upload.resumeId&&upload.resumeTask?.target_playlist_id==null){await resumeJSON('/'+upload.resumeId+'/finish','POST',{target_playlist_id:upload.targetPlaylistID||''},owner,epoch);if(!uploadFlowCurrent(owner,epoch))return}const result=await uploadBatchConfirm(upload);if(uploadFlowCurrent(owner,epoch)&&!state.uploadBusy)await assignUploadResults([upload],owner,epoch);return result};
+function lockUploadTarget(upload){if(upload.targetNeedsSelection)throw new Error('恢复任务缺少原目标，请先确认上传到哪个歌单，或明确选择“仅加入曲库”。');if(upload.targetLocked)return;if(upload.targetPlaylistID===undefined)upload.targetPlaylistID=$('uploadTargetPlaylist').value==='__mixed__'?'':$('uploadTargetPlaylist').value;upload.targetLocked=true;void persistResumeQueue()}
 const uploadBatchResumeStage=resumeStageUpload;
 resumeStageUpload=async function(upload){lockUploadTarget(upload);return uploadBatchResumeStage(upload)};
 const uploadBatchConfirmAll=confirmUploads;
@@ -111,6 +111,7 @@ renderUploads=function(){
  const target=(select.value==='__mixed__'?'':select.value)||state.uploads.find(u=>u.targetPlaylistID&&u.playlistAssigned)?.targetPlaylistID,link=$('openUploadPlaylist');link.hidden=!target;if(target)link.href='#/playlists/'+encodeURIComponent(target);
  for(const u of visibleUploadItems()){if(!u.assignmentError)continue;const row=document.querySelector('[data-upload-id="'+u.id+'"] .upload-meta');if(row){const note=document.createElement('p');note.className='status error';note.textContent='音频已入库，仅歌单添加待重试。';row.append(note)}}
  for(const u of visibleUploadItems()){if(u.targetPlaylistID===undefined&&uploadTargetMutable(u))u.targetPlaylistID=select.value==='__mixed__'?'':select.value;const row=document.querySelector('[data-upload-id="'+u.id+'"] .upload-meta');if(!row)continue;const note=document.createElement('p');note.className='status upload-task-target';note.textContent='上传到：'+(u.targetPlaylistID?uploadTargetCatalog.names.get(u.targetPlaylistID)||'已选歌单':'仅加入曲库')+(uploadTargetMutable(u)?'':' · 目标已固定');row.append(note);if(u.assignmentError){const change=document.createElement('button');change.type='button';change.className='btn small';change.textContent='改为当前目标并重试';change.disabled=busy;change.onclick=()=>run(async()=>{u.targetPlaylistID=select.value==='__mixed__'?'':select.value;u.playlistAssigned=false;u.assignmentError='';if(!u.targetPlaylistID){u.playlistAssigned=true;u.error=''}await persistResumeQueue();await assignUploadResults([u])});row.append(change)}}
+ for(const u of visibleUploadItems().filter(u=>u.targetNeedsSelection)){const row=document.querySelector('[data-upload-id="'+u.id+'"] .upload-meta');if(!row)continue;const note=row.querySelector('.upload-task-target');if(note)note.textContent='旧任务未保存原目标，请选择并确认上传位置。';const confirm=makeButton('确认使用当前目标',()=>setUploadTarget(select.value==='__mixed__'?'':select.value),'btn small');confirm.disabled=busy;row.append(confirm)}
  renderUploadPager();
 };
 renderUploads();
