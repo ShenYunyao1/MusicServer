@@ -55,7 +55,7 @@ for (const [label,pages] of groups) {
   const group = document.createElement('div'); group.className = 'nav-group';
   if (label === '管理') group.dataset.admin = 'true';
   const heading = document.createElement('p'); heading.className = 'nav-heading'; heading.textContent = label; group.append(heading);
-  for (const page of pages) {
+  for (const page of pages.filter(page=>page!=='listening'||listeningAvailable())) {
     const button = nav.querySelector('[data-page="'+page+'"]');
     button.querySelector('.nav-label').textContent = titles[page];button.removeAttribute('title');button.setAttribute('aria-label',titles[page]);
     button.querySelector('.nav-icon').innerHTML=sidebarSVG(navIcons[page]);
@@ -180,6 +180,7 @@ async function restoreWorkspaceRoute() {
   if(path[0]==='admin'&&path[1]==='stats'&&path.length===2)page='stats';
   try {
     if(!page || (adminPages.has(page)||path[0]==='admin')&&!isAdministrator())throw new Error('页面不存在或当前账户无权访问。');
+    if(page==='listening'&&!listeningAvailable())throw new Error('当前版本尚未启用听歌统计，请完成数据库升级。');
     state.statsScope=path[0]==='admin'?'admin':'self';
     state.statsUserID=page==='stats'&&state.statsScope==='admin'?new URLSearchParams(location.hash.split('?')[1]||'').get('user')||'':'';
     renderStatsUsers();

@@ -2,7 +2,7 @@
 let currentListening=null;
 const listeningRequests=new Set();
 function listeningNow(){return performance.now()}
-function newListeningSession(track){finishListeningSession();if(!state.user||!track?.id)return;currentListening={id:browserUUID(),track:track.id,owner:state.user.id,epoch:typeof resumeWorkspaceEpoch==='number'?resumeWorkspaceEpoch:0,played:0,minimum:30000,started:false,counted:false,active:false,wall:0,position:0,busy:false,attempts:0,retryAt:0,ended:false};submitListening(currentListening)}
+function newListeningSession(track){finishListeningSession();if(document.documentElement.dataset.listeningEnabled!=='true'||!state.user||!track?.id)return;currentListening={id:browserUUID(),track:track.id,owner:state.user.id,epoch:typeof resumeWorkspaceEpoch==='number'?resumeWorkspaceEpoch:0,played:0,minimum:30000,started:false,counted:false,active:false,wall:0,position:0,busy:false,attempts:0,retryAt:0,ended:false};submitListening(currentListening)}
 function listeningOwner(s){return s.owner===state.user?.id&&s.epoch===(typeof resumeWorkspaceEpoch==='number'?resumeWorkspaceEpoch:0)}
 async function submitListening(s){
  if(!listeningOwner(s)||s.busy||s.counted||s.attempts>=3||listeningRequests.size>=4||listeningNow()<s.retryAt||s.started&&s.played<s.minimum)return;

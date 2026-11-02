@@ -2,7 +2,7 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
 const source=fs.readFileSync(path.join(__dirname,'../internal/music/listening-ui.js'),'utf8');
 function deferred(){let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve}}
-function fixture(hash='#/listening'){
+function fixture(hash='#/listening',enabled=true){
  const ids=new Map(),requests=[],played=[],details=[],menus=[],added=[];
  class Element{
   constructor(){this.children=[];this.attributes={};this.dataset={};this.value='';this.textContent='';this.disabled=false;this.className=''}
@@ -11,11 +11,16 @@ function fixture(hash='#/listening'){
   append(...items){this.children.push(...items)}replaceChildren(...items){this.children=items}setAttribute(name,value){this.attributes[name]=String(value)}
  }
  const nav=new Element(),content=new Element();
- const c={document:{createElement:()=>new Element(),querySelector:selector=>selector==='.nav'?nav:content},$:id=>ids.get(id),location:{hash},state:{user:{id:'alice'},page:'listening'},resumeWorkspaceEpoch:1,AbortController,URLSearchParams,setTimeout,clearTimeout,console,
+ const c={document:{documentElement:{dataset:{listeningEnabled:String(enabled)}},createElement:()=>new Element(),querySelector:selector=>selector==='.nav'?nav:content},$:id=>ids.get(id),location:{hash},state:{user:{id:'alice'},page:'listening'},resumeWorkspaceEpoch:1,AbortController,URLSearchParams,setTimeout,clearTimeout,console,
  makeButton:(label,action,cls)=>{const button=new Element();button.textContent=label;button.onclick=action;button.className=cls;return button},
  fetch:(url,options)=>{const pending=deferred();requests.push({url,options,pending});return pending.promise},playTrack:t=>played.push(t),openTrackDetails:t=>details.push(t),showContextMenu:(_,items)=>menus.push(items),openAddTracks:ids=>added.push(ids),loadCover(){},setLoggedOut:()=>{throw new Error('stale response logged out the replacement owner')}};
  vm.createContext(c);vm.runInContext(source,c);c.setupListeningPage();return {c,ids,requests,played,details,menus,added,get:id=>ids.get(id),respond(index,page,status=200){requests[index].pending.resolve({ok:status===200,status,json:async()=>page})}};
 }
+
+test('schema-8 bridge registers no history page and performs no statistics requests',async()=>{
+ const f=fixture('#/listening',false);assert.equal(f.get('page-listening'),undefined);
+ await assert.rejects(f.c.loadListeningPage(),/尚未启用/);assert.equal(f.requests.length,0);
+});
 test('page route, both pagers and page size/range changes retain filters and reset offset',async()=>{
  const f=fixture('#/listening?range=7d&q=artist&limit=30&offset=30'),pending=f.c.loadListeningPage();
  assert.match(f.requests[0].url,/range=7d/);assert.match(f.requests[0].url,/offset=30/);assert.match(f.requests[0].url,/limit=30/);

@@ -30,6 +30,21 @@ func currentCapabilities() workerCapabilities {
 	return workerCapabilities{Format: 1, Version: version.Version, Commit: commit, Schemas: []int{7, 8, 9}, Migrations: []schemaMigration{{From: 7, To: 8}, {From: 8, To: 9}}}
 }
 
+// ReleaseCapabilities describes the signed package. It is not the root-owned
+// live capability file, which only the independent worker writes.
+func ReleaseCapabilities() ([]byte, error) { return json.Marshal(currentCapabilities()) }
+
+func ValidateReleaseCapabilities(data []byte, identity Manifest, source, target int) error {
+	c, err := decodeCapabilities(data)
+	if err != nil {
+		return err
+	}
+	if c.Version != identity.Version || c.Commit != identity.Commit || !c.supports(source, target) {
+		return errors.New("bridge updater capabilities do not match identity or required migration")
+	}
+	return nil
+}
+
 func (c workerCapabilities) supports(source, target int) bool {
 	if c.Format != 1 {
 		return false

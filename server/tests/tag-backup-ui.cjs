@@ -18,7 +18,7 @@ print(json.dumps(result))`;
 }
 
 module.exports=async function({page,browser,base,directory}){
- const health=await(await fetch(base+'/api/v2/health')).json();assert.equal(health.schema,8,'This acceptance requires the isolated schema-8 preview');
+ const health=await(await fetch(base+'/api/v2/health')).json();assert.ok([8,9].includes(health.schema),'This acceptance requires a supported tag schema');
  await page.evaluate(async()=>{
   const track=state.tracks[0];
   const publicTag=await api('tags','POST',{scope:'public',group_id:'genre',name:'Backup public',aliases:['Backup alias']});
@@ -29,9 +29,9 @@ module.exports=async function({page,browser,base,directory}){
   await api('saved-track-filters','POST',{name:'Backup rule',filter:{version:1,tags:[{scope:'personal',group_id:'scene',include_ids:[privateTag.id]}]}});
   await api('tag-batches','POST',{scope:'personal',track_ids:[track.id],add_ids:[privateTag.id],remove_ids:[]});
  });
- const before=tagRows(path.join(directory,'library.sqlite'));assert.equal(before.schema,8);assert.ok(before.saved_track_filters.length&&before.track_tags.length&&before.tag_batches.length);
+ const before=tagRows(path.join(directory,'library.sqlite'));assert.equal(before.schema,health.schema);assert.ok(before.saved_track_filters.length&&before.track_tags.length&&before.tag_batches.length);
  await require('./backup-ui.cjs')({page,browser,base,directory});
  const after=tagRows(path.join(directory,'backup-restored','data','library.sqlite'));
  assert.deepEqual(after,before,'Full web backup and real CLI restore must retain every tag/filter/import/task row');
- console.log('Schema-8 backup acceptance passed: real executable, public/private bindings, aliases, saved filters, all ten tables, media digest, integrity and foreign keys.');
+ console.log('Schema-'+health.schema+' backup acceptance passed: real executable, public/private bindings, aliases, saved filters, all ten tables, media digest, integrity and foreign keys.');
 };

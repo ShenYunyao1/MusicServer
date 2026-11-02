@@ -15,9 +15,9 @@ import tempfile
 
 def preview_source(source, version=None):
     schemas = re.findall(r"(?m)^[ \t]*Schema[ \t]*=[ \t]*([^\r\n]+)", source)
-    if len(schemas) != 1 or schemas[0].strip() not in ('7', '8'):
-        raise ValueError("preview requires a single known schema-7 or schema-8 constant")
-    source = re.sub(r"(?m)^([ \t]*Schema[ \t]*=[ \t]*)7([ \t]*)$", r"\g<1>8\2", source)
+    if len(schemas) != 1 or schemas[0].strip() not in ('7', '8', '9'):
+        raise ValueError("preview requires a single known schema constant")
+    source = re.sub(r"(?m)^([ \t]*Schema[ \t]*=[ \t]*)[789]([ \t]*)$", r"\g<1>8\2", source)
     if version is not None:
         if not re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", version):
             raise ValueError("test version must have X.Y.Z format")

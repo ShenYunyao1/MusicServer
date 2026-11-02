@@ -13,7 +13,7 @@ import (
 func tagHTTPAPI(t *testing.T) (*API, string) {
 	t.Helper()
 	a, _ := testAPI(t)
-	assertMigrationSchema(t, a.store.db, 8)
+	assertMigrationSchema(t, a.store.db, sqliteSchemaVersion)
 	_, _, token := loginTestAccount(t, a.store, "admin")
 	return a, token
 }

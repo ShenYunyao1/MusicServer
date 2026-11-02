@@ -1,5 +1,11 @@
 # 独立更新器维护与 schema 7 桥接
 
+## 当前 schema 8→9 阶段
+
+参见 [schema 9 升级与数据保留](schema9-upgrade.md)。先安装真实正式 schema 8 桥接 B 主程序，再由维护者使用已验签的同 schema B 工具维护独立 worker，能力核对通过后才能安装 schema 9。B 的正式版本／提交由 `schema9-bridge.json` 锁定；字段留空表示桥接尚未发行，不可拿测试预览代替。
+
+下文 0.21.12／schema 7 内容保留为历史记录，不是当前升级步骤。
+
 ## schema 8 安装的 0.21.12 恢复修复
 
 0.21.12 的异常队列隔离及维护标记恢复涉及独立 root worker。网页更新只替换主程序，不会替换 `/usr/local/lib/musicserver/musicserver-updater`，因此先在网页备份并安装 0.21.12 主程序，确认健康版本及schema 8，再手动维护worker。

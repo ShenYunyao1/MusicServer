@@ -157,12 +157,12 @@ func testSystemdInstallAndRollback(t *testing.T, baselineSchema, targetSchema in
 	}
 	if targetSchema != baselineSchema {
 		// Fail after the candidate has really migrated the database under a
-		// non-root systemd service, then verify old program + schema 7 recovery.
+		// non-root systemd service, then verify old program + source-schema recovery.
 		if err = i.Install(ctx, Request{ID: strings.Repeat("d", 32), Version: "10.0.0"}); err == nil {
 			t.Fatal("failed cross-schema startup was accepted")
 		}
-		if err := verifyDatabaseSchema(database, 7); err != nil {
-			t.Fatal("cross-schema rollback did not restore schema 7", err)
+		if err := verifyDatabaseSchema(database, baselineSchema); err != nil {
+			t.Fatal("cross-schema rollback did not restore source schema", baselineSchema, err)
 		}
 		if err := i.Healthy(ctx, old); err != nil {
 			t.Fatal("old program was not restored after failed migration", err)

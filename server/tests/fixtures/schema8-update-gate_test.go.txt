@@ -1,0 +1,20 @@
+// Copied into the immutable released schema-8 checkout only for CI acceptance.
+package update
+
+import (
+ "context"
+ "crypto/sha256"
+ "encoding/hex"
+ "testing"
+)
+
+func TestReleasedSchemaEightRejectsSchemaNine(t *testing.T) {
+ payload := []byte("schema9 candidate")
+ sum := sha256.Sum256(payload)
+ m, _ := testManager(t, "v9.0.0", "sha256:"+hex.EncodeToString(sum[:]), payload, 9, 8)
+ defer m.Close()
+ err := m.Check(context.Background())
+ status := m.Status()
+ if err == nil && status.Compatible { t.Fatal("released schema-8 app unexpectedly accepted schema9", status) }
+ if status.CanInstall { t.Fatal("released app exposed install for unsupported schema9") }
+}

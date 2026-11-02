@@ -1,4 +1,4 @@
-"""Exercise real binaries against an isolated populated DB (current gate: 8 -> 8)."""
+"""Exercise real binaries against an isolated populated DB (current gate: 8 -> 9)."""
 import argparse
 from contextlib import closing
 import hashlib
@@ -61,12 +61,26 @@ def snapshot(database):
         return result
 
 
+def assert_preserved_rows(before, after, source, target):
+    for table, rows in before.items():
+        if table != 'schema_migrations':
+            assert after[table] == rows, 'old rows changed in ' + table
+            continue
+        retained = {row[1]: row for row in after[table]}
+        assert all(retained.get(row[1]) == row for row in rows), 'old migration history changed'
+        additions = [row for row in after[table] if row[1] not in {old[1] for old in rows}]
+        expected = [] if source == target else [(source, target)]
+        assert [(row[0], row[1]) for row in additions] == expected, 'unexpected migration history additions'
+        assert all(isinstance(row[2], str) and row[2] for row in additions), 'migration timestamp missing'
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--old-server',type=Path,required=True)
     parser.add_argument('--new-server',type=Path,required=True)
-    parser.add_argument('--from-schema',type=int,choices=(7,8),default=7)
-    parser.add_argument('--to-schema',type=int,choices=(8,9),default=8)
+    parser.add_argument('--bridge-server',type=Path,help='isolated schema-8 bridge; not a formal release asset')
+    parser.add_argument('--from-schema',type=int,choices=(7,8),default=8)
+    parser.add_argument('--to-schema',type=int,choices=(8,9),default=9)
     args=parser.parse_args()
     old,new=args.old_server.resolve(),args.new_server.resolve()
     terminal=Path(__file__).with_name('admin-terminal.py')
@@ -108,10 +122,26 @@ def main():
             key=admin.call('auth/keys','POST',{'name':'Retained player','scopes':['library:read','media:read'],'allowed_playlist_ids':[playlist['id']]})
             stop(process);process=None
             before=snapshot(database)
+            if args.bridge_server:
+                assert args.from_schema == 8 and args.to_schema == 9
+                process,bridge,health=start(args.bridge_server.resolve(),True)
+                assert health['schema']==8
+                assert_preserved_rows(before,snapshot(database),8,8)
+                bridge.login('admin',password)
+                try:
+                    bridge.call('listening/tracks')
+                    raise AssertionError('bridge exposed schema-9 tables')
+                except urllib.error.HTTPError as error:
+                    assert error.code==501
+                with urllib.request.urlopen(bridge.base+'/',timeout=10) as response:
+                    assert b'data-listening-enabled="false"' in response.read()
+                stop(process);process=None
+                # Successful login intentionally updates login_limits; snapshot
+                # the actual migration source after exercising the bridge UI.
+                before=snapshot(database)
             process,upgraded,health=start(new,True);assert health['schema']==args.to_schema
             after=snapshot(database)
-            for table,rows in before.items():
-                if table!='schema_migrations': assert after[table]==rows,'old rows changed in '+table
+            assert_preserved_rows(before, after, args.from_schema, args.to_schema)
             backups=list(root.glob(f'.schema-{args.from_schema}-to-{args.to_schema}-*/snapshot.sqlite'))
             expected_snapshots=1 if args.from_schema!=args.to_schema else 0
             expected_migrations=len(before.get('schema_migrations',[]))+expected_snapshots

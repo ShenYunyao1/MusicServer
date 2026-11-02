@@ -271,9 +271,10 @@ func TestApplyRechecksWorkerCapabilitiesBeforeQueueing(t *testing.T) {
 	root := t.TempDir()
 	m := NewManager(filepath.Join(root, "app"), func() string { return Repository })
 	defer m.Close()
+	m.installedSchema = 8
 	m.ConfigureInstaller(filepath.Join(root, "queue"), filepath.Join(root, "state", "job.json"))
-	m.status = Status{State: "available", Repository: Repository, LatestVersion: "9.0.0", Schema: 8, Compatible: true}
-	m.plan = &releasePlan{Manifest: Manifest{Version: "9.0.0", Schema: 8, MigrateFrom: []int{7}}, Repository: Repository}
+	m.status = Status{State: "available", Repository: Repository, LatestVersion: "9.0.0", Schema: 9, Compatible: true}
+	m.plan = &releasePlan{Manifest: Manifest{Version: "9.0.0", Schema: 9, MigrateFrom: []int{8}}, Repository: Repository}
 	if err := m.Apply("9.0.0"); err == nil || !strings.Contains(err.Error(), upgradeWorkerMessage) {
 		t.Fatalf("direct apply bypassed worker gate: %v", err)
 	}

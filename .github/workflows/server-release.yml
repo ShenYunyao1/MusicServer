@@ -86,6 +86,12 @@ jobs:
           export MUSIC_SERVER_CANDIDATE_VERSION="$(go run ./cmd/release -version)"
           sudo -E env PATH="$PATH" bash tests/update-systemd.sh
 
+      - name: Released schema-8 application rejects unsupported schema-9 metadata
+        if: runner.os == 'Linux'
+        run: |
+          cp tests/fixtures/schema8-update-gate_test.go.txt "$GITHUB_WORKSPACE/schema8-baseline/server/internal/update/schema9_rejection_test.go"
+          (cd "$GITHUB_WORKSPACE/schema8-baseline/server" && go test ./internal/update -run '^TestReleasedSchemaEightRejectsSchemaNine$' -count=1)
+
   web:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -178,7 +184,10 @@ jobs:
             MUSIC_SERVER_TEST_EMAIL_BINARY="$PWD/build/email-browser-fixture" node tests/registration-email-ui.cjs
           elif [ "$SUITE" = tags ]; then
             python tests/test-admin-terminal.py
-            python tests/schema-upgrade-process.py --old-server build/schema-preview/released/musicserver --new-server build/musicserver --from-schema 8 --to-schema 9
+            python tests/test-schema-upgrade-history.py
+            python tests/test-schema-preview.py
+            python tests/build-schema-preview.py
+            python tests/schema-upgrade-process.py --old-server build/schema-preview/released/musicserver --bridge-server build/schema-preview/musicserver --new-server build/musicserver --from-schema 8 --to-schema 9
             MUSIC_SERVER_TEST_TAG_BACKUP_ONLY=1 node tests/management-ui.cjs
             node tests/tag-editor-ui.cjs
             node tests/tagger-ui.cjs
@@ -325,9 +334,22 @@ jobs:
         run: |
           VERSION=$(go run -buildvcs=true ./cmd/release -version)
           if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "v$VERSION" ]]; then echo 'Tag differs from code version'; exit 1; fi
-          go run -buildvcs=true ./cmd/release -sign
+          FORMAL=()
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            FORMAL=(-formal)
+            SCHEMA=$(sed -nE 's/^[[:space:]]*Schema[[:space:]]*=[[:space:]]*([0-9]+).*$/\1/p' internal/version/version.go)
+            if [[ "$SCHEMA" == 9 ]]; then
+              BRIDGE_TAG=$(jq -er '.tag | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))' deploy/schema9-bridge.json)
+              BRIDGE_COMMIT=$(jq -er '.commit | select(test("^[a-f0-9]{40}$"))' deploy/schema9-bridge.json)
+              test "$(git rev-list -n 1 "$BRIDGE_TAG")" = "$BRIDGE_COMMIT"
+              gh release view "$BRIDGE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease | jq -e '.isDraft == false and .isPrerelease == false'
+              gh release download "$BRIDGE_TAG" --repo "$GITHUB_REPOSITORY" --dir build/schema8-bridge --pattern 'release-manifest.json*' --pattern 'musicserver-linux-amd64.tar.gz' --pattern 'musicserver-windows-amd64.zip'
+            fi
+          fi
+          go run -buildvcs=true ./cmd/release -sign "${FORMAL[@]}"
         env:
           UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+          GH_TOKEN: ${{ github.token }}
       - name: Verify signed packages and installer extraction
         run: |
           go run ./cmd/verify-release -dir build/packages

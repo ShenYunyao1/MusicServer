@@ -78,7 +78,17 @@ func listeningTrackAllowed(reader sqlReader, auth authContext, id string) bool {
 	}
 	return false
 }
+
+func (s *Store) listeningEnabled() bool {
+	schema, err := sqliteSchemaIdentity(s.db)
+	return err == nil && schema >= 9
+}
+
 func (a *API) listening(w http.ResponseWriter, r *http.Request) {
+	if !a.store.listeningEnabled() {
+		writeError(w, http.StatusNotImplemented, "LISTENING_DISABLED", "listening statistics require database schema 9")
+		return
+	}
 	path := strings.TrimPrefix(r.URL.Path, "/api/v2/listening/")
 	var result any
 	var err error

@@ -48,9 +48,7 @@ func TestTrackTagLinksIsolatePersonalAndKeepPublicTrackIdentity(t *testing.T) {
 func tagLinkFixture(t *testing.T) (*API, authContext, User, authContext, User, authContext) {
 	t.Helper()
 	api, _ := testAPI(t)
-	if err := initializeSQLiteSchemaForTarget(api.store.db, 8); err != nil {
-		t.Fatal(err)
-	}
+	assertMigrationSchema(t, api.store.db, sqliteSchemaVersion)
 	admin := tagTestAuth(t, api.store, "admin")
 	alice, _ := readyMember(t, api, "tag-alice")
 	bob, _ := readyMember(t, api, "tag-bob")

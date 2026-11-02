@@ -18,9 +18,13 @@ class PreviewTests(unittest.TestCase):
         self.assertEqual(preview.preview_source(source, '0.22.0'), source.replace('0.21.0', '0.22.0'))
 
     def test_unknown_or_ambiguous_source_is_refused(self):
-        for source in ("Schema = 9\n", "Schema = 7\nSchema = 7\n", "Schema = 17\n", "Schema = 7\nSchema = 8\n"):
+        for source in ("Schema = 7\nSchema = 7\n", "Schema = 17\n", "Schema = 7\nSchema = 8\n"):
             with self.subTest(source=source), self.assertRaises(ValueError):
                 preview.preview_source(source)
+
+    def test_schema_nine_can_build_an_isolated_schema_eight_bridge(self):
+        source = 'Version = "0.22.0"\nSchema = 9\n'
+        self.assertEqual(preview.preview_source(source), source.replace('Schema = 9', 'Schema = 8'))
 
     def test_explicit_test_version_is_validated(self):
         source='Version = "0.20.2"\nSchema = 7\n'

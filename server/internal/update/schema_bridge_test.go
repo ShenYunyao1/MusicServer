@@ -168,3 +168,27 @@ func TestCachedSchemaEightStatusRechecksIndependentWorker(t *testing.T) {
 		t.Fatalf("cached status trusted absent worker: %+v", s)
 	}
 }
+
+func TestCheckSignedListeningCandidateAfterSchemaEightBridge(t *testing.T) {
+	payload := []byte("signed schema9 package")
+	sum := sha256.Sum256(payload)
+	m, _ := testManager(t, "v9.0.0", "sha256:"+hex.EncodeToString(sum[:]), payload, 9, 8)
+	defer m.Close()
+	m.installedSchema = 8
+	m.readCapabilities = func(string) (workerCapabilities, error) {
+		return workerCapabilities{Format: 1, Schemas: []int{7, 8}, Migrations: []schemaMigration{{7, 8}}}, nil
+	}
+	if err := m.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if s := m.Status(); s.Compatible || s.CanInstall || s.State != "incompatible" {
+		t.Fatal("old worker accepted candidate", s)
+	}
+	m.readCapabilities = func(string) (workerCapabilities, error) { return currentCapabilities(), nil }
+	if err := m.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if s := m.Status(); !s.Compatible || s.State != "available" {
+		t.Fatal("bridge and maintained worker refused candidate", s)
+	}
+}

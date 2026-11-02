@@ -29,6 +29,8 @@ func run() error {
 	output := flag.String("output", "build/packages", "fixed release output directory")
 	sign := flag.Bool("sign", false, "sign with UPDATE_SIGNING_KEY (Actions only)")
 	show := flag.Bool("version", false, "print release version")
+	formal := flag.Bool("formal", false, "validate formal-release prerequisites")
+	bridgeDir := flag.String("bridge-assets", "build/schema8-bridge", "formal schema-8 bridge asset directory")
 	flag.Parse()
 	if *show {
 		fmt.Println(version.Version)
@@ -38,6 +40,23 @@ func run() error {
 	if commit == "unknown" || modified {
 		return fmt.Errorf("release packaging requires a clean, committed checkout")
 	}
+	if *formal && version.Schema == 9 {
+		var prerequisite struct {
+			Tag    string `json:"tag"`
+			Commit string `json:"commit"`
+		}
+		data, err := os.ReadFile("deploy/schema9-bridge.json")
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(data, &prerequisite); err != nil {
+			return err
+		}
+		key, _ := base64.StdEncoding.DecodeString(update.ReleasePublicKey)
+		if err := validateBridgeAssets(*bridgeDir, key, version.Version, prerequisite.Tag, prerequisite.Commit); err != nil {
+			return err
+		}
+	}
 	if err := os.MkdirAll(*output, 0755); err != nil {
 		return err
 	}
@@ -45,7 +64,12 @@ func run() error {
 		MigrateFrom: version.MigrationSources(version.Schema)}
 	identity, _ := json.MarshalIndent(m, "", "  ")
 	files := map[string][]byte{"build.json": identity}
-	for _, path := range []string{"README.md", "deploy/README.md", "deploy/install.sh", "deploy/musicserver.service", "deploy/musicserver.env.example", "deploy/musicserver-update.service", "deploy/musicserver-update.path", "deploy/musicserver-update-recovery.timer", "deploy/updater.json.example", "deploy/updater-maintenance.md", "deploy/schema8-upgrade.md", "deploy/release-notes.md", "deploy/nginx.conf.example", "deploy/musicserver-certbot.service", "deploy/musicserver-certbot.timer", "deploy/renew-nginx.sh"} {
+	capabilities, err := update.ReleaseCapabilities()
+	if err != nil {
+		return err
+	}
+	files["deploy/updater-capabilities.json"] = capabilities
+	for _, path := range []string{"README.md", "deploy/README.md", "deploy/install.sh", "deploy/musicserver.service", "deploy/musicserver.env.example", "deploy/musicserver-update.service", "deploy/musicserver-update.path", "deploy/musicserver-update-recovery.timer", "deploy/updater.json.example", "deploy/updater-maintenance.md", "deploy/schema8-upgrade.md", "deploy/schema9-upgrade.md", "deploy/schema9-bridge.json", "deploy/release-notes.md", "deploy/nginx.conf.example", "deploy/musicserver-certbot.service", "deploy/musicserver-certbot.timer", "deploy/renew-nginx.sh"} {
 		info, e := os.Stat(path)
 		if e != nil {
 			return e

@@ -39,6 +39,33 @@ func TestListeningPlayerScopeAndGrantRecheck(t *testing.T) {
 	}
 }
 
+func TestListeningSchemaBridgeGate(t *testing.T) {
+	for _, schema := range []int{8, 9} {
+		t.Run(fmt.Sprint(schema), func(t *testing.T) {
+			a, _ := testAPIForSchema(t, schema)
+			_, _, token := loginTestAccount(t, a.store, "admin")
+			for _, item := range []struct{ method, path, body string }{
+				{"GET", "/api/v2/listening/tracks", ""},
+				{"POST", "/api/v2/listening/sessions", listeningBody("80000000-0000-4000-8000-000000000099", a.store.Tracks()[0].ID, 0)},
+			} {
+				w := mailRequest(a, token, item.method, item.path, item.body, 0)
+				if schema == 8 && (w.Code != 501 || !strings.Contains(w.Body.String(), "LISTENING_DISABLED")) {
+					t.Fatalf("bridge endpoint: %d %s", w.Code, w.Body)
+				}
+				if schema == 9 && w.Code != 200 {
+					t.Fatalf("current endpoint: %d %s", w.Code, w.Body)
+				}
+			}
+			w := httptest.NewRecorder()
+			a.ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
+			want := fmt.Sprintf(`data-listening-enabled="%t"`, schema >= 9)
+			if !strings.Contains(w.Body.String(), want) {
+				t.Fatalf("HTML is missing feature gate %s", want)
+			}
+		})
+	}
+}
+
 func TestListeningRangesStableSortAndLifecycle(t *testing.T) {
 	a, u, auth, _ := listeningFixture(t)
 	ids := browseSeedTracks(t, a, u.ID, u.ID, 3)

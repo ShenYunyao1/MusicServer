@@ -149,7 +149,11 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	if request.URL.Path == "/" && request.Method == http.MethodGet {
 		response.Header().Set("Cache-Control", "no-cache")
 		response.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = response.Write(managementPage)
+		page := managementPage
+		if a.store.listeningEnabled() {
+			page = []byte(strings.Replace(string(page), `data-listening-enabled="false"`, `data-listening-enabled="true"`, 1))
+		}
+		_, _ = response.Write(page)
 		return
 	}
 	if request.Method == http.MethodGet {

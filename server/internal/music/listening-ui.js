@@ -1,12 +1,14 @@
 'use strict';
 
 const listeningPageState={generation:0,owner:null,controller:null,timer:null,page:null};
+function listeningAvailable(){return document.documentElement.dataset.listeningEnabled==='true'}
 function listeningRouteValues(){
  const values=new URLSearchParams(location.hash.split('?')[1]||''),range=['all','7d','30d'].includes(values.get('range'))?values.get('range'):'all',limit=[20,30,50].includes(Number(values.get('limit')))?Number(values.get('limit')):20;
  const offset=Number(values.get('offset'));return {range,q:(values.get('q')||'').trim().slice(0,200),offset:Number.isSafeInteger(offset)&&offset>=0?Math.floor(offset/limit)*limit:0,limit};
 }
 function listeningRoute(changes={}){const values={...listeningRouteValues(),...changes},query=new URLSearchParams();if(values.range!=='all')query.set('range',values.range);if(values.q)query.set('q',values.q);if(values.offset)query.set('offset',String(values.offset));if(values.limit!==20)query.set('limit',String(values.limit));return '#/listening'+(query.size?'?'+query:'')}
 function setupListeningPage(){
+ if(!listeningAvailable())return;
  if($('page-listening'))return;
  const button=document.createElement('button');button.dataset.page='listening';button.innerHTML='<span class="nav-icon"></span><span class="nav-label">我常听的</span>';document.querySelector('.nav').append(button);
  const section=document.createElement('section');section.id='page-listening';section.className='page';section.innerHTML='<div class="page-intro"><div><h1>我常听的</h1><p>按有效播放次数排序，仅统计功能启用后的播放。</p></div><button id="refreshListening" type="button" class="btn">刷新</button></div><div class="toolbar listening-toolbar"><label>时间范围 <select id="listeningRange" class="select"><option value="all">全部</option><option value="30d">近30天</option><option value="7d">近7天</option></select></label><input id="listeningSearch" class="search" type="search" placeholder="搜索曲名、歌手或专辑" aria-label="搜索常听曲目"><label>每页 <select id="listeningPageSize" class="select"><option value="20">20首</option><option value="30">30首</option><option value="50">50首</option></select></label></div><p id="listeningStatus" class="status" role="status"></p><div id="listeningPagerTop"></div><div id="listeningRows" class="panel listening-rows" role="list" aria-label="常听曲目"></div><div id="listeningPagerBottom"></div>';
@@ -22,6 +24,7 @@ function clearListeningPage(){
  for(const id of ['listeningRows','listeningPagerTop','listeningPagerBottom'])$(id)?.replaceChildren();if($('listeningStatus'))$('listeningStatus').textContent='';if($('listeningSearch'))$('listeningSearch').value='';if($('listeningRange'))$('listeningRange').value='all';if($('listeningPageSize'))$('listeningPageSize').value='20';
 }
 async function loadListeningPage(){
+ if(!listeningAvailable())throw new Error('当前版本尚未启用听歌统计，请完成数据库升级。');
  setupListeningPage();if(!state.user)return clearListeningPage();
  if(listeningPageState.owner!==state.user.id)clearListeningPage();listeningPageState.owner=state.user.id;
  clearTimeout(listeningPageState.timer);listeningPageState.controller?.abort();const controller=new AbortController();listeningPageState.controller=controller;
