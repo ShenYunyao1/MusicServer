@@ -19,14 +19,18 @@ import (
 )
 
 func TestSystemdInstallAndRollback(t *testing.T) {
-	testSystemdInstallAndRollback(t, 7)
+	testSystemdInstallAndRollback(t, 7, 7)
 }
 
 func TestSystemdSchemaMigrationAndRollback(t *testing.T) {
-	testSystemdInstallAndRollback(t, 8)
+	testSystemdInstallAndRollback(t, 7, 8)
 }
 
-func testSystemdInstallAndRollback(t *testing.T, targetSchema int) {
+func TestSystemdCurrentSchemaInstallAndRollback(t *testing.T) {
+	testSystemdInstallAndRollback(t, 8, 8)
+}
+
+func testSystemdInstallAndRollback(t *testing.T, baselineSchema, targetSchema int) {
 	if os.Getenv("MUSIC_SERVER_SYSTEMD_TEST") != "1" {
 		t.Skip("enable on an isolated Linux systemd runner")
 	}
@@ -94,18 +98,18 @@ func testSystemdInstallAndRollback(t *testing.T, targetSchema int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.Exec("PRAGMA user_version=7; CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT); INSERT INTO meta VALUES('schema_version','7'); CREATE TABLE marker(value TEXT); INSERT INTO marker VALUES('original');")
+	_, err = db.Exec(fmt.Sprintf("PRAGMA user_version=%d; CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT); INSERT INTO meta VALUES('schema_version','%d'); CREATE TABLE marker(value TEXT); INSERT INTO marker VALUES('original');", baselineSchema, baselineSchema))
 	db.Close()
 	if err != nil {
 		t.Fatal(err)
 	}
 	os.Chown(database, uid, gid)
-	old := Manifest{Version: "0.13.0", Commit: strings.Repeat("1", 40), Schema: 7}
+	old := Manifest{Version: "0.13.0", Commit: strings.Repeat("1", 40), Schema: baselineSchema}
 	prepared := map[string]string{}
 	prepare := func(_ context.Context, v string) (Manifest, string, error) {
 		manifest := Manifest{Version: v, Commit: strings.Repeat("2", 40), Schema: targetSchema}
-		if targetSchema == 8 {
-			manifest.MigrateFrom = []int{7}
+		if targetSchema != baselineSchema {
+			manifest.MigrateFrom = []int{baselineSchema}
 		}
 		if v == old.Version {
 			manifest = old
@@ -151,7 +155,7 @@ func testSystemdInstallAndRollback(t *testing.T, targetSchema int) {
 	if err = i.Healthy(ctx, old); err != nil {
 		t.Fatal(err)
 	}
-	if targetSchema == 8 {
+	if targetSchema != baselineSchema {
 		// Fail after the candidate has really migrated the database under a
 		// non-root systemd service, then verify old program + schema 7 recovery.
 		if err = i.Install(ctx, Request{ID: strings.Repeat("d", 32), Version: "10.0.0"}); err == nil {

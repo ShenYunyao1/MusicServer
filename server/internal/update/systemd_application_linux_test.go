@@ -24,6 +24,14 @@ import (
 // non-root unit. These preview binaries are never distributed as release assets.
 // Signing and strict VCS health identity have their own installer tests.
 func TestSystemdRealApplicationSchemaMigrationAndRollback(t *testing.T) {
+	testSystemdRealApplicationAndRollback(t, 7)
+}
+
+func TestSystemdRealApplicationCurrentSchemaAndRollback(t *testing.T) {
+	testSystemdRealApplicationAndRollback(t, 8)
+}
+
+func testSystemdRealApplicationAndRollback(t *testing.T, baselineSchema int) {
 	if os.Getenv("MUSIC_SERVER_SYSTEMD_TEST") != "1" {
 		t.Skip("requires isolated root systemd runner")
 	}
@@ -31,10 +39,14 @@ func TestSystemdRealApplicationSchemaMigrationAndRollback(t *testing.T) {
 		t.Fatal("requires root to install isolated unit")
 	}
 	oldBinary, newBinary := os.Getenv("MUSIC_SERVER_SCHEMA7_BINARY"), os.Getenv("MUSIC_SERVER_SCHEMA8_BINARY")
-	if oldBinary == "" || newBinary == "" {
-		t.Fatal("real schema 7 and 8 preview binaries are required")
-	}
 	oldVersion, newVersion := os.Getenv("MUSIC_SERVER_SCHEMA7_VERSION"), os.Getenv("MUSIC_SERVER_SCHEMA8_VERSION")
+	if baselineSchema == 8 {
+		oldBinary, newBinary = os.Getenv("MUSIC_SERVER_BASELINE_BINARY"), os.Getenv("MUSIC_SERVER_CANDIDATE_BINARY")
+		oldVersion, newVersion = os.Getenv("MUSIC_SERVER_BASELINE_VERSION"), os.Getenv("MUSIC_SERVER_CANDIDATE_VERSION")
+	}
+	if oldBinary == "" || newBinary == "" {
+		t.Fatal("real baseline and candidate binaries are required")
+	}
 	if oldVersion == "" || newVersion == "" {
 		t.Fatal("preview binary versions are required")
 	}
@@ -67,7 +79,7 @@ func TestSystemdRealApplicationSchemaMigrationAndRollback(t *testing.T) {
 	database := filepath.Join(dataDir, "library.sqlite")
 	releases := filepath.Join(root, "releases")
 	must(os.Mkdir(releases, 0755))
-	old := Manifest{Version: oldVersion, Commit: strings.Repeat("1", 40), Schema: 7}
+	old := Manifest{Version: oldVersion, Commit: strings.Repeat("1", 40), Schema: baselineSchema}
 	next := Manifest{Version: newVersion, Commit: strings.Repeat("2", 40), Schema: 8, MigrateFrom: []int{7}}
 	prepared := map[string]string{}
 	prepare := func(_ context.Context, v string) (Manifest, string, error) {
@@ -153,6 +165,10 @@ func TestSystemdRealApplicationSchemaMigrationAndRollback(t *testing.T) {
 	must(i.Stop(ctx))
 	db, err := sql.Open("sqlite", database)
 	must(err)
+	migrationBaseline := 0
+	if baselineSchema == 8 {
+		must(db.QueryRow("SELECT count(*) FROM schema_migrations WHERE from_version=7 AND to_version=8").Scan(&migrationBaseline))
+	}
 	_, err = db.Exec(`CREATE TABLE legacy_application_marker(id INTEGER PRIMARY KEY,value TEXT NOT NULL); INSERT INTO legacy_application_marker VALUES(1,'preserve old data'); INSERT INTO settings VALUES('opaque-upgrade-marker','{"keep":true}');`)
 	must(err)
 	must(db.Close())
@@ -177,7 +193,11 @@ func TestSystemdRealApplicationSchemaMigrationAndRollback(t *testing.T) {
 				t.Fatal("real tag migration was not executed", n)
 			}
 			must(db.QueryRow("SELECT count(*) FROM schema_migrations WHERE from_version=7 AND to_version=8").Scan(&n))
-			if n != 1 {
+			want := migrationBaseline
+			if baselineSchema == 7 {
+				want = 1
+			}
+			if n != want {
 				t.Fatal("migration is not idempotent", n)
 			}
 		}
@@ -187,7 +207,7 @@ func TestSystemdRealApplicationSchemaMigrationAndRollback(t *testing.T) {
 		if err := health(ctx, m); err != nil {
 			return err
 		}
-		if m.Schema == 8 {
+		if m.Version == next.Version {
 			checkData(8)
 			return errors.New("injected failure after real migration")
 		}
@@ -196,7 +216,7 @@ func TestSystemdRealApplicationSchemaMigrationAndRollback(t *testing.T) {
 	if err := i.Install(ctx, Request{ID: strings.Repeat("d", 32), Version: newVersion}); err == nil {
 		t.Fatal("injected failure accepted")
 	}
-	checkData(7)
+	checkData(baselineSchema)
 	must(health(ctx, old))
 	i.Healthy = health
 	must(i.Install(ctx, Request{ID: strings.Repeat("a", 32), Version: newVersion}))
@@ -213,6 +233,6 @@ func TestSystemdRealApplicationSchemaMigrationAndRollback(t *testing.T) {
 	job.RestoreRequired = true
 	must(i.save(&job, "starting", "simulate interruption after real migration"))
 	must(i.Recover(ctx))
-	checkData(7)
+	checkData(baselineSchema)
 	must(health(ctx, old))
 }

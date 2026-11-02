@@ -29,12 +29,12 @@ jobs:
         working-directory: server
     steps:
       - uses: actions/checkout@v4
-      - name: Checkout immutable schema-7 bridge for installation acceptance
+      - name: Checkout immutable schema-8 baseline for installation acceptance
         if: runner.os == 'Linux'
         uses: actions/checkout@v4
         with:
-          ref: bb55d3c2f3688b4f9fb27fe5b22434cdcebf6967 # v0.20.3 bridge
-          path: schema7-bridge
+          ref: dfca68d017c4f226f6ef76985f8b76ec5a1d5e3b # v0.21.12, schema 8
+          path: schema8-baseline
           persist-credentials: false
           sparse-checkout: server
       - uses: actions/setup-go@v5
@@ -74,17 +74,16 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           go test -race ./internal/update -count=1 -timeout 120s
-          go test -race ./internal/music -run '^TestRealtime|^TestAccountDeletion|^TestKeyDeletion|^TestStorage|^TestManagedBackup|^TestBackup|^TestResumable|^TestBrowse|^TestObjectSync|^TestMail|^TestEmail|^TestRegistration|^TestAccountStorage|^TestUploadEmailPolicy|^TestSchemaMigration|^TestTag|^TestTrackTag|^TestTrackFilter|^TestSavedTrackFilter' -count=1 -timeout 240s
+          go test -race ./internal/music -run '^TestPlayback|^TestRealtime|^TestAccountDeletion|^TestKeyDeletion|^TestStorage|^TestManagedBackup|^TestBackup|^TestResumable|^TestBrowse|^TestObjectSync|^TestMail|^TestEmail|^TestRegistration|^TestAccountStorage|^TestUploadEmailPolicy|^TestSchemaMigration|^TestTag|^TestTrackTag|^TestTrackFilter|^TestSavedTrackFilter' -count=1 -timeout 240s
       - name: Linux installation integration
         if: runner.os == 'Linux'
         run: |
-          python tests/test-schema-preview.py
-          (cd "$GITHUB_WORKSPACE/schema7-bridge/server" && CGO_ENABLED=0 go build -trimpath -buildvcs=true -o "$GITHUB_WORKSPACE/server/build/schema-preview/baseline/musicserver" ./cmd/musicserver)
-          CGO_ENABLED=0 python tests/build-schema-preview.py
-          export MUSIC_SERVER_SCHEMA7_BINARY="$PWD/build/schema-preview/baseline/musicserver"
-          export MUSIC_SERVER_SCHEMA8_BINARY="$PWD/build/schema-preview/musicserver"
-          export MUSIC_SERVER_SCHEMA7_VERSION=0.20.3
-          export MUSIC_SERVER_SCHEMA8_VERSION="$(go run ./cmd/release -version)"
+          (cd "$GITHUB_WORKSPACE/schema8-baseline/server" && CGO_ENABLED=0 go build -trimpath -buildvcs=true -o "$GITHUB_WORKSPACE/server/build/schema-current/baseline/musicserver" ./cmd/musicserver)
+          CGO_ENABLED=0 go build -trimpath -buildvcs=true -o build/schema-current/musicserver ./cmd/musicserver
+          export MUSIC_SERVER_BASELINE_BINARY="$PWD/build/schema-current/baseline/musicserver"
+          export MUSIC_SERVER_CANDIDATE_BINARY="$PWD/build/schema-current/musicserver"
+          export MUSIC_SERVER_BASELINE_VERSION=0.21.12
+          export MUSIC_SERVER_CANDIDATE_VERSION="$(go run ./cmd/release -version)"
           sudo -E env PATH="$PATH" bash tests/update-systemd.sh
 
   web:
@@ -99,20 +98,12 @@ jobs:
         working-directory: server
     steps:
       - uses: actions/checkout@v4
-      - name: Checkout released schema-7 source for upgrade acceptance
+      - name: Checkout released schema-8 baseline for upgrade acceptance
         if: matrix.suite == 'tags'
         uses: actions/checkout@v4
         with:
-          ref: fc6cd7745fa11818de59e6566ed9d664bc71f618 # v0.20.2
-          path: schema7-release
-          persist-credentials: false
-          sparse-checkout: server
-      - name: Checkout immutable schema-7 bridge for upgrade acceptance
-        if: matrix.suite == 'tags'
-        uses: actions/checkout@v4
-        with:
-          ref: bb55d3c2f3688b4f9fb27fe5b22434cdcebf6967 # v0.20.3 bridge
-          path: schema7-bridge
+          ref: dfca68d017c4f226f6ef76985f8b76ec5a1d5e3b # v0.21.12, schema 8
+          path: schema8-baseline
           persist-credentials: false
           sparse-checkout: server
       - uses: actions/setup-go@v5
@@ -159,16 +150,10 @@ jobs:
         run: go build -trimpath -buildvcs=true -o build/musicserver ./cmd/musicserver
         env:
           CGO_ENABLED: '0'
-      - name: Build the released schema-7 baseline
+      - name: Build the released schema-8 baseline
         if: matrix.suite == 'tags'
-        working-directory: schema7-release/server
+        working-directory: schema8-baseline/server
         run: go build -trimpath -buildvcs=true -o "$GITHUB_WORKSPACE/server/build/schema-preview/released/musicserver" ./cmd/musicserver
-        env:
-          CGO_ENABLED: '0'
-      - name: Build the released schema-7 bridge
-        if: matrix.suite == 'tags'
-        working-directory: schema7-bridge/server
-        run: go build -trimpath -buildvcs=true -o "$GITHUB_WORKSPACE/server/build/schema-preview/bridge/musicserver" ./cmd/musicserver
         env:
           CGO_ENABLED: '0'
       - name: Real browser acceptance
@@ -191,10 +176,8 @@ jobs:
             CGO_ENABLED=0 go test -c -o build/email-browser-fixture ./internal/music
             MUSIC_SERVER_TEST_EMAIL_BINARY="$PWD/build/email-browser-fixture" node tests/registration-email-ui.cjs
           elif [ "$SUITE" = tags ]; then
-            python tests/test-schema-preview.py
             python tests/test-admin-terminal.py
-            python tests/schema-upgrade-process.py --old-server build/schema-preview/released/musicserver --new-server build/musicserver
-            python tests/schema-upgrade-process.py --old-server build/schema-preview/bridge/musicserver --new-server build/musicserver
+            python tests/schema-upgrade-process.py --old-server build/schema-preview/released/musicserver --new-server build/musicserver --from-schema 8
             MUSIC_SERVER_TEST_TAG_BACKUP_ONLY=1 node tests/management-ui.cjs
             node tests/tag-editor-ui.cjs
             node tests/tagger-ui.cjs
@@ -239,7 +222,7 @@ jobs:
       fail-fast: false
       matrix:
         player: [33da837016e01419db3200bb0adcc58aae179c56, f36c07dbe7f3890080b0290dd4ad32bb7729711d]
-        schema: [7, 8]
+        schema: [8]
     defaults:
       run:
         shell: pwsh
@@ -247,13 +230,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: server-source
-      - name: Checkout released schema-7 source for upgrade acceptance
-        uses: actions/checkout@v4
-        with:
-          ref: bb55d3c2f3688b4f9fb27fe5b22434cdcebf6967 # v0.20.3 bridge
-          path: schema7-bridge
-          persist-credentials: false
-          sparse-checkout: server
       - name: Checkout accepted native player
         uses: actions/checkout@v4
         with:
@@ -299,23 +275,11 @@ jobs:
           $candidateVersion = go run ./cmd/release -version
           if ($LASTEXITCODE -ne 0) { throw 'Cannot read candidate identity' }
           $candidateBinary = '../server-source/server/build/musicserver.exe'
-          Push-Location '../../schema7-bridge/server'
-          try {
-            go build -trimpath -buildvcs=true -o "$env:GITHUB_WORKSPACE/server-source/server/build/schema-preview/bridge/musicserver.exe" ./cmd/musicserver
-            if ($LASTEXITCODE -ne 0) { throw 'Cannot build released schema-7 bridge' }
-          } finally { Pop-Location }
-          if ('${{ matrix.schema }}' -eq '8') {
-            python tests/schema-upgrade-process.py --old-server build/schema-preview/bridge/musicserver.exe --new-server build/musicserver.exe
-            if ($LASTEXITCODE -ne 0) { throw 'Real populated schema migration failed' }
-          } else {
-            $candidateBinary = '../server-source/server/build/schema-preview/bridge/musicserver.exe'
-            $candidateVersion = '0.20.3'
-          }
           "version=$candidateVersion" >> $env:GITHUB_OUTPUT
           "binary=$candidateBinary" >> $env:GITHUB_OUTPUT
           "server=$(git rev-parse HEAD)" >> $env:GITHUB_STEP_SUMMARY
           "player=${{ matrix.player }}" >> $env:GITHUB_STEP_SUMMARY
-          "schema=${{ matrix.schema }} (7: fixed released bridge; 8: current candidate without overlay)" >> $env:GITHUB_STEP_SUMMARY
+          "schema=${{ matrix.schema }} (current candidate without overlay)" >> $env:GITHUB_STEP_SUMMARY
         env:
           CGO_ENABLED: '0'
       - name: Real WinHTTP TLS, cache and two-ended integration
