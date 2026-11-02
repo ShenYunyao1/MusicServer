@@ -106,8 +106,8 @@ func (a *API) browse(response http.ResponseWriter, request *http.Request) {
 		if err := browseIdentity(tx, auth); err != nil {
 			return err
 		}
-		var revision int64
-		if err := tx.QueryRow("SELECT value FROM meta WHERE key='revision'").Scan(&revision); err != nil {
+		revision, err := browseAccountRevision(tx, auth)
+		if err != nil {
 			return err
 		}
 		if q.Revision != nil && *q.Revision != revision {
@@ -123,7 +123,11 @@ func (a *API) browse(response http.ResponseWriter, request *http.Request) {
 			if err := tx.QueryRow("SELECT count(*) FROM playlists WHERE owner_id=? AND system=0", auth.userID).Scan(&playlists); err != nil {
 				return err
 			}
-			result = map[string]any{"total": total, "owned": owned, "missing": missing, "playlist_count": playlists, "revision": revision}
+			var globalRevision int64
+			if err := tx.QueryRow("SELECT value FROM meta WHERE key='revision'").Scan(&globalRevision); err != nil {
+				return err
+			}
+			result = map[string]any{"total": total, "owned": owned, "missing": missing, "playlist_count": playlists, "revision": revision, "global_revision": globalRevision}
 			return nil
 		case path == "tracks":
 			if err := browseTracks(tx, auth, q, &page); err != nil {
@@ -186,8 +190,8 @@ func (a *API) browsePlaylistMove(response http.ResponseWriter, request *http.Req
 		if err := browseIdentity(tx, auth); err != nil {
 			return err
 		}
-		var revision int64
-		if err := tx.QueryRow("SELECT value FROM meta WHERE key='revision'").Scan(&revision); err != nil {
+		revision, err := browseAccountRevision(tx, auth)
+		if err != nil {
 			return err
 		}
 		if body.Revision != nil && *body.Revision != revision {

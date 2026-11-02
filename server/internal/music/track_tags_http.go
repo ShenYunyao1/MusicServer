@@ -63,6 +63,11 @@ func tagGroupID(id string) bool {
 }
 
 func writeTagError(w http.ResponseWriter, err error) {
+	if errors.Is(err, errTagContributionBudget) {
+		w.Header().Set("Retry-After", "3600")
+		writeError(w, 429, "TAG_CONTRIBUTION_LIMIT", err.Error())
+		return
+	}
 	switch {
 	case errors.Is(err, errTagPreviewRate):
 		w.Header().Set("Retry-After", "60")

@@ -429,6 +429,11 @@ func (s *Store) CreateTag(auth authContext, input TagInput) (Tag, error) {
 				return err
 			}
 		}
+		if scopeID == "public" {
+			if err := checkPublicContributionBudget(tx, actor); err != nil {
+				return err
+			}
+		}
 		var count int
 		if err := tx.QueryRow("SELECT count(*) FROM tags WHERE scope_id=?", scopeID).Scan(&count); err != nil {
 			return err
@@ -438,7 +443,18 @@ func (s *Store) CreateTag(auth authContext, input TagInput) (Tag, error) {
 			limit = publicTagLimit
 		}
 		if count >= limit {
-			return errTagStorageLimit
+			if scopeID != "public" {
+				return errTagStorageLimit
+			}
+			if err := compactTagTombstones(tx, scopeID); err != nil {
+				return err
+			}
+			if err := tx.QueryRow("SELECT count(*) FROM tags WHERE scope_id=?", scopeID).Scan(&count); err != nil {
+				return err
+			}
+			if count >= limit {
+				return errTagStorageLimit
+			}
 		}
 		now := persistedTime(time.Now())
 		scope := "personal"
@@ -562,7 +578,7 @@ func (s *Store) DeleteTag(auth authContext, id string, expectedVersion int64) er
 			return err
 		}
 		var used bool
-		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM track_tags WHERE tag_id=?) OR EXISTS(SELECT 1 FROM track_tag_overrides WHERE tag_id=?) OR EXISTS(SELECT 1 FROM tags WHERE merged_into=?) OR EXISTS(SELECT 1 FROM saved_track_filters f,json_tree(f.query_json) j WHERE j.type='text' AND j.value=?)`, id, id, id, id).Scan(&used); err != nil {
+		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM track_tags WHERE tag_id=?) OR EXISTS(SELECT 1 FROM track_tag_overrides WHERE tag_id=?) OR EXISTS(SELECT 1 FROM tags WHERE merged_into=?)`, id, id, id).Scan(&used); err != nil {
 			return err
 		}
 		if used {

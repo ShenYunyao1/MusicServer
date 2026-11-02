@@ -217,7 +217,7 @@ func TestBrowseRelativePlaylistMoveAndLightweightPicker(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	baseline := api.store.Revision()
+	baseline := browseTestPage(t, browseTestRequest(api, alice, "GET", "/api/v2/browse/playlists", "", 0))["revision"]
 	body, _ := json.Marshal(map[string]any{"playlist_id": ids[99], "before_id": ids[50], "expected_order": ids[50:100], "offset": 50, "limit": 50, "revision": baseline})
 	page := browseTestPage(t, browseTestRequest(api, alice, "POST", "/api/v2/browse/playlists/move", string(body), 0))
 	if page["total"] != float64(105) || len(page["items"].([]any)) != 50 || page["items"].([]any)[0].(map[string]any)["id"] != ids[99] {

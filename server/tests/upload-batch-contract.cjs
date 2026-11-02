@@ -18,7 +18,7 @@ function fixture(items){
 }
 async function restoreCommitted(){
  const f=fixture([]),saved={id:'saved',resumeId:'removed-remote-task',name:'saved.wav',size:10,targetPlaylistID:'target',playlistAssigned:false,commitResult:{track:{id:'existing-track'},duplicate:false}};
- Object.assign(f.c,{resumeObservedDrafts:new Map(),resumeQueueStorage:{read:async()=>[saved]},resumeJSON:async()=>({items:[]}),resumeCurrent:(owner,epoch)=>f.state.user?.id===owner&&f.c.resumeWorkspaceEpoch===epoch,
+ Object.assign(f.c,{resumeQueueWrite:Promise.resolve(),resumeObservedDrafts:new Map(),resumeQueueStorage:{read:async()=>[saved]},resumeJSON:async()=>({items:[]}),resumeCurrent:(owner,epoch)=>f.state.user?.id===owner&&f.c.resumeWorkspaceEpoch===epoch,
   describeFile:file=>({id:'new',file}),browserUUID:()=> 'new',completeResumeUpload:async u=>{u.resumeId=null},setStatus(){},renderUploads(){}});
  vm.runInContext(resume.slice(resume.indexOf('async function restoreResumeQueue('),resume.indexOf('function decorateResumableUploads(')),f.c);
  await f.c.restoreResumeQueue();assert.equal(f.state.uploads.length,1,'committed assignment must survive missing remote resume task');

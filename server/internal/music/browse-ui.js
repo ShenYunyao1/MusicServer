@@ -51,11 +51,10 @@ async function browseFetchPage(kind,path,params={}){
   try{page=await fetchPage()}catch(error){
     if(error.name==='AbortError')return null;
     if(error.code!=='BROWSE_RESTART')throw error;
-    values.delete('revision');if(kind!=='tracks')values.set('offset','0');page=await fetchPage();
-    if(kind!=='tracks'&&generation===browseState.generations[kind]&&route===location.hash.split('?')[0])browseSetRoute(params.q||'',0,params.filter);
+    values.delete('revision');page=await fetchPage();
   }
   if(generation!==browseState.generations[kind]||userID!==state.user?.id)return null;
-  if(kind==='tracks'&&page.total>0&&page.offset>=page.total){values.delete('revision');values.set('offset',String(Math.floor((page.total-1)/Number(values.get('limit')))*Number(values.get('limit'))));page=await fetchPage();if(generation!==browseState.generations[kind]||userID!==state.user?.id)return null}
+  if(page.total>0&&page.offset>=page.total){values.delete('revision');values.set('offset',String(Math.floor((page.total-1)/Number(values.get('limit')))*Number(values.get('limit'))));page=await fetchPage();if(generation!==browseState.generations[kind]||userID!==state.user?.id)return null}
   if(kind==='tracks'){if(!page.total)page.offset=0;if(typeof libraryCanonicalPage==='function')libraryCanonicalPage(page.offset,page.limit)}
   const previous=browseState[kind];page.items=browseReuse(page.items||[],previous?.items);page.query=params.q||'';page.filter=params.filter||'all';
   browseState[kind]=page;
@@ -86,7 +85,7 @@ async function loadBrowseMembers(id,offset=browseRouteOffset(),revision){
 async function refreshBrowseCore(){
   browseReset();const userID=state.user?.id,epoch=browseState.epoch;if(!userID)return;
   const summary=await api('browse/summary');if(state.user?.id!==userID||epoch!==browseState.epoch)return;
-  browseState.summary=summary;state.browseSummary=summary;state.revision=summary.revision;
+  browseState.summary=summary;state.browseSummary=summary;state.revision=summary.revision;state.browseGlobalRevision=summary.global_revision;
   await Promise.all([loadBrowseTracks(state.page==='tracks'?browseRouteOffset():browseState.tracks?.offset||0,summary.revision),loadBrowsePlaylists(state.page==='playlists'&&!state.playlistDetailId?browseRouteOffset():browseState.playlists?.offset||0,summary.revision)]);
   if(epoch!==browseState.epoch)return;
   if(state.page==='keys'||state.page==='public'||state.page==='playlists'&&(state.subscriptionsTab||state.invitationsTab)){
@@ -208,8 +207,9 @@ async function pollBrowseChanges(){
     kind=page==='tracks'?'tracks':page==='playlists'?(detailID?'member':'playlists'):null;
   let generation=kind?browseState.generations[kind]:null;
   const sameView=()=>epoch===browseState.epoch&&route===location.hash&&page===state.page&&detailID===state.playlistDetailId&&!state.subscriptionsTab&&!state.invitationsTab&&(!kind||generation===browseState.generations[kind]);
-  browseState.polling=true;try{const health=await api('health');if(!sameView()||health.revision===state.revision||browseRefreshBlocked())return;
+  browseState.polling=true;try{const health=await api('health');if(!sameView()||health.revision===state.browseGlobalRevision||browseRefreshBlocked())return;
     const summary=await api('browse/summary');if(!sameView()||browseRefreshBlocked())return;
+    state.browseGlobalRevision=summary.global_revision;if(summary.revision===state.revision)return;
     if(kind){
       const pending=kind==='tracks'?loadBrowseTracks(browseState.tracks?.offset||0):kind==='member'?loadBrowseMembers(detailID,browseState.member?.offset||0):loadBrowsePlaylists(browseState.playlists?.offset||0);
       // The loader increments its generation synchronously. A newer navigation

@@ -352,6 +352,16 @@ func TestTagDictionaryDeletionRejectsEveryReference(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if kind == "filter" {
+				if err := s.DeleteTag(auth, tag.ID, tag.Version); err != nil {
+					t.Fatal("saved filter vetoed dictionary maintenance", err)
+				}
+				actual, err := s.GetTag(auth, tag.ID)
+				if err != nil || !actual.Deleted {
+					t.Fatal("filter reference did not retain invalid tombstone", err)
+				}
+				return
+			}
 			if err := s.DeleteTag(auth, tag.ID, tag.Version); !errors.Is(err, errTagInUse) {
 				t.Fatal("referenced tag deleted", kind, err)
 			}

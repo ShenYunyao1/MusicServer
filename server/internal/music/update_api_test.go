@@ -1,6 +1,7 @@
 package music
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -86,7 +87,7 @@ func TestUpdateMaintenanceBlocksWritesButKeepsHealth(t *testing.T) {
 	}
 	r := httptest.NewRecorder()
 	api.ServeHTTP(r, httptest.NewRequest("GET", "/api/v2/health", nil))
-	if r.Code != 200 || !strings.Contains(r.Body.String(), `"schema":8`) {
+	if r.Code != 200 || !strings.Contains(r.Body.String(), fmt.Sprintf(`"schema":%d`, sqliteSchemaVersion)) {
 		t.Fatalf("health not available: %d %s", r.Code, r.Body)
 	}
 }

@@ -371,7 +371,11 @@ func trackFilterBaseline(reader sqlReader, auth authContext) (TrackFilterBaselin
 		return TrackFilterBaseline{}, err
 	}
 	baseline := TrackFilterBaseline{AccountID: actor.ID}
-	err = reader.QueryRow(`SELECT (SELECT value FROM meta WHERE key='revision'),COALESCE((SELECT revision FROM tag_scopes WHERE id='public'),0),COALESCE((SELECT revision FROM tag_scopes WHERE id=?),0)`, actor.ID).Scan(&baseline.Library, &baseline.Public, &baseline.Personal)
+	baseline.Library, err = browseAccountRevisionData(reader, auth, false)
+	if err != nil {
+		return baseline, err
+	}
+	err = reader.QueryRow(`SELECT COALESCE((SELECT revision FROM tag_scopes WHERE id='public'),0),COALESCE((SELECT revision FROM tag_scopes WHERE id=?),0)`, actor.ID).Scan(&baseline.Public, &baseline.Personal)
 	return baseline, err
 }
 func checkTrackFilterBaseline(current TrackFilterBaseline, expected *TrackFilterBaseline) error {

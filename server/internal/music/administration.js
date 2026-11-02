@@ -57,7 +57,7 @@ function renderOverview(){
   $('metricPlaylists').textContent=(state.users||[]).length;
   $('metricKeys').textContent=state.browseSummary?.missing??state.tracks.filter(t=>t.missing).length;
   $('metricRevision').textContent=state.browseSummary?.playlist_count??state.playlists.filter(p=>!p.system&&!p.read_only).length;
-  $('overviewNotice').textContent='曲库统计包含当前可见曲目；私人歌单计数仅属于本人。账户 '+(state.users||[]).filter(u=>u.enabled).length+' 个已启用。服务修订版本 '+(state.revision??'—')+'。';
+  $('overviewNotice').textContent='曲库统计包含当前可见曲目；私人歌单计数仅属于本人。账户 '+(state.users||[]).filter(u=>u.enabled).length+' 个已启用。服务修订版本 '+(state.browseSummary?.global_revision??state.revision??'—')+'。';
 }
 async function loadOverviewSummary(){
   try{const scan=await api('admin/scan/status');$('overviewScanStatus').textContent=scanSummary(scan)}catch(error){$('overviewScanStatus').textContent='扫描状态读取失败：'+error.message}

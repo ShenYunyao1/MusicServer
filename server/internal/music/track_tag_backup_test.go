@@ -74,12 +74,12 @@ func TestTrackTagBackupRestoresDictionaryRelationshipsAndPrivateTombstones(t *te
 		t.Fatal(err)
 	}
 	before := tagDataSnapshot(t, s.db)
-	archive, err := s.createBackupBundleForTarget(context.Background(), false, nil, 8)
+	archive, err := s.createBackupBundleForTarget(context.Background(), false, nil, sqliteSchemaVersion)
 	if err != nil {
 		t.Fatal(err)
 	}
 	destination := filepath.Join(t.TempDir(), "restored")
-	if _, err := restoreBackupForTarget(context.Background(), filepath.Join(s.backupDirectory(), archive.Name), destination, 8); err != nil {
+	if _, err := restoreBackupForTarget(context.Background(), filepath.Join(s.backupDirectory(), archive.Name), destination, sqliteSchemaVersion); err != nil {
 		t.Fatal(err)
 	}
 	db := sqliteConnection(t, filepath.Join(destination, "data/library.sqlite"))
