@@ -211,13 +211,20 @@ func (s *Store) ProcessMailJobs(ctx context.Context, limit int) error {
 				return nil
 			}
 			user, err := readUser(tx, job.UserID)
-			if err != nil || !user.Enabled || user.DeletedAt != "" || user.MustChangePassword {
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			if errors.Is(err, sql.ErrNoRows) || !user.Enabled || user.DeletedAt != "" || user.MustChangePassword {
 				reason = "MAIL_ACCOUNT_UNAVAILABLE"
 				return nil
 			}
 			if !job.Test {
 				var challenge emailChallenge
-				if mailReadJSON(tx, "email_challenge/"+job.UserID, &challenge) != nil || challenge.ID != job.ChallengeID || challenge.Consumed || challenge.Attempts >= 5 || !time.Now().Before(challenge.ExpiresAt) {
+				readErr := mailReadJSON(tx, "email_challenge/"+job.UserID, &challenge)
+				if readErr != nil && !errors.Is(readErr, sql.ErrNoRows) {
+					return readErr
+				}
+				if errors.Is(readErr, sql.ErrNoRows) || challenge.ID != job.ChallengeID || challenge.Consumed || challenge.Attempts >= 5 || !time.Now().Before(challenge.ExpiresAt) {
 					reason = "MAIL_SUPERSEDED"
 					return nil
 				}
@@ -232,8 +239,7 @@ func (s *Store) ProcessMailJobs(ctx context.Context, limit int) error {
 			}
 			secret, err = s.mailCredential(config)
 			if err != nil {
-				reason = "MAIL_UNAVAILABLE"
-				return nil
+				return err
 			}
 			raw, err := s.decryptMailPayload(job.Payload)
 			if err != nil || json.Unmarshal(raw, &envelope) != nil {
@@ -243,7 +249,9 @@ func (s *Store) ProcessMailJobs(ctx context.Context, limit int) error {
 			return nil
 		})
 		if err != nil {
-			reason = "MAIL_UNAVAILABLE"
+			// Failed queries, transaction begin/commit or credential reads may
+			// recover. Keep the encrypted body and use the bounded retry policy.
+			reason = "MAIL_RETRY"
 		}
 		if reason == "" {
 			s.mail.mu.Lock()
