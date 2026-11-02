@@ -95,7 +95,7 @@ test('playlist queue spans pages, ignores visible cache, advances and stops at t
  check.pending.resolve({ok:true,json:async()=>({items:[],total:3})});await settle();
  const full=f.requests.find(r=>r.url==='/api/v2/tracks/c');full.pending.resolve({ok:true,json:async()=>({id:'c',title:'C',lyrics:''})});await next;
  assert.equal(f.snapshot().track.id,'c');const count=f.requests.length;f.audio.ended=true;f.audio.emit('ended');await settle();assert.equal(f.requests.length,count);
- f.c.playOnlineTrack({id:'library',lyrics:''});assert.equal(f.get('onlineQueueToggle').hidden,true);
+ f.c.playOnlineTrack({id:'library',lyrics:''});assert.equal(f.get('onlineQueueToggle').hidden,true);assert.equal(f.get('onlineQueuePosition').textContent,'');
 });
 
 test('late playlist snapshot cannot replace a newer library playback',async()=>{
@@ -123,4 +123,15 @@ test('unavailable tracks are skipped, changed page revisions restart without mix
  const next=f.c.moveOnlineQueue(1);f.requests.at(-1).pending.resolve({ok:true,json:async()=>({})});await settle();
  assert.equal(f.requests.at(-1).url,'/api/v2/tracks/c');f.requests.at(-1).pending.resolve({ok:true,json:async()=>({id:'c',lyrics:''})});await next;
  assert.equal(f.snapshot().track.id,'c');assert.match(f.get('onlinePlayerStatus').textContent,/跳过 1/);
+});
+
+test('lyrics show three groups with translations, seek immediately and panels exclude each other',async()=>{
+ const f=fixture();await startQueue(f);
+ f.c.renderOnlineLyrics('[00:01]Original\n[00:01]翻译\n[00:02]Second\n[00:02]第二句\n[00:03]Third\n[00:04]Fourth');f.audio.duration=10;f.audio.currentTime=2;f.c.highlightOnlineLyrics(true);
+ const body=f.get('onlineLyricsLines');assert.equal(body.children.length,3);assert.equal(body.children[1].textContent,'Second第二句');assert.equal(body.children[1].getAttribute('aria-current'),'true');
+ f.get('onlineTranslations').onclick();assert.equal(body.children[1].textContent,'Second');body.children[2].onclick();assert.equal(f.audio.currentTime,3);assert.equal(body.children[1].textContent,'Third');
+ f.c.showOnlineLyrics(true);assert.equal(f.get('onlineQueuePanel').hidden,true);
+ f.c.showOnlineQueue(true);assert.equal(f.get('onlineLyricsPanel').hidden,true);assert.equal(f.get('onlineLyricsToggle').getAttribute('aria-expanded'),'false');assert.equal(f.get('onlineQueuePanel').hidden,false);
+ f.c.showOnlineLyrics(true);assert.equal(f.get('onlineQueuePanel').hidden,true);
+ f.c.renderOnlineLyrics('原文\n<script>bad()</script>');assert.match(body.textContent,/暂无同步歌词/);body.children.at(-1).onclick();assert.equal(body.textContent,'原文\n<script>bad()</script>');f.c.closeOnlinePlayer();assert.equal(body.textContent,'');
 });

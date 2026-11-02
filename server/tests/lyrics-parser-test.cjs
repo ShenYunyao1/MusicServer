@@ -75,3 +75,11 @@ test('oversized input rejects without silently displaying a truncated lyric',()=
  assert.throws(()=>context.parsePlayerLyrics('[00:01]'.repeat(20001)),/歌词行数/);
  assert.equal(parse('a'.repeat(2*1024*1024)).lines[0].text.length,2*1024*1024);
 });
+
+test('translation groups retain stable original and all distinct same-time texts',()=>{
+ const lines=parse('[00:01]原文\n[00:03]下一句\n[00:01]翻译\n[00:01]翻译\n[00:01]另一译文\n[00:03]Next\n说明').lines;
+ const groups=JSON.parse(JSON.stringify(context.groupPlayerLyrics(lines)));
+ assert.deepEqual(groups,[{time:1,text:'原文',translations:['翻译','另一译文']},{time:3,text:'下一句',translations:['Next']}]);
+ assert.equal(context.playerLyricIndex(groups,1),0);
+ assert.deepEqual(JSON.parse(JSON.stringify(context.groupPlayerLyrics([{time:null,text:'普通歌词'}]))),[]);
+});

@@ -89,9 +89,9 @@ async function savePlaylistTrackOrder(p,ids,focusID){
 function playlistTrackActions(p,track,unavailable){
   const ids=[...members(p)],index=ids.indexOf(track.id);
   const shift=offset=>{const order=ids.slice();[order[index],order[index+offset]]=[order[index+offset],order[index]];savePlaylistTrackOrder(p,order,track.id)};
-  const base=[{label:'播放曲目',disabled:unavailable,action:()=>playTrack(track)},{label:'曲目详情',action:()=>openPlaylistTrackDetails(p,track,unavailable)}];
+  const base=[{label:'播放曲目',disabled:unavailable,action:()=>playPlaylistTrack(p,track,p.playback_source)},{label:'曲目详情',action:()=>openPlaylistTrackDetails(p,track,unavailable)}];
   if(p.read_only){if(p.subscription_status==='active')base.push({label:'个人备注',action:()=>editPlaylistTrackNote(p,track)});return base}
-  return [{label:'播放曲目',disabled:unavailable,action:()=>playTrack(track)},
+  return [{label:'播放曲目',disabled:unavailable,action:()=>playPlaylistTrack(p,track,p.playback_source)},
     {label:'曲目详情',action:()=>openPlaylistTrackDetails(p,track,unavailable)},
     {label:'个人备注',action:()=>editPlaylistTrackNote(p,track)},
     {label:'上移曲目',disabled:index<=0||state.playlistTrackSortBusy,action:()=>shift(-1)},
@@ -114,7 +114,7 @@ function removePlaylistMember(p,track){
   run(async()=>{await api('playlists/'+p.id+'/tracks/'+track.id,'DELETE',undefined,undefined,p.version);await refreshCore();setStatus('曲目已移出歌单','ok')});
 }
 async function openPlaylistTrackDetails(p,track,unavailable){
-  if(!unavailable){if(await openTrackDetails(track)===false)return}
+  if(!unavailable){if(await openTrackDetails(track,full=>playPlaylistTrack(p,full,p.playback_source))===false)return}
   else{$('trackDetails').querySelector('h3').textContent='不可用曲目';$('trackDetailsBody').replaceChildren();$('trackDetails').showModal()}
   const section=document.createElement('section');section.className='playlist-track-personal';
   const title=document.createElement('h3');title.textContent='此歌单的个人备注';const note=document.createElement('p');note.textContent=p.track_notes?.[track.id]||'暂无个人备注';note.className='notice';

@@ -43,3 +43,16 @@ function playerLyricIndex(lines,seconds){
  while(low<=high){const middle=Math.floor((low+high)/2),time=lines[middle]?.time;if(Number.isFinite(time)&&time<=seconds){result=middle;low=middle+1}else high=middle-1}
  return result;
 }
+
+// Same-timestamp LRC entries are simultaneous text, never independent active lines.
+// Keep the file's first distinct nonempty text as the original; no language guessing.
+function groupPlayerLyrics(lines){
+ const groups=[];let distinct=new Set();
+ for(const line of lines){
+  if(!Number.isFinite(line.time))continue;
+  let group=groups.at(-1);if(!group||group.time!==line.time){group={time:line.time,text:line.text,translations:[]};groups.push(group);distinct=new Set([line.text]);continue}
+  if(!line.text||distinct.has(line.text))continue;distinct.add(line.text);if(!group.text){group.text=line.text;continue}
+  group.translations.push(line.text);
+ }
+ return groups;
+}

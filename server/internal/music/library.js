@@ -33,7 +33,7 @@ function renderTracks() {
     const row=document.createElement('tr');row.dataset.libraryTrack=t.id;
     row.dataset.signature=signature;
     row.innerHTML='<td class="track-selection-cell"><input type="checkbox" data-track-id="'+txt(t.id)+'" aria-label="选择 '+txt(t.title)+'" '+(state.selectedTrackIds.has(t.id)?'checked':'')+'></td><td><div class="track-title-cell"><button type="button" class="track-cover" aria-label="播放：'+txt(t.title||'未命名')+'" '+(t.missing?'disabled':'')+'>♪</button><button class="text-button track-title" data-details>'+txt(t.title||'未命名')+'</button></div></td><td class="track-artist">'+txt(t.artist||'—')+'</td><td class="track-album">'+txt(t.album||'—')+'</td><td><span class="badge '+(t.missing?'warn':'ok')+'">'+(t.missing?'文件缺失':'可播放')+'</span></td><td class="row-actions"></td>';
-    row.querySelector('.track-cover').onclick=()=>{cancelTrackClick();if(!t.missing)playTrack(t)};
+    row.querySelector('.track-cover').onclick=()=>{if(!t.missing)playTrack(t)};
     row.querySelector('[data-details]').onclick=null;
     if(typeof renderTrackTagSummary==='function'){
       const summary=renderTrackTagSummary(t);
@@ -51,7 +51,7 @@ function renderTracks() {
     row.onpointermove=e=>{if(pressPoint&&Math.hypot(e.clientX-pressPoint.x,e.clientY-pressPoint.y)>10)cancelPress()};
     row.onpointerup=row.onpointercancel=cancelPress;
     row.addEventListener('click',e=>{if(longPressed){longPressed=false;e.preventDefault();e.stopImmediatePropagation()}},true);
-    if(typeof bindTrackRowInteraction==='function')bindTrackRowInteraction(row,{title:row.querySelector('[data-details]'),detail:()=>openTrackDetails(t),play:()=>{if(!t.missing)playTrack(t)},toggle:()=>{const input=row.querySelector('[data-track-id]');input.checked=!input.checked;input.dispatchEvent(new Event('change',{bubbles:true}))}});
+    if(typeof bindTrackRowInteraction==='function')bindTrackRowInteraction(row,{title:row.querySelector('[data-details]'),detail:()=>openTrackDetails(t),toggle:()=>{const input=row.querySelector('[data-track-id]');input.checked=!input.checked;input.dispatchEvent(new Event('change',{bubbles:true}))}});
     $('trackRows').insertBefore(row,$('trackRows').children[index]||null);if(t.cover_id&&state.user)loadCover(row.querySelector('.track-cover'),'covers/'+encodeURIComponent(t.cover_id));
   }
   $('selectAll').checked=rows.length>0&&rows.every(t=>state.selectedTrackIds.has(t.id));
@@ -62,7 +62,7 @@ function renderTracks() {
   else if(page)browseRenderPager($('page-tracks'),'browseTrackPager',page,offset=>run(async()=>{state.selectedTrackIds.clear();browseSetRoute($('trackSearch').value.trim(),offset,state.trackFilter);await loadBrowseTracks(offset,page.revision);renderTracks()}));
   updateTrackSelection();
 }
-async function openTrackDetails(track) {
+async function openTrackDetails(track,playback=null) {
   if(track.detail_loaded===false&&typeof browseFullTrack==='function'){
     const generation=(state.trackDetailGeneration||0)+1;state.trackDetailGeneration=generation;
     try{track=await browseFullTrack(track);if(state.trackDetailGeneration!==generation)return false}catch(error){setStatus(error.message,'error');return false}
@@ -70,7 +70,7 @@ async function openTrackDetails(track) {
   const dialog=$('trackDetails');dialog.querySelector('h3').textContent=track.title||'未命名曲目';
   const body=$('trackDetailsBody');body.replaceChildren();
   const actions=document.createElement('div');actions.className='actions';
-  const play=makeButton('播放预览',()=>playTrack(track),'btn primary');play.disabled=Boolean(track.missing||track.removed);actions.append(play);
+  const play=makeButton('播放预览',()=>playback?playback(track):playTrack(track),'btn primary');play.disabled=Boolean(track.missing||track.removed);actions.append(play);
   actions.append(makeButton('加入我的歌单',()=>{dialog.close();openAddTracks([track.id])}));
   if(canManageTrack(track))actions.append(makeButton('编辑曲目',()=>{dialog.close();editTrack(track)}));
   body.append(actions);
@@ -143,6 +143,7 @@ function renderPlaylists(){
 function renderPlaylistDetail(p,config={}){
   const readonly=Boolean(p.read_only||config.publicView);
   if(!readonly&&typeof browseMemberPlaylist==='function')p=browseMemberPlaylist(p);
+  p={...p,playback_source:config.publicView?'public':p.subscription_status?'subscription':'own'};
   const detail=config.target||$('playlistDetail'),signature=JSON.stringify({p:{...p,browse_page:p.browse_page?{offset:p.browse_page.offset,limit:p.browse_page.limit,total:p.browse_page.total,items:p.browse_page.items}:null},tracks:config.tracks||state.tracks.filter(t=>members(p).has(t.id)),query:state.playlistTrackQuery||'',readonly});
   const renderPager=()=>{if(p.browse_page)browseRenderPager(detail,'browseMemberPager',p.browse_page,offset=>run(async()=>{browseSetRoute(state.playlistTrackQuery||'',offset);await loadBrowseMembers(p.id,offset,p.browse_page.revision);renderPlaylists()}))};
   if(detail.dataset.signature===signature&&detail.childElementCount){renderPager();return}
@@ -153,7 +154,8 @@ function renderPlaylistDetail(p,config={}){
   const intro=document.createElement('div');intro.className='page-intro';intro.innerHTML='<div class="playlist-detail-summary"><span class="cover playlist-detail-cover">♪</span><div><p>我的歌单 / 私人歌单</p><h1>'+txt(p.name)+'</h1><p>'+txt(p.description||'')+'</p></div></div><div class="actions"></div>';
   intro.querySelector('p').textContent=config.publicView?'公开歌单 / 只读查看':readonly?'我的订阅 / 只读歌单':'我的歌单 / '+playlistVisibilityLabel(p);
   const actions=intro.querySelector('.actions');const back=makeButton(config.publicView?'← 公开歌单':readonly?'← 我的订阅':'← 我的歌单',()=>{if(config.publicView)location.hash='#/public/playlists';else if(readonly)location.hash='#/subscriptions';else returnPlaylistList()});back.dataset.backPlaylists='';back.classList.add('page-back');
-  if(!readonly){const edit=makeButton('编辑歌单',()=>editPlaylist(p));edit.dataset.editPlaylist='';const add=makeButton('添加曲目',()=>openPlaylistTrackPicker(p),'btn primary');add.dataset.addMembers='';actions.append(edit,add)}appendCommunityActions(actions,p,config.publicView);detail.append(back,intro);
+  if(p.subscription_status!=='invalid'){const playAll=makeButton('播放全部',()=>playPlaylistTrack(p,null,p.playback_source),'btn primary');playAll.dataset.playPlaylist=p.id;actions.append(playAll)}
+  if(!readonly){const edit=makeButton('编辑歌单',()=>editPlaylist(p));edit.dataset.editPlaylist='';const add=makeButton('添加曲目',()=>openPlaylistTrackPicker(p),'btn');add.dataset.addMembers='';actions.append(edit,add)}appendCommunityActions(actions,p,config.publicView);detail.append(back,intro);
   if(p.subscription_status==='invalid'){const notice=document.createElement('p');notice.className='notice';notice.dataset.subscriptionInvalid='';notice.textContent='订阅已失效：'+subscriptionReason(p)+'。恢复可见性、分享授权和账户状态后会恢复；也可以取消此订阅。';detail.append(notice);return}
   if(p.cover_id)loadCover(intro.querySelector('.cover'),'covers/'+encodeURIComponent(p.cover_id));
   const all=[...members(p)].map(id=>(config.tracks||state.tracks).find(t=>t.id===id)||{id,title:'不可用曲目',removed:true}),query=(state.playlistTrackQuery||'').trim().toLowerCase(),tracks=p.browse_page?all:all.filter(t=>[t.title,t.artist,t.album,p.track_notes?.[t.id]].join(' ').toLowerCase().includes(query));
@@ -170,8 +172,8 @@ function renderPlaylistDetail(p,config={}){
     row.innerHTML='<span class="playlist-sequence" title="长按拖拽排序">'+(index+1)+'</span><div class="track-title-cell"><button type="button" class="track-cover" aria-label="播放：'+txt(name)+'" '+(unavailable?'disabled':'')+'>♪</button><div class="playlist-track-info"><button type="button" class="text-button track-title" data-playlist-track-details>'+txt(name)+'</button><span class="playlist-artist-mobile">'+txt(unavailable?'不可用':track.artist||'未知歌手')+'</span>'+(p.track_notes?.[track.id]?'<p class="playlist-note" title="'+txt(p.track_notes[track.id])+'">'+txt(p.track_notes[track.id])+'</p>':'')+'</div></div><span class="playlist-track-artist">'+txt(unavailable?'—':track.artist||'—')+'</span><span class="playlist-track-album">'+txt(unavailable?'—':track.album||'—')+'</span><span class="playlist-duration">'+playlistDuration(track.duration_ms)+'</span><span class="playlist-track-state"><span class="badge '+(unavailable?'warn':'ok')+'">'+(unavailable?'不可用':'可播放')+'</span></span>';
     const checkbox=document.createElement('input');checkbox.type='checkbox';checkbox.dataset.playlistSelect=track.id;checkbox.checked=selected.has(track.id);checkbox.setAttribute('aria-label','选择 '+name);checkbox.onchange=()=>{if(checkbox.checked)selected.add(track.id);else selected.delete(track.id);selectionCount.textContent='已选 '+selected.size+' / 当前页 '+tracks.length+' 首';if(typeof refreshSelectionUI==='function')refreshSelectionUI()};row.prepend(checkbox);
     row.querySelector('.track-cover').after(row.querySelector('.playlist-sequence'));
-    row.querySelector('.track-cover').onclick=()=>{cancelTrackClick();if(!unavailable)playTrack(track)};row.querySelector('[data-playlist-track-details]').onclick=null;
-    bindTrackRowInteraction(row,{title:row.querySelector('[data-playlist-track-details]'),detail:()=>openPlaylistTrackDetails(p,track,unavailable),play:()=>{if(!unavailable)playTrack(track)},toggle:()=>{checkbox.checked=!checkbox.checked;checkbox.dispatchEvent(new Event('change',{bubbles:true}))}});
+    row.querySelector('.track-cover').onclick=()=>{if(!unavailable)playPlaylistTrack(p,track,p.playback_source)};row.querySelector('[data-playlist-track-details]').onclick=null;
+    bindTrackRowInteraction(row,{title:row.querySelector('[data-playlist-track-details]'),detail:()=>openPlaylistTrackDetails(p,track,unavailable),toggle:()=>{checkbox.checked=!checkbox.checked;checkbox.dispatchEvent(new Event('change',{bubbles:true}))}});
     row.oncontextmenu=e=>{e.preventDefault();showPlaylistTrackMenu(e,p,track,unavailable)};
     row.onkeydown=e=>{if(e.target!==row)return;if(e.key==='ContextMenu'||e.shiftKey&&e.key==='F10'){e.preventDefault();const r=row.getBoundingClientRect();showPlaylistTrackMenu({clientX:r.left+45,clientY:r.top+20},p,track,unavailable)}};
     list.append(row);if(track.cover_id&&!unavailable)loadCover(row.querySelector('.track-cover'),'covers/'+encodeURIComponent(track.cover_id));

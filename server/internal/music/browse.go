@@ -400,6 +400,9 @@ func browsePlaylistTracks(tx *sql.Tx, auth authContext, id string, q browseQuery
 	var count int
 	playback := len(playbackSource) > 0
 	if playback {
+		// A playback snapshot is independent of UI filters. In particular, never
+		// allow a public listener to search an author's private member notes.
+		q.Search = ""
 		p, err := readPlaylistFrom(tx, id)
 		if err != nil {
 			return err

@@ -38,6 +38,10 @@ func TestPlaybackDirectoryPagingAndAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	request(bob, "public", "&limit=1")
+	searched := request(bob, "public", "&limit=1&q=private%20note")
+	if searched["total"] != float64(105) {
+		t.Fatal("playback search must not expose private note matches", searched)
+	}
 	if r := browseTestRequest(api, alice, "GET", fmt.Sprintf("/api/v2/browse/playback/playback?source=own&revision=%.0f", first["revision"]), "", 0); r.Code != 409 {
 		t.Fatal(r.Code, r.Body)
 	}
@@ -66,4 +70,32 @@ func TestPlaybackDirectoryPagingAndAccess(t *testing.T) {
 		b, _ := json.Marshal(r.Body.String())
 		t.Fatal(r.Code, string(b))
 	}
+}
+
+func TestPlaybackSharedInvitationRevocation(t *testing.T) {
+	api, a, b, p := sharingFixture(t)
+	bt := communityLogin(t, api.store, b.Username)
+	check := func(want int) {
+		t.Helper()
+		r := sessionRequest(api, bt, "GET", "/api/v2/browse/playback/"+p.ID+"?source=subscription&limit=1", "")
+		if r.Code != want {
+			t.Fatalf("got %d want %d: %s", r.Code, want, r.Body)
+		}
+	}
+	check(404)
+	invite, err := api.store.CreateInvitation(p.ID, b.Username, MutationOptions{UserID: a.ID, ExpectedVersion: p.Version})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(404)
+	invite, err = api.store.InvitationAction(invite.ID, "accept", MutationOptions{UserID: b.ID, ExpectedVersion: invite.Version})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(200)
+	_, err = api.store.InvitationAction(invite.ID, "revoke", MutationOptions{UserID: a.ID, ExpectedVersion: invite.Version})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(404)
 }
