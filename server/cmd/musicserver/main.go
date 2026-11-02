@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"log"
 	"net"
@@ -95,7 +96,7 @@ func main() {
 		if backgroundBlocked() {
 			return nil
 		}
-		return store.CleanupUploadStages()
+		return errors.Join(store.CleanupUploadStages(), store.CleanupListeningStatistics())
 	}(); err != nil {
 		log.Printf("clean expired uploads: %v", err)
 		_ = journal.Emit("server.cleanup_failed", activity.Fields{})
@@ -115,6 +116,10 @@ func main() {
 				}
 				if err := store.CleanupUploadStages(); err != nil {
 					log.Printf("clean expired uploads: %v", err)
+					_ = journal.Emit("server.cleanup_failed", activity.Fields{})
+				}
+				if err := store.CleanupListeningStatistics(); err != nil {
+					log.Printf("clean expired listening statistics: %v", err)
 					_ = journal.Emit("server.cleanup_failed", activity.Fields{})
 				}
 			case <-stopCleanup:

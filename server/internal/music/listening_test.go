@@ -255,3 +255,76 @@ func TestListeningRejectsForgedElapsedAndRevokedSession(t *testing.T) {
 		t.Fatal(w.Code, w.Body)
 	}
 }
+
+func TestListeningReadDoesNotRequireGlobalWriterAndProjectsSmallSummary(t *testing.T) {
+	a, u, auth, id := listeningFixture(t)
+	now := time.Now().UTC()
+	if _, err := a.store.db.Exec("INSERT INTO listening_totals VALUES(?,?,1,?)", u.ID, id, now.UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.store.db.Exec("UPDATE tracks SET payload=json_set(payload,'$.lyrics',?) WHERE id=?", strings.Repeat("large lyrics ", 100000), id); err != nil {
+		t.Fatal(err)
+	}
+	a.store.writeMu.Lock()
+	done := make(chan error, 1)
+	go func() {
+		result, err := a.store.listListening(auth, listeningQuery{period: "all", limit: 20}, now)
+		if err == nil {
+			data, _ := json.Marshal(result)
+			if len(data) > 4096 {
+				err = fmt.Errorf("summary carries large payload: %d", len(data))
+			}
+		}
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		a.store.writeMu.Unlock()
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		a.store.writeMu.Unlock()
+		<-done
+		t.Fatal("read-only history waited for global writer mutex")
+	}
+}
+
+func TestListeningExpiredSessionsDoNotConsumeMonthOfAdmission(t *testing.T) {
+	a, u, auth, id := listeningFixture(t)
+	now := time.Now().UTC()
+	if err := a.store.transaction(func(tx *sql.Tx) error {
+		for i := 0; i < 3000; i++ {
+			if _, err := tx.Exec("INSERT INTO listening_sessions VALUES(?,?,?,?,0,30000,0,?)", u.ID, fmt.Sprintf("90000000-0000-4000-8000-%012d", i), id, now.Add(-25*time.Hour).UnixMilli(), now.Add(-25*time.Hour).UnixMilli()); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	w := listeningRequest(a, auth, "POST", "sessions", listeningBody("90000000-0000-4000-8001-000000000000", id, 0))
+	if w.Code != 200 {
+		t.Fatal("expired sessions blocked new playback", w.Code, w.Body)
+	}
+}
+
+func TestListeningMaintenanceCleansInactiveAccountsAndKeepsTotals(t *testing.T) {
+	a, u, _, id := listeningFixture(t)
+	now := time.Now().UTC()
+	if _, err := a.store.db.Exec("INSERT INTO listening_sessions VALUES(?,?,?,?,0,30000,1,?)", u.ID, "90000000-0000-4000-8002-000000000000", id, now.Add(-25*time.Hour).UnixMilli(), now.UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.store.db.Exec("INSERT INTO listening_totals VALUES(?,?,1,?)", u.ID, id, now.UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.store.CleanupListeningStatistics(); err != nil {
+		t.Fatal(err)
+	}
+	var sessions, total int
+	a.store.db.QueryRow("SELECT count(*) FROM listening_sessions WHERE user_id=?", u.ID).Scan(&sessions)
+	a.store.db.QueryRow("SELECT play_count FROM listening_totals WHERE user_id=? AND track_id=?", u.ID, id).Scan(&total)
+	if sessions != 0 || total != 1 {
+		t.Fatal("maintenance lost totals or kept unusable sessions", sessions, total)
+	}
+}

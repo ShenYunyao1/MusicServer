@@ -1,6 +1,7 @@
 package music
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -63,20 +64,20 @@ func listeningTrackAllowed(reader sqlReader, auth authContext, id string) bool {
 	if auth.session {
 		return true
 	}
+	args := []any{id}
 	for pid, allowed := range auth.allowedPlaylists {
-		if !allowed {
-			continue
-		}
-		p, err := readPlaylistFrom(reader, pid)
-		if err != nil || !playlistReadAccess(reader, auth, p) {
-			continue
-		}
-		var exists bool
-		if reader.QueryRow("SELECT EXISTS(SELECT 1 FROM playlist_tracks WHERE playlist_id=? AND track_id=?)", pid, id).Scan(&exists) == nil && exists {
-			return true
+		if allowed {
+			args = append(args, pid)
 		}
 	}
-	return false
+	if len(args) == 1 {
+		return false
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(args)-1), ",")
+	args = append(args, auth.userID, auth.userID, auth.userID)
+	var allowed bool
+	err := reader.QueryRow("SELECT EXISTS(SELECT 1 FROM playlist_tracks m JOIN playlists p ON p.id=m.playlist_id LEFT JOIN users u ON u.id=p.owner_id WHERE m.track_id=? AND m.playlist_id IN ("+placeholders+") AND (p.system=1 OR p.owner_id=? OR (u.enabled=1 AND EXISTS(SELECT 1 FROM subscriptions s WHERE s.user_id=? AND s.playlist_id=p.id) AND (p.visibility='public' OR (p.visibility='shared' AND EXISTS(SELECT 1 FROM playlist_invitations i WHERE i.playlist_id=p.id AND i.inviter_id=p.owner_id AND i.recipient_id=? AND i.state='accepted'))))))", args...).Scan(&allowed)
+	return err == nil && allowed
 }
 
 func (s *Store) listeningEnabled() bool {
@@ -131,6 +132,9 @@ func (a *API) listening(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var e *listeningError
 		if errors.As(err, &e) {
+			if e.status == 429 {
+				w.Header().Set("Retry-After", "60")
+			}
 			writeError(w, e.status, e.code, e.message)
 		} else if errors.Is(err, sql.ErrNoRows) || errors.Is(err, errResourceHidden) {
 			writeError(w, 404, "NOT_FOUND", "track unavailable")
@@ -165,11 +169,12 @@ func (s *Store) reportListening(auth authContext, sid, trackID string, played in
 		if !listeningTrackAllowed(tx, auth, trackID) {
 			return errResourceHidden
 		}
-		track, err := readTrackFrom(tx, trackID, true)
-		if err != nil {
+		var removed, missing bool
+		var duration int64
+		if err := tx.QueryRow("SELECT removed,missing,COALESCE(json_extract(payload,'$.duration_ms'),0) FROM tracks WHERE id=?", trackID).Scan(&removed, &missing, &duration); err != nil {
 			return err
 		}
-		if track.Removed || track.Missing {
+		if removed || missing {
 			return errResourceHidden
 		}
 		stamp := now.UnixMilli()
@@ -182,7 +187,7 @@ func (s *Store) reportListening(auth authContext, sid, trackID string, played in
 				return listenError(409, "LISTENING_START_REQUIRED", "start session with played_ms=0 before progress")
 			}
 			// Bounded retention and admission apply per account, never erase another user's state.
-			if _, err = tx.Exec("DELETE FROM listening_sessions WHERE user_id=? AND last_seen_at<?", auth.userID, now.Add(-30*24*time.Hour).UnixMilli()); err != nil {
+			if _, err = tx.Exec("DELETE FROM listening_sessions WHERE user_id=? AND started_at<?", auth.userID, now.Add(-24*time.Hour).UnixMilli()); err != nil {
 				return err
 			}
 			if _, err = tx.Exec("DELETE FROM listening_daily WHERE user_id=? AND day<?", auth.userID, now.AddDate(0, 0, -90).Format("2006-01-02")); err != nil {
@@ -196,8 +201,8 @@ func (s *Store) reportListening(auth authContext, sid, trackID string, played in
 				return listenError(429, "LISTENING_LIMIT", "listening session limit reached")
 			}
 			minimum = 30000
-			if track.DurationMS > 0 {
-				minimum = max(int64(1), min(minimum, track.DurationMS/2))
+			if duration > 0 {
+				minimum = max(int64(1), min(minimum, duration/2))
 			}
 			_, err = tx.Exec("INSERT INTO listening_sessions(user_id,session_id,track_id,started_at,played_ms,minimum_ms,counted,last_seen_at) VALUES(?,?,?,?,0,?,0,?)", auth.userID, sid, trackID, stamp, minimum, stamp)
 			result.MinimumMS = minimum
@@ -276,7 +281,12 @@ func parseListeningQuery(r *http.Request) (listeningQuery, error) {
 }
 func (s *Store) listListening(auth authContext, q listeningQuery, now time.Time) (map[string]any, error) {
 	result := map[string]any{"items": []map[string]any{}, "total": 0, "offset": q.offset, "limit": q.limit}
-	err := s.transaction(func(tx *sql.Tx) error {
+	tx, err := s.db.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return result, err
+	}
+	defer tx.Rollback()
+	err = func() error {
 		var err error
 		auth, err = listeningIdentity(tx, auth)
 		if err != nil {
@@ -306,25 +316,26 @@ func (s *Store) listListening(auth authContext, q listeningQuery, now time.Time)
 			return err
 		}
 		result["total"] = total
-		rows, err := tx.Query("SELECT json_remove(t.payload,'$.lyrics'),l.play_count,l.last_played_at"+from+" ORDER BY l.play_count DESC,l.last_played_at DESC,t.id LIMIT ? OFFSET ?", append(args, q.limit, q.offset)...)
+		rows, err := tx.Query("SELECT t.id,t.title,json_extract(t.payload,'$.artist','$.album','$.duration_ms','$.cover_id'),l.play_count,l.last_played_at"+from+" ORDER BY l.play_count DESC,l.last_played_at DESC,t.id LIMIT ? OFFSET ?", append(args, q.limit, q.offset)...)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		items := []map[string]any{}
 		for rows.Next() {
-			var raw string
+			var id, title, raw string
 			var count, stamp int64
-			if err = rows.Scan(&raw, &count, &stamp); err != nil {
+			if err = rows.Scan(&id, &title, &raw, &count, &stamp); err != nil {
 				return err
 			}
-			var item map[string]any
-			if err = json.Unmarshal([]byte(raw), &item); err != nil {
+			var values []any
+			if err = json.Unmarshal([]byte(raw), &values); err != nil {
 				return err
 			}
-			if auth.role != "admin" {
-				item["path"] = ""
+			if len(values) != 4 {
+				return errors.New("invalid listening projection")
 			}
+			item := map[string]any{"id": id, "title": title, "artist": values[0], "album": values[1], "duration_ms": values[2], "cover_id": values[3]}
 			item["detail_loaded"] = false
 			item["play_count"] = count
 			item["last_played_at"] = time.UnixMilli(stamp).UTC().Format(time.RFC3339Nano)
@@ -332,6 +343,26 @@ func (s *Store) listListening(auth authContext, q listeningQuery, now time.Time)
 		}
 		result["items"] = items
 		return rows.Err()
-	})
+	}()
+	if err == nil {
+		err = tx.Commit()
+	}
 	return result, err
+}
+
+// Maintenance is global, so inactive accounts do not retain expired sessions
+// forever. Counted totals remain; only replay guards and old daily buckets age.
+func (s *Store) CleanupListeningStatistics() error {
+	schema, err := sqliteSchemaIdentity(s.db)
+	if err != nil || schema < 9 {
+		return err
+	}
+	return s.transaction(func(tx *sql.Tx) error {
+		now := time.Now().UTC()
+		if _, err := tx.Exec("DELETE FROM listening_sessions WHERE started_at<?", now.Add(-24*time.Hour).UnixMilli()); err != nil {
+			return err
+		}
+		_, err := tx.Exec("DELETE FROM listening_daily WHERE day<?", now.AddDate(0, 0, -90).Format("2006-01-02"))
+		return err
+	})
 }
