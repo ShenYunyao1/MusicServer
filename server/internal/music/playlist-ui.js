@@ -115,7 +115,7 @@ function removePlaylistMember(p,track){
 }
 async function openPlaylistTrackDetails(p,track,unavailable){
   if(!unavailable){if(await openTrackDetails(track,full=>playPlaylistTrack(p,full,p.playback_source))===false)return}
-  else{$('trackDetails').querySelector('h3').textContent='不可用曲目';$('trackDetailsBody').replaceChildren();$('trackDetails').showModal()}
+  else{state.trackDetailGeneration=(state.trackDetailGeneration||0)+1;$('trackDetails').querySelector('h3').textContent='不可用曲目';$('trackDetailsBody').replaceChildren();if(!$('trackDetails').open)$('trackDetails').showModal()}
   const section=document.createElement('section');section.className='playlist-track-personal';
   const title=document.createElement('h3');title.textContent='此歌单的个人备注';const note=document.createElement('p');note.textContent=p.track_notes?.[track.id]||'暂无个人备注';note.className='notice';
   const controls=document.createElement('div');controls.className='actions';

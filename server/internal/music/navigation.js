@@ -214,6 +214,7 @@ async function restoreWorkspaceRoute() {
     if(page==='tracks'){
       const query=new URLSearchParams(location.hash.split('?')[1]||'');$('trackSearch').value=query.get('q')||'';
       state.trackFilter=['all','mine','managed','orphan','missing'].includes(query.get('filter'))?query.get('filter'):'all';
+      if(!isAdministrator()&&['managed','orphan','missing'].includes(state.trackFilter)){state.trackFilter='all';query.delete('filter');history.replaceState(null,'',location.hash.split('?')[0]+(query.size?'?'+query:''))}
       document.querySelectorAll('[data-filter]').forEach(el=>el.classList.toggle('active',el.dataset.filter===state.trackFilter));await loadBrowseView();if(generation!==routeGeneration)return;renderTracks();
     }
     if(page==='listening')await loadListeningPage();

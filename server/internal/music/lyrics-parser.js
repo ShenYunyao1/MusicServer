@@ -29,7 +29,7 @@ function parsePlayerLyrics(value){
   if(offsetMatch&&Number.isSafeInteger(Number(offsetMatch[1]))&&Math.abs(Number(offsetMatch[1]))<=86400000)continue;
   const timestamps=[];
   for(;;){const match=text.match(/^\[(\d{1,5}):([0-5]\d)(?:[.:](\d{1,3}))?\]/);if(!match)break;timestamps.push((Number(match[1])*60+Number(match[2]))*1000+Number((match[3]||'').padEnd(3,'0')));text=text.slice(match[0].length);if(timestamps.length+timed.length>20000)throw new Error('歌词行数超过限制')}
-  if(timestamps.length){for(const time of timestamps)timed.push({time:Math.max(0,time-offset)/1000,text:text.trim()})}
+  if(timestamps.length){for(const time of timestamps)timed.push({time:(time-offset)/1000,text:text.trim()})}
   else{plain.push({time:null,text});if(text)notes.push({time:null,text})}
  }
  if(timed.length){timed.sort((first,second)=>first.time-second.time);return {timed:true,lines:timed.concat(notes)}}

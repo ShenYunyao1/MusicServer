@@ -23,7 +23,8 @@ function fixture(options={}){
   setAttribute(name,value){this.attributes.set(name,String(value))}getAttribute(name){return this.attributes.get(name)??null}removeAttribute(name){this.attributes.delete(name)}
   addEventListener(name,listener){if(!this.listeners.has(name))this.listeners.set(name,[]);this.listeners.get(name).push(listener)}
   emit(name,event={}){for(const listener of this.listeners.get(name)||[])listener(event)}
-  focus(){}scrollTo(value){this.scroll=value}getBoundingClientRect(){return {height:100,top:600,bottom:700}}
+  contains(element){return this===element||this.children.some(child=>child.contains(element))}
+  focus(){doc.activeElement=this}scrollTo(value){this.scroll=value}getBoundingClientRect(){return {height:100,top:600,bottom:700}}
   querySelector(selector){const walk=children=>{for(const child of children){if(selector==='[aria-current="true"]'&&child.getAttribute('aria-current')==='true')return child;const index=selector.match(/\[data-lyric-index="(\d+)"\]/)?.[1];if(index!==undefined&&child.dataset.lyricIndex===index)return child;const nested=walk(child.children);if(nested)return nested}return null};return walk(this.children)}
  }
  class Audio extends Element{
@@ -130,11 +131,22 @@ test('lyrics show three groups with translations, seek immediately and panels ex
  const f=fixture();await startQueue(f);
  f.c.renderOnlineLyrics('[00:01]Original\n[00:01]翻译\n[00:02]Second\n[00:02]第二句\n[00:03]Third\n[00:04]Fourth');f.audio.duration=10;f.audio.currentTime=2;f.c.highlightOnlineLyrics(true);
  const body=f.get('onlineLyricsLines');assert.equal(body.children.length,3);assert.equal(body.children[1].textContent,'Second第二句');assert.equal(body.children[1].getAttribute('aria-current'),'true');
+ assert.match(body.children[1].getAttribute('aria-label'),/第二句/);body.children[1].focus();f.audio.currentTime=3;f.c.highlightOnlineLyrics();assert.equal(f.c.document.activeElement.dataset.lyricIndex,'1');f.audio.currentTime=2;f.c.highlightOnlineLyrics();
  f.get('onlineTranslations').onclick();assert.equal(body.children[1].textContent,'Second');body.children[2].onclick();assert.equal(f.audio.currentTime,3);assert.equal(body.children[1].textContent,'Third');
  f.c.showOnlineLyrics(true);assert.equal(f.get('onlineQueuePanel').hidden,true);
  f.c.showOnlineQueue(true);assert.equal(f.get('onlineLyricsPanel').hidden,true);assert.equal(f.get('onlineLyricsToggle').getAttribute('aria-expanded'),'false');assert.equal(f.get('onlineQueuePanel').hidden,false);
  f.c.showOnlineLyrics(true);assert.equal(f.get('onlineQueuePanel').hidden,true);
  f.c.renderOnlineLyrics('原文\n<script>bad()</script>');assert.match(body.textContent,/暂无同步歌词/);body.children.at(-1).onclick();assert.equal(body.textContent,'原文\n<script>bad()</script>');f.c.closeOnlinePlayer();assert.equal(body.textContent,'');
+});
+
+test('volume panel focuses fine control, announces percent and returns focus',()=>{
+ const f=fixture();f.c.showOnlineVolume(true);assert.equal(f.c.document.activeElement,f.get('onlineVolumeFine'));
+ assert.equal(f.get('onlineVolumeFine').getAttribute('aria-valuetext'),'100%');assert.equal(f.get('onlineVolume').getAttribute('aria-describedby'),'onlineVolumeValue');
+ f.bar.hidden=false;f.c.showOnlineVolume(false);assert.equal(f.c.document.activeElement,f.get('onlineVolumeToggle'));
+});
+
+test('playback toggle remains usable while queue request is pending',async()=>{
+ const f=fixture();await startQueue(f);vm.runInContext('onlineQueue.busy=true',f.c);f.audio.paused=false;await f.c.toggleOnlinePlayback();assert.equal(f.audio.paused,true);await f.c.toggleOnlinePlayback();assert.equal(f.audio.paused,false);
 });
 
 test('expanded lyrics retain full groups, suspend follow during browsing and clicking seeks and plays',async()=>{

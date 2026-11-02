@@ -7,6 +7,12 @@ const vm=require('node:vm');
 const context=vm.createContext({});
 vm.runInContext(fs.readFileSync(path.join(__dirname,'../internal/music/lyrics-parser.js'),'utf8'),context);
 const parse=text=>JSON.parse(JSON.stringify(context.parsePlayerLyrics(text)));
+test('positive offset preserves distinct preroll times rather than creating translations',()=>{
+ const parsed=parse('[offset:3000]\n[00:01]First\n[00:02]Second\n[00:04]Third');
+ assert.deepEqual(parsed.lines.map(x=>x.time),[-2,-1,1]);
+ const groups=JSON.parse(JSON.stringify(context.groupPlayerLyrics(parsed.lines)));
+ assert.equal(groups.length,3);assert.deepEqual(groups.map(x=>x.translations),[[],[],[]]);assert.equal(context.playerLyricIndex(groups,0),1);
+});
 
 test('provider extensions and packed metadata never become displayed lyric lines',()=>{
  const extensions=['[kuwo:033]','[ver:v1.0]','[awlrc:lrc:'+ 'A'.repeat(19999)+']','[tlrc:encoded]','[rlrc:encoded]','[ar:Artist][ti:Song]'];
@@ -35,7 +41,7 @@ test('metadata is hidden while untimed mixed notes never enter timed lookup',()=
 test('positive offset advances lyrics and negative offset delays every timestamp',()=>{
  assert.deepEqual(parse('[00:01]一\n[offset:+500]\n[00:02]二').lines,[{time:0.5,text:'一'},{time:1.5,text:'二'}]);
  assert.equal(parse('[offset:-1000]\n[00:02.345]延后').lines[0].time,3.345);
- assert.equal(parse('[offset:5000]\n[00:01]提前').lines[0].time,0);
+ assert.equal(parse('[offset:5000]\n[00:01]提前').lines[0].time,-4);
  assert.equal(parse('[offset:100]\n[offset:200]\n[00:01]最后偏移').lines[0].time,0.8);
 });
 

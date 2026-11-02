@@ -33,6 +33,7 @@ function renderOnlineVolume(){
  const output=onlineOutput;if(!$('onlineVolume'))return;
  $('onlineVolume').value=String(output.level);if($('onlineVolumeFine'))$('onlineVolumeFine').value=String(output.level);
  if($('onlineVolumeValue'))$('onlineVolumeValue').textContent=(Math.round(output.level*1000)/10)+'%';
+ for(const id of ['onlineVolume','onlineVolumeFine'])if($(id)){$(id).setAttribute('aria-valuetext',(Math.round(output.level*1000)/10)+'%');$(id).setAttribute('aria-describedby','onlineVolumeValue')}
  if($('onlineVolumeMute'))$('onlineVolumeMute').textContent=output.audio?.muted?'取消静音':'静音';
 }
 async function setOnlineVolume(value){
@@ -42,7 +43,7 @@ async function setOnlineVolume(value){
  try{await ensureOnlineAudio();if(onlineOutput.level>0)onlineOutput.audio.muted=false;renderOnlineVolume();return true}
  catch(error){onlineOutput.audio.pause();if($('onlinePlayerStatus'))$('onlinePlayerStatus').textContent=error.message;return false}
 }
-function showOnlineVolume(open){if(!onlineOutput.panel)return;onlineOutput.panel.hidden=!open;$('onlineVolumeToggle').setAttribute('aria-expanded',String(open));if(open){if(typeof showOnlineLyrics==='function')showOnlineLyrics(false);if(typeof showOnlineQueue==='function')showOnlineQueue(false);renderOnlineVolume()}}
+function showOnlineVolume(open){if(!onlineOutput.panel)return;const panel=onlineOutput.panel,restore=!panel.hidden&&panel.contains(document.activeElement);panel.hidden=!open;$('onlineVolumeToggle').setAttribute('aria-expanded',String(open));if(open){if(typeof showOnlineLyrics==='function')showOnlineLyrics(false);if(typeof showOnlineQueue==='function')showOnlineQueue(false);renderOnlineVolume();$('onlineVolumeFine').focus({preventScroll:true})}else if(restore&&!onlinePlayerBar?.hidden)$('onlineVolumeToggle').focus({preventScroll:true})}
 function initializeOnlineVolume(bar,audio){
  onlineOutput.audio=audio;try{applyOnlineVolume()}catch(_){} // Playback remains gated by ensureOnlineAudio.
  const toggle=makeButton('音量',()=>showOnlineVolume(onlineOutput.panel.hidden),'online-lyrics-toggle online-volume-toggle');toggle.id='onlineVolumeToggle';toggle.setAttribute('aria-expanded','false');toggle.setAttribute('aria-controls','onlineVolumePanel');$('onlineLyricsToggle').before(toggle);
