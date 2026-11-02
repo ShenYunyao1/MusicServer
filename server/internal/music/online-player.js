@@ -2,11 +2,16 @@
 
 const onlinePlayback={generation:0,track:null,controller:null,coverURL:null,coverSerial:0,lyrics:[],active:-1,seeking:false,follow:true,loaded:false};
 let onlinePlayerBar=null,onlineLyricsPanel=null,onlineCover=null;
+let onlineQueue=null,onlineQueueSerial=0,onlineQueueController=null,onlineQueuePanel=null;
 function playerTime(seconds){if(!Number.isFinite(seconds)||seconds<0)return '00:00';const whole=Math.floor(seconds);return String(Math.floor(whole/60)).padStart(2,'0')+':'+String(whole%60).padStart(2,'0')}
 function playerIcon(name){const paths={play:'<path d="m9 5 11 7-11 7Z"/>',pause:'<path d="M8 5v14M16 5v14"/>',volume:'<path d="m11 4-6 5H2v6h3l6 5Z"/><path d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/>',muted:'<path d="m11 4-6 5H2v6h3l6 5Z"/><path d="m16 9 6 6m0-6-6 6"/>',close:'<path d="m6 6 12 12M18 6 6 18"/>'};return '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+paths[name]+'</svg>'}
 function initializeOnlinePlayer(bar,audio){
  onlinePlayerBar=bar;audio.controls=false;audio.hidden=true;audio.preload='metadata';bar.classList.add('online-player');bar.setAttribute('aria-label','在线播放器');bar.innerHTML='<div id="onlineCover" class="online-cover" aria-hidden="true">♪</div><div class="online-player-body"><div class="online-player-heading"><div class="online-track-information"><strong id="previewTitle"></strong><span id="onlineArtist"></span></div><div class="online-player-actions"><button id="onlinePlay" type="button" class="online-icon online-play" aria-label="播放"></button><button id="onlineMute" type="button" class="online-icon" aria-label="静音"></button><input id="onlineVolume" class="online-volume" type="range" min="0" max="1" step="0.01" value="1" aria-label="音量"><button id="onlineLyricsToggle" type="button" class="online-lyrics-toggle" aria-expanded="false" aria-controls="onlineLyricsPanel">歌词</button><button id="onlineClose" type="button" class="online-icon" aria-label="关闭播放预览"></button></div></div><div class="online-progress-row"><time id="onlineElapsed">00:00</time><input id="onlineSeek" type="range" min="0" max="1000" value="0" step="1" aria-label="播放进度" disabled><time id="onlineDuration">00:00</time></div><p id="onlinePlayerStatus" class="online-player-status" role="status"></p></div>';
  bar.append(audio);onlineCover=$('onlineCover');
+ const previous=makeButton('‹',()=>moveOnlineQueue(-1),'online-icon'),next=makeButton('›',()=>moveOnlineQueue(1),'online-icon'),queue=makeButton('播放列表',()=>showOnlineQueue(onlineQueuePanel.hidden),'online-lyrics-toggle'),position=document.createElement('span');
+ previous.id='onlinePrevious';next.id='onlineNext';queue.id='onlineQueueToggle';position.id='onlineQueuePosition';previous.setAttribute('aria-label','上一首');next.setAttribute('aria-label','下一首');queue.setAttribute('aria-controls','onlineQueuePanel');queue.setAttribute('aria-expanded','false');
+ $('onlinePlay').before(previous);$('onlinePlay').after(next);$('onlineLyricsToggle').after(queue);$('onlineArtist').after(position);
+ onlineQueuePanel=document.createElement('section');onlineQueuePanel.id='onlineQueuePanel';onlineQueuePanel.className='online-lyrics-panel online-queue-panel';onlineQueuePanel.hidden=true;onlineQueuePanel.setAttribute('aria-label','当前播放列表');onlineQueuePanel.innerHTML='<div class="online-lyrics-heading"><h2 id="onlineQueueTitle">播放列表</h2><button id="onlineQueueClose" type="button" class="online-icon" aria-label="收起播放列表">×</button></div><div id="onlineQueueItems" class="online-queue-items"></div>';document.body.append(onlineQueuePanel);$('onlineQueueClose').onclick=()=>showOnlineQueue(false);
  const panel=document.createElement('section');panel.id='onlineLyricsPanel';panel.className='online-lyrics-panel';panel.hidden=true;panel.setAttribute('aria-label','当前曲目歌词');panel.innerHTML='<div class="online-lyrics-heading"><div><span class="online-eyebrow">正在播放</span><h2 id="onlineLyricsTitle">歌词</h2></div><div class="online-lyrics-actions"><button id="onlineLyricsFollow" type="button" class="btn small" hidden>回到当前歌词</button><button id="onlineLyricsClose" type="button" class="online-icon" aria-label="收起歌词"></button></div></div><div id="onlineLyricsLines" class="online-lyrics-lines" tabindex="0" aria-label="歌词内容"></div>';
  onlineLyricsPanel=panel;document.body.append(panel);
  $('onlineClose').innerHTML=playerIcon('close');$('onlineLyricsClose').innerHTML=playerIcon('close');
@@ -19,10 +24,12 @@ function initializeOnlinePlayer(bar,audio){
  $('onlineSeek').onchange=()=>{if(Number.isFinite(audio.duration)&&audio.duration>0)audio.currentTime=audio.duration*Number($('onlineSeek').value)/1000;onlinePlayback.seeking=false;renderOnlinePlayer();highlightOnlineLyrics(true)};
  $('onlineSeek').onblur=()=>{onlinePlayback.seeking=false;renderOnlinePlayer()};
  for(const event of ['loadedmetadata','durationchange','timeupdate','play','pause','ended','volumechange','canplay'])audio.addEventListener(event,()=>{renderOnlinePlayer();highlightOnlineLyrics()});
+ audio.addEventListener('ended',()=>{if(onlineQueue&&!onlineQueue.busy)moveOnlineQueue(1)});
  audio.addEventListener('waiting',()=>{if(onlinePlayback.track)$('onlinePlayerStatus').textContent='正在缓冲…'});
  audio.addEventListener('playing',()=>{$('onlinePlayerStatus').textContent=''});
  audio.addEventListener('error',()=>{if(onlinePlayback.track)$('onlinePlayerStatus').textContent='音频加载失败，请点击播放重试。'});
- document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!panel.hidden){event.preventDefault();showOnlineLyrics(false)}});
+ document.addEventListener('keydown',event=>{if(event.key==='Escape'&&(!panel.hidden||!onlineQueuePanel.hidden)){event.preventDefault();showOnlineLyrics(false);showOnlineQueue(false)}});
+ document.addEventListener('pointerdown',event=>{if(!onlinePlayerBar.contains(event.target)&&!panel.contains(event.target)&&!onlineQueuePanel.contains(event.target)){showOnlineLyrics(false);showOnlineQueue(false)}});
  if(typeof ResizeObserver==='function'){const observer=new ResizeObserver(updateOnlinePlayerLayout);observer.observe(bar)}
  window.addEventListener('resize',updateOnlinePlayerLayout);renderOnlinePlayer();
 }
@@ -36,8 +43,10 @@ function renderOnlinePlayer(){
  const duration=Number.isFinite(audio.duration)&&audio.duration>0?audio.duration:0;$('onlineDuration').textContent=playerTime(duration);$('onlineSeek').disabled=!duration;
  if(!onlinePlayback.seeking){const ratio=duration?Math.max(0,Math.min(1,audio.currentTime/duration)):0;$('onlineSeek').value=String(Math.round(ratio*1000));$('onlineSeek').style.setProperty('--progress',ratio*100+'%');$('onlineElapsed').textContent=playerTime(audio.currentTime)}
  $('onlineSeek').setAttribute('aria-valuetext',playerTime(audio.currentTime)+' / '+playerTime(duration));
+ renderOnlineQueueControls();
 }
 async function toggleOnlinePlayback(){
+ if(onlineQueue?.pendingIndex!==undefined)return selectOnlineQueue(onlineQueue.pendingIndex);
  if(!onlinePlayback.track)return;if(!memberPlayer.paused&&!memberPlayer.ended){memberPlayer.pause();return}
  const generation=onlinePlayback.generation;
  try{if(memberPlayer.error){memberPlayer.src='/api/v2/media/'+encodeURIComponent(onlinePlayback.track.id);memberPlayer.load()}await memberPlayer.play();if(generation===onlinePlayback.generation)$('onlinePlayerStatus').textContent=''}catch(error){if(generation===onlinePlayback.generation)$('onlinePlayerStatus').textContent='播放未开始，请再次点击播放。'}
@@ -48,24 +57,88 @@ async function loadOnlineCover(track,current,signal){
  try{const response=await fetch('/api/v2/covers/'+encodeURIComponent(track.cover_id),{credentials:'same-origin',cache:'no-store',signal});if(!response.ok)throw new Error('cover');const blob=await response.blob();if(!current()||serial!==onlinePlayback.coverSerial)return;const url=URL.createObjectURL(blob),img=document.createElement('img');onlinePlayback.coverURL=url;img.alt='';img.src=url;onlineCover.replaceChildren(img)}catch(_){}
 }
 function setOnlineTrackText(track){$('previewTitle').textContent=track.title||'未命名曲目';$('previewTitle').title=track.title||'未命名曲目';$('onlineArtist').textContent=[track.artist||'未知歌手',track.album].filter(Boolean).join(' · ');$('onlineArtist').title=$('onlineArtist').textContent;$('onlineLyricsTitle').textContent=track.title||'歌词'}
-function playOnlineTrack(track){
+function playOnlineTrack(track,fromQueue=false){
  if(!state.user||track.missing||track.removed||!onlinePlayerBar)return;
- const generation=++onlinePlayback.generation,owner=state.user.id,epoch=typeof browseState==='undefined'?0:browseState.epoch;
+ if(!fromQueue)clearOnlineQueue();
+ const generation=++onlinePlayback.generation,owner=state.user.id;
  onlinePlayback.controller?.abort();const controller=new AbortController();onlinePlayback.controller=controller;
- const current=()=>generation===onlinePlayback.generation&&owner===state.user?.id&&(typeof browseState==='undefined'||epoch===browseState.epoch)&&!controller.signal.aborted;
+ const current=()=>generation===onlinePlayback.generation&&owner===state.user?.id&&!controller.signal.aborted;
  memberPlayer.pause();onlinePlayback.track={...track};onlinePlayback.lyrics=[];onlinePlayback.active=-1;onlinePlayback.follow=true;onlinePlayback.seeking=false;onlinePlayback.loaded=false;onlinePlayerBar.hidden=false;memberPlayer.hidden=true;setOnlineTrackText(track);$('onlinePlayerStatus').textContent='正在加载音频…';$('onlineLyricsFollow').hidden=true;showOnlineLyricMessage('正在读取歌词…');releaseOnlineCover();updateOnlinePlayerLayout();
  memberPlayer.src='/api/v2/media/'+encodeURIComponent(track.id);memberPlayer.load();toggleOnlinePlayback();
  loadOnlineCover(track,current,controller.signal);
- (async()=>{try{let full=track;if(track.detail_loaded===false||track.lyrics===undefined){const response=await fetch('/api/v2/tracks/'+encodeURIComponent(track.id),{credentials:'same-origin',cache:'no-store',signal:controller.signal});if(!response.ok)throw new Error('metadata');full=await response.json()}
-  if(!current())return;if(full.missing||full.removed){memberPlayer.pause();$('onlinePlayerStatus').textContent='曲目已不可用';showOnlineLyricMessage('曲目已不可用');return}
+ (async()=>{try{let full=track;if(track.detail_loaded===false||track.lyrics===undefined){const response=await fetch('/api/v2/tracks/'+encodeURIComponent(track.id),{credentials:'same-origin',cache:'no-store',signal:controller.signal});if(!response.ok)throw Object.assign(new Error('metadata'),{status:response.status});full=await response.json()}
+  if(!current())return;if(full.missing||full.removed){memberPlayer.pause();$('onlinePlayerStatus').textContent='曲目已不可用';showOnlineLyricMessage('曲目已不可用');if(onlineQueue)moveOnlineQueue(1);return}
   onlinePlayback.track=full;onlinePlayback.loaded=true;setOnlineTrackText(full);if(full.cover_id!==track.cover_id)loadOnlineCover(full,current,controller.signal);renderOnlineLyrics(full.lyrics||'');
- }catch(error){if(current())showOnlineLyricMessage('歌词读取失败，请点击重试。',true)}})();
+ }catch(error){if(current()){if(onlineQueue&&[401,403].includes(error.status)){onlineQueueError(error);return}if(onlineQueue&&error.status===404){memberPlayer.pause();moveOnlineQueue(1);return}showOnlineLyricMessage('歌词读取失败，请点击重试。',true)}}})();
 }
 function closeOnlinePlayer(){
+ clearOnlineQueue();
  onlinePlayback.generation++;onlinePlayback.controller?.abort();onlinePlayback.controller=null;onlinePlayback.track=null;onlinePlayback.lyrics=[];onlinePlayback.active=-1;onlinePlayback.seeking=false;onlinePlayback.loaded=false;releaseOnlineCover();memberPlayer.pause();memberPlayer.removeAttribute('src');memberPlayer.load();memberPlayer.hidden=true;
  if(onlinePlayerBar){onlinePlayerBar.hidden=true;$('previewTitle').textContent='';$('onlineArtist').textContent='';$('onlineLyricsTitle').textContent='歌词';$('onlinePlayerStatus').textContent='';$('onlineLyricsLines').replaceChildren();showOnlineLyrics(false);renderOnlinePlayer();updateOnlinePlayerLayout()}
 }
-function showOnlineLyrics(open){if(!onlineLyricsPanel||!onlinePlayback.track&&open)return;onlineLyricsPanel.hidden=!open;$('onlineLyricsToggle').setAttribute('aria-expanded',String(open));if(open){onlinePlayback.follow=true;$('onlineLyricsFollow').hidden=true;highlightOnlineLyrics(true);$('onlineLyricsLines').focus({preventScroll:true})}updateOnlinePlayerLayout()}
+function showOnlineLyrics(open){if(!onlineLyricsPanel||!onlinePlayback.track&&open)return;if(open)showOnlineQueue(false);onlineLyricsPanel.hidden=!open;$('onlineLyricsToggle').setAttribute('aria-expanded',String(open));if(open){onlinePlayback.follow=true;$('onlineLyricsFollow').hidden=true;highlightOnlineLyrics(true);$('onlineLyricsLines').focus({preventScroll:true})}updateOnlinePlayerLayout()}
+
+function clearOnlineQueue(){onlineQueueSerial++;onlineQueueController?.abort();onlineQueueController=null;onlineQueue=null;showOnlineQueue(false);renderOnlineQueueControls();if($('onlineQueueItems'))$('onlineQueueItems').replaceChildren()}
+function renderOnlineQueueControls(){
+ if(!$('onlinePrevious'))return;
+ for(const id of ['onlinePrevious','onlineNext','onlineQueueToggle','onlineQueuePosition'])$(id).hidden=!onlineQueue;
+ if(!onlineQueue)return;
+ $('onlinePrevious').disabled=onlineQueue.busy||onlineQueue.index<=0;$('onlineNext').disabled=onlineQueue.busy||onlineQueue.index>=onlineQueue.items.length-1;
+ $('onlineQueuePosition').textContent=onlineQueue.name+' · '+(onlineQueue.index+1)+' / '+onlineQueue.items.length;
+}
+function showOnlineQueue(open){
+ if(!onlineQueuePanel)return;open=Boolean(open&&onlineQueue);onlineQueuePanel.hidden=!open;$('onlineQueueToggle').setAttribute('aria-expanded',String(open));
+ if(!open)return;showOnlineLyrics(false);$('onlineQueueTitle').textContent=onlineQueue.name+' · 播放列表';const body=$('onlineQueueItems');body.replaceChildren();
+ onlineQueue.items.forEach((track,index)=>{const button=makeButton((index+1)+'. '+(track.title||'未命名曲目')+(track.missing||track.removed?' · 不可用':''),()=>selectOnlineQueue(index),'online-queue-item');button.disabled=Boolean(track.missing||track.removed);button.setAttribute('aria-current',String(index===onlineQueue.index));body.append(button)});
+ body.querySelector('[aria-current="true"]')?.scrollIntoView?.({block:'nearest'});
+}
+async function onlineJSON(path,signal){
+ const response=await fetch('/api/v2/'+path,{credentials:'same-origin',cache:'no-store',signal});
+ if(!response.ok){const error=new Error('HTTP '+response.status);error.status=response.status;try{error.code=(await response.json()).error?.code}catch(_){}throw error}return response.json();
+}
+function onlineQueuePath(p,offset=0,limit=100,revision){const params=new URLSearchParams({source:p.source,offset:String(offset),limit:String(limit)});if(revision!==undefined)params.set('revision',String(revision));return 'browse/playback/'+encodeURIComponent(p.id)+'?'+params}
+function onlineQueueError(error){
+ if([401,403,404].includes(error.status)){memberPlayer.pause();clearOnlineQueue();$('onlinePlayerStatus').textContent='登录或歌单访问权限已失效，已停止顺序播放。'}
+ else $('onlinePlayerStatus').textContent='播放列表读取失败，请重试：'+error.message;
+}
+async function playPlaylistTrack(playlist,track,source){
+ if(!state.user||playlist.system||playlist.subscription_status==='invalid')return;
+ clearOnlineQueue();memberPlayer.pause();onlinePlayback.generation++;onlinePlayback.controller?.abort();
+ const serial=onlineQueueSerial,owner=state.user.id,controller=new AbortController();onlineQueueController=controller;
+ const current=()=>serial===onlineQueueSerial&&owner===state.user?.id&&!controller.signal.aborted;
+ const p={id:playlist.id,name:playlist.name,source:source|| (playlist.subscription_status?'subscription':'own')};
+ try{
+  let items=[],revision,name=p.name;
+  for(let attempt=0;attempt<3;attempt++){
+   items=[];revision=undefined;
+   try{for(let offset=0;;){const page=await onlineJSON(onlineQueuePath(p,offset,100,revision),controller.signal);if(!current())return;
+    if(!Array.isArray(page.items)||!Number.isInteger(page.total)||page.total<offset+page.items.length||!Number.isFinite(page.revision))throw new Error('播放目录格式无效');
+    if(revision!==undefined&&revision!==page.revision)throw Object.assign(new Error('目录变化'),{code:'BROWSE_RESTART'});
+    revision=page.revision;name=page.playlist?.name||name;items.push(...page.items);offset+=page.items.length;if(offset>=page.total)break;if(!page.items.length)throw new Error('播放目录不完整');
+   }break}catch(error){if(error.code==='BROWSE_RESTART'&&attempt<2)continue;throw error}
+  }
+  if(!current())return;let index=track?items.findIndex(item=>item.id===track.id):items.findIndex(item=>!item.missing&&!item.removed);
+  if(index<0||items[index].missing||items[index].removed)throw new Error('歌单中没有目标可播放曲目，请刷新后重试');
+  onlineQueue={...p,name,items,index,busy:false};playOnlineTrack(items[index],true);renderOnlineQueueControls();
+ }catch(error){if(current()&&error.name!=='AbortError'){onlineQueueError(error);if(typeof setStatus==='function')setStatus('无法开始歌单播放：'+error.message,'error')}}
+}
+function moveOnlineQueue(direction){if(!onlineQueue||onlineQueue.busy)return;const index=onlineQueue.index+direction;if(index<0||index>=onlineQueue.items.length)return;return selectOnlineQueue(index,direction)}
+async function selectOnlineQueue(index,direction=1){
+ const queue=onlineQueue;if(!queue||queue.busy)return;queue.busy=true;memberPlayer.pause();onlinePlayback.generation++;onlinePlayback.controller?.abort();renderOnlineQueueControls();
+ const serial=onlineQueueSerial,owner=state.user?.id,current=()=>queue===onlineQueue&&serial===onlineQueueSerial&&owner===state.user?.id;
+ try{
+  await onlineJSON(onlineQueuePath(queue,0,1),onlineQueueController?.signal);if(!current())return;
+  let skipped=0;
+  for(;index>=0&&index<queue.items.length;index+=direction){
+   const item=queue.items[index];if(item.missing||item.removed){skipped++;continue}
+   let full;try{full=await onlineJSON('tracks/'+encodeURIComponent(item.id),onlineQueueController?.signal)}catch(error){if(error.status===404){skipped++;continue}throw error}if(!current())return;
+   if(full.missing||full.removed){skipped++;continue}
+   delete queue.pendingIndex;queue.index=index;queue.items[index]={...full,detail_loaded:true};playOnlineTrack(queue.items[index],true);if(skipped)$('onlinePlayerStatus').textContent='已跳过 '+skipped+' 首不可用曲目';return;
+  }
+  $('onlinePlayerStatus').textContent=skipped?'剩余曲目不可用，播放已停止。':'歌单播放完毕。';
+ }catch(error){if(current()&&error.name!=='AbortError'){queue.pendingIndex=index;onlineQueueError(error)}}
+ finally{if(current()){queue.busy=false;renderOnlineQueueControls();if(!onlineQueuePanel.hidden)showOnlineQueue(true)}}
+}
 function showOnlineLyricMessage(text,retry=false){
  const body=$('onlineLyricsLines');body.replaceChildren();const message=document.createElement('p');message.className='online-lyrics-message';message.textContent=text;body.append(message);if(retry){const b=makeButton('重试读取歌词',()=>{const track=onlinePlayback.track;if(track)reloadOnlineLyrics(track)},'btn small');body.append(b)}
 }

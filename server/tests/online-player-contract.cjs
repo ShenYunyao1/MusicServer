@@ -18,6 +18,7 @@ function fixture(){
   get textContent(){return this.ownText+this.children.map(child=>child.textContent||'').join('')}
   set textContent(value){this.ownText=String(value);this.children=[]}
   append(...children){for(const child of children){if(child.tagName==='fragment')this.append(...child.children);else{child.parentNode=this;this.children.push(child)}}}
+  before(...children){this.parentNode.append(...children)}after(...children){this.parentNode.append(...children)}
   replaceChildren(...children){this.ownText='';this.children=[];this.append(...children)}
   setAttribute(name,value){this.attributes.set(name,String(value))}getAttribute(name){return this.attributes.get(name)??null}removeAttribute(name){this.attributes.delete(name)}
   addEventListener(name,listener){if(!this.listeners.has(name))this.listeners.set(name,[]);this.listeners.get(name).push(listener)}
@@ -35,7 +36,7 @@ function fixture(){
  }
  const audio=new Audio(),bar=new Element();bar.id='previewBar';bar.hidden=true;
  const doc={body:new Element(),documentElement:new Element(),createElement:tag=>new Element(tag),createDocumentFragment:()=>new Element('fragment'),addEventListener(){}};
- const c={console,document:doc,window:{addEventListener(){}},AbortController,Number,Math,Date,Set,Map,Promise,state:{user:{id:'alice'}},browseState:{epoch:1},memberPlayer:audio,
+ const c={console,document:doc,window:{addEventListener(){}},AbortController,URLSearchParams,Number,Math,Date,Set,Map,Promise,state:{user:{id:'alice'}},browseState:{epoch:1},memberPlayer:audio,
   $:id=>ids.get(id),makeButton:(text,action)=>{const element=new Element('button');element.textContent=text;element.onclick=action;return element},
   URL:{createObjectURL:blob=>{const url='blob:test-'+created.length;created.push({url,blob});return url},revokeObjectURL:url=>revoked.push(url)},
   fetch:(url,options)=>{const pending=deferred();requests.push({url,options,pending});return pending.promise},
@@ -79,4 +80,47 @@ test('seek reflects actual duration and uses a preview without claiming audio mo
 
 test('oversized lyric parser failure becomes retry UI and never an uncaught task',async()=>{
  const f=fixture();f.c.playOnlineTrack({id:'huge',lyrics:'a'.repeat(2*1024*1024+1)});await settle();assert.match(f.get('onlineLyricsLines').textContent,/读取失败/);assert.equal(f.snapshot().lyrics.length,0);assert.equal(f.get('onlineLyricsLines').children.at(-1).tagName,'button');
+});
+
+test('playlist queue spans pages, ignores visible cache, advances and stops at the end',async()=>{
+ const f=fixture(),p={id:'p',name:'Playlist'};
+ const pending=f.c.playPlaylistTrack(p,{id:'b'});
+ assert.match(f.requests[0].url,/browse\/playback\/p\?.*source=own/);
+ f.requests[0].pending.resolve({ok:true,json:async()=>({items:[{id:'a'},{id:'b'}],total:3,revision:8,playlist:{id:'p',name:'Playlist'}})});await settle();
+ assert.match(f.requests[1].url,/offset=2/);assert.match(f.requests[1].url,/revision=8/);
+ f.requests[1].pending.resolve({ok:true,json:async()=>({items:[{id:'c'}],total:3,revision:8,playlist:{id:'p',name:'Playlist'}})});
+ await pending;await settle();
+ const next=f.c.moveOnlineQueue(1);
+ const check=f.requests.find(r=>/limit=1(?:&|$)/.test(r.url));
+ check.pending.resolve({ok:true,json:async()=>({items:[],total:3})});await settle();
+ const full=f.requests.find(r=>r.url==='/api/v2/tracks/c');full.pending.resolve({ok:true,json:async()=>({id:'c',title:'C',lyrics:''})});await next;
+ assert.equal(f.snapshot().track.id,'c');const count=f.requests.length;f.audio.ended=true;f.audio.emit('ended');await settle();assert.equal(f.requests.length,count);
+ f.c.playOnlineTrack({id:'library',lyrics:''});assert.equal(f.get('onlineQueueToggle').hidden,true);
+});
+
+test('late playlist snapshot cannot replace a newer library playback',async()=>{
+ const f=fixture(),pending=f.c.playPlaylistTrack({id:'p',name:'Old'},{id:'a'});
+ f.c.playOnlineTrack({id:'library',lyrics:''});f.requests[0].pending.resolve({ok:true,json:async()=>({items:[{id:'a'}],total:1,revision:1,playlist:{id:'p'}})});await pending;
+ assert.equal(f.snapshot().track.id,'library');assert.equal(f.get('onlineQueueToggle').hidden,true);
+});
+
+async function startQueue(f,source='own'){
+ const pending=f.c.playPlaylistTrack({id:'p',name:'Queue'},{id:'a'},source);
+ f.requests[0].pending.resolve({ok:true,json:async()=>({items:[{id:'a',lyrics:''},{id:'b'},{id:'c'}],total:3,revision:1,playlist:{id:'p'}})});await pending;
+}
+test('revoked source stops and clears the queue, network error pauses and can retry',async()=>{
+ const f=fixture();await startQueue(f,'subscription');
+ const next=f.c.moveOnlineQueue(1);f.requests.at(-1).pending.resolve({ok:false,status:503,json:async()=>({})});await next;
+ assert.equal(f.audio.paused,true);assert.equal(f.snapshot().track.id,'a');assert.equal(f.get('onlineQueueToggle').hidden,false);
+ const retry=f.c.toggleOnlinePlayback();f.requests.at(-1).pending.resolve({ok:false,status:404,json:async()=>({})});await retry;
+ assert.equal(f.audio.paused,true);assert.equal(f.get('onlineQueueToggle').hidden,true);assert.match(f.get('onlinePlayerStatus').textContent,/权限/);
+});
+test('unavailable tracks are skipped, changed page revisions restart without mixing snapshots',async()=>{
+ const f=fixture(),pending=f.c.playPlaylistTrack({id:'p',name:'Queue'},null);
+ f.requests[0].pending.resolve({ok:true,json:async()=>({items:[{id:'stale'}],total:2,revision:1})});await settle();
+ f.requests.at(-1).pending.resolve({ok:false,status:409,json:async()=>({error:{code:'BROWSE_RESTART'}})});await settle();
+ f.requests.at(-1).pending.resolve({ok:true,json:async()=>({items:[{id:'a',lyrics:''},{id:'gone',missing:true},{id:'c'}],total:3,revision:2})});await pending;
+ const next=f.c.moveOnlineQueue(1);f.requests.at(-1).pending.resolve({ok:true,json:async()=>({})});await settle();
+ assert.equal(f.requests.at(-1).url,'/api/v2/tracks/c');f.requests.at(-1).pending.resolve({ok:true,json:async()=>({id:'c',lyrics:''})});await next;
+ assert.equal(f.snapshot().track.id,'c');assert.match(f.get('onlinePlayerStatus').textContent,/跳过 1/);
 });

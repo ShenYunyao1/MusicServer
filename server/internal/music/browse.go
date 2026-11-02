@@ -133,6 +133,10 @@ func (a *API) browse(response http.ResponseWriter, request *http.Request) {
 			if err := browsePlaylists(tx, auth, q, &page); err != nil {
 				return err
 			}
+		case len(parts) == 2 && parts[0] == "playback" && validID.MatchString(parts[1]):
+			if err := browsePlaylistTracks(tx, auth, parts[1], q, &page, request.URL.Query().Get("source")); err != nil {
+				return err
+			}
 		case len(parts) == 3 && parts[0] == "playlists" && parts[2] == "tracks" && validID.MatchString(parts[1]):
 			if err := browsePlaylistTracks(tx, auth, parts[1], q, &page); err != nil {
 				return err
@@ -391,13 +395,37 @@ func browsePlaylists(tx *sql.Tx, auth authContext, q browseQuery, page *browsePa
 	return rows.Err()
 }
 
-func browsePlaylistTracks(tx *sql.Tx, auth authContext, id string, q browseQuery, page *browsePage) error {
+func browsePlaylistTracks(tx *sql.Tx, auth authContext, id string, q browseQuery, page *browsePage, playbackSource ...string) error {
 	var raw string
 	var count int
-	// Ordinary browse intentionally includes only one's own private collection;
-	// administrators can inspect another owner only by explicitly naming it.
-	if err := tx.QueryRow("SELECT "+browsePlaylistProjection+" FROM playlists WHERE id=? AND (system=1 OR owner_id=? OR ?='admin')", id, auth.userID, auth.role).Scan(&raw, &count); err != nil {
-		return err
+	playback := len(playbackSource) > 0
+	if playback {
+		p, err := readPlaylistFrom(tx, id)
+		if err != nil {
+			return err
+		}
+		allowed := false
+		switch playbackSource[0] {
+		case "own":
+			allowed = p.OwnerID == auth.userID || auth.role == "admin"
+		case "public":
+			allowed = publishedPlaylist(tx, p)
+		case "subscription":
+			allowed = hasSubscription(tx, auth.userID, id) && externalPlaylistAccess(tx, auth.userID, p)
+		}
+		if p.System || !allowed {
+			return errResourceHidden
+		}
+		// Playback never returns personal notes, complete membership arrays or lyrics.
+		if err := tx.QueryRow("SELECT json_remove(payload,'$.track_ids','$.track_notes','$.unavailable_track_ids'),COALESCE(json_array_length(payload,'$.track_ids'),0) FROM playlists WHERE id=?", id).Scan(&raw, &count); err != nil {
+			return err
+		}
+	} else {
+		// Ordinary browse intentionally includes only one's own private collection;
+		// administrators can inspect another owner only by explicitly naming it.
+		if err := tx.QueryRow("SELECT "+browsePlaylistProjection+" FROM playlists WHERE id=? AND (system=1 OR owner_id=? OR ?='admin')", id, auth.userID, auth.role).Scan(&raw, &count); err != nil {
+			return err
+		}
 	}
 	playlist, err := browsePlaylistSummary(raw, count)
 	if err != nil {
@@ -413,7 +441,11 @@ func browsePlaylistTracks(tx *sql.Tx, auth authContext, id string, q browseQuery
 	if err := tx.QueryRow("SELECT count(*) FROM playlist_tracks m JOIN tracks t ON t.id=m.track_id WHERE "+where, args...).Scan(&page.Total); err != nil {
 		return err
 	}
-	rows, err := tx.Query(`SELECT CASE WHEN t.removed=1 OR t.missing=1 THEN json_object('id',t.id,'title','Unavailable','removed',json(CASE WHEN t.removed=1 THEN 'true' ELSE 'false' END),'missing',json(CASE WHEN t.missing=1 THEN 'true' ELSE 'false' END),'version',t.version) ELSE json_remove(t.payload,'$.lyrics') END,m.note FROM playlist_tracks m JOIN tracks t ON t.id=m.track_id WHERE `+where+" ORDER BY m.position LIMIT ? OFFSET ?", append(args, q.Limit, q.Offset)...)
+	noteProjection := "m.note"
+	if playback {
+		noteProjection = "''"
+	}
+	rows, err := tx.Query(`SELECT CASE WHEN t.removed=1 OR t.missing=1 THEN json_object('id',t.id,'title','Unavailable','removed',json(CASE WHEN t.removed=1 THEN 'true' ELSE 'false' END),'missing',json(CASE WHEN t.missing=1 THEN 'true' ELSE 'false' END),'version',t.version) ELSE json_remove(t.payload,'$.lyrics') END,`+noteProjection+` FROM playlist_tracks m JOIN tracks t ON t.id=m.track_id WHERE `+where+" ORDER BY m.position LIMIT ? OFFSET ?", append(args, q.Limit, q.Offset)...)
 	if err != nil {
 		return err
 	}
@@ -428,6 +460,9 @@ func browsePlaylistTracks(tx *sql.Tx, auth authContext, id string, q browseQuery
 			return err
 		}
 		item["detail_loaded"], item["playlist_note"] = false, note
+		if playback {
+			delete(item, "playlist_note")
+		}
 		if auth.role != "admin" {
 			if _, present := item["path"]; present {
 				item["path"] = ""
