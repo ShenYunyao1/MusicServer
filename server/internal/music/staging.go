@@ -180,6 +180,12 @@ func (s *Store) stageAudioWithAssetsContext(ctx context.Context, name string, re
 	defer func() { s.stageMu.Lock(); delete(s.activeStages, relative); s.stageMu.Unlock() }()
 	settings := s.Settings()
 	max := settings.MaxUploadBytes
+	max = temporaryReaderBound(reader, max)
+	releaseBudget, err := s.reserveTemporaryUpload(owner, id, max)
+	if err != nil {
+		return UploadPreview{}, err
+	}
+	defer releaseBudget()
 	writeStarted := time.Now()
 	count, copyErr := s.materializeUpload(ctx, root, relative, reader, max)
 	metrics.Bytes = count
@@ -274,6 +280,9 @@ func (s *Store) stageAudioWithAssetsContext(ctx context.Context, name string, re
 	}
 	if err := s.transaction(func(tx *sql.Tx) error {
 		if err := checkStageUploadActor(tx, owner, options); err != nil {
+			return err
+		}
+		if err := checkTemporaryMetadata(tx, owner, id, "", int64(len(encoded)), s.temporaryLimits()); err != nil {
 			return err
 		}
 		if _, err := tx.Exec("INSERT INTO meta(key,value) VALUES(?,'1') ON CONFLICT(key) DO UPDATE SET value='1'", "validated_audio/"+record.Track.ContentHash); err != nil {

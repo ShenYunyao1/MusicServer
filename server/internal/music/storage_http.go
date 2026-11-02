@@ -11,6 +11,11 @@ import (
 )
 
 func writeStorageError(w http.ResponseWriter, err error) bool {
+	if errors.Is(err, errUploadTemporaryLimit) {
+		w.Header().Set("Retry-After", "60")
+		writeError(w, 429, "UPLOAD_TEMPORARY_LIMIT", err.Error())
+		return true
+	}
 	if errors.Is(err, errEmailVerificationRequired) {
 		writeError(w, 403, "EMAIL_VERIFICATION_REQUIRED", err.Error())
 		return true

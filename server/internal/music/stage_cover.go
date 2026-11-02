@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"path/filepath"
 )
 
 // Updating a discovered sidecar never requires sending the audio again.
@@ -32,7 +33,7 @@ func (s *Store) updateStageCover(id string, data []byte, source string, options 
 	if err := checkStageUploadActor(s.db, owner, options); err != nil {
 		return UploadPreview{}, err
 	}
-	if source == "external" && (record.Track.CoverSource == "embedded"||record.Track.CoverSource=="manual") {
+	if source == "external" && (record.Track.CoverSource == "embedded" || record.Track.CoverSource == "manual") {
 		return preview, nil
 	}
 	record.Cover = cover
@@ -43,8 +44,14 @@ func (s *Store) updateStageCover(id string, data []byte, source string, options 
 	if err != nil {
 		return UploadPreview{}, err
 	}
+	if err := s.checkSpace(filepath.Dir(s.dataPath), int64(len(encoded))*2+(1<<20)); err != nil {
+		return UploadPreview{}, err
+	}
 	if err := s.transaction(func(tx *sql.Tx) error {
 		if err := checkStageUploadActor(tx, owner, options); err != nil {
+			return err
+		}
+		if err := checkTemporaryMetadata(tx, owner, id, "", int64(len(encoded)), s.temporaryLimits()); err != nil {
 			return err
 		}
 		_, err := tx.Exec("UPDATE upload_staging SET track_json=? WHERE id=?", string(encoded), id)
@@ -72,6 +79,9 @@ func (a *API) stageCoverUpload(w http.ResponseWriter, r *http.Request, id string
 	}
 	preview, err := a.store.updateStageCover(id, data, source, mutationOptions(r))
 	if err != nil {
+		if writeStorageError(w, err) {
+			return
+		}
 		writeError(w, 400, "STAGE_COVER_FAILED", err.Error())
 		return
 	}

@@ -170,9 +170,16 @@ func readResume(reader sqlReader, id string) (resumableUpload, error) {
 	return checkpoint.resumableUpload, nil
 }
 
-func saveResume(tx *sql.Tx, task resumableUpload) error {
+func saveResume(tx *sql.Tx, task resumableUpload, limits ...temporaryUploadLimits) error {
 	encoded, err := json.Marshal(resumableCheckpoint{task, task.OwnerID, task.Preview})
 	if err != nil {
+		return err
+	}
+	budget := defaultTemporaryUploadLimits()
+	if len(limits) > 0 {
+		budget = limits[0]
+	}
+	if err := checkTemporaryMetadata(tx, task.OwnerID, "", task.ID, int64(len(encoded)), budget); err != nil {
 		return err
 	}
 	_, err = tx.Exec("INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", resumableMetaPrefix+task.ID, string(encoded))
@@ -303,6 +310,11 @@ func (s *Store) createResume(auth authContext, name string, size int64, fields, 
 	}
 	now := time.Now().UTC()
 	task := resumableUpload{ID: id, OwnerID: auth.userID, Name: name, Size: size, ChunkSize: resumableChunkSize, Chunks: []resumableChunk{}, State: "uploading", CreatedAt: now, ExpiresAt: now.Add(resumableTTL), Fields: fields, Attachments: attachments}
+	releaseBudget, err := s.reserveTemporaryUpload(auth.userID, id, size)
+	if err != nil {
+		return resumableUpload{}, err
+	}
+	defer releaseBudget()
 	lock := resumableLock(id)
 	lock.Lock()
 	defer lock.Unlock()
@@ -354,7 +366,7 @@ func (s *Store) createResume(auth authContext, name string, size int64, fields, 
 		if total >= 256 || ownerCount >= 16 {
 			return errResumeLimit
 		}
-		return saveResume(tx, task)
+		return saveResume(tx, task, s.temporaryLimits())
 	})
 	if err != nil {
 		_ = root.Remove(resumeFilePath(id))
@@ -367,6 +379,11 @@ func (s *Store) patchResume(ctx context.Context, auth authContext, task resumabl
 	if task.State != "uploading" {
 		return task, errResumeConflict
 	}
+	releaseBudget, err := s.reserveTemporaryUpload(auth.userID, task.ID, 0)
+	if err != nil {
+		return task, err
+	}
+	defer releaseBudget()
 	if err := s.recoverResume(task, false); err != nil {
 		return task, err
 	}
@@ -451,7 +468,7 @@ func (s *Store) patchResume(ctx context.Context, auth authContext, task resumabl
 		if current.Offset != task.Offset || current.State != "uploading" || current.OwnerID != auth.userID || !time.Now().Before(current.ExpiresAt) {
 			return errResumeConflict
 		}
-		return saveResume(tx, next)
+		return saveResume(tx, next, s.temporaryLimits())
 	})
 	if err != nil {
 		return task, err
@@ -547,7 +564,7 @@ func (s *Store) finishResume(ctx context.Context, auth authContext, task resumab
 		if err := checkResumeUploadActor(tx, auth); err != nil {
 			return err
 		}
-		return saveResume(tx, next)
+		return saveResume(tx, next, s.temporaryLimits())
 	})
 	if err != nil {
 		return UploadPreview{}, err
@@ -571,7 +588,7 @@ func (s *Store) cancelResume(auth authContext, task resumableUpload) error {
 		if err := resumeActor(tx, auth); err != nil {
 			return err
 		}
-		return saveResume(tx, next)
+		return saveResume(tx, next, s.temporaryLimits())
 	}); err != nil {
 		return err
 	}
@@ -845,7 +862,7 @@ func (s *Store) InitializeResumableUploads() error {
 			e = s.recoverResume(task, true)
 			if errors.Is(e, errResumeCorrupt) {
 				task.State = "corrupt"
-				e = s.transaction(func(tx *sql.Tx) error { return saveResume(tx, task) })
+				e = s.transaction(func(tx *sql.Tx) error { return saveResume(tx, task, s.temporaryLimits()) })
 			}
 		}
 		lock.Unlock()
