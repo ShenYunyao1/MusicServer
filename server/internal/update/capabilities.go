@@ -84,16 +84,45 @@ func (m *Manager) sourceSchema() int {
 	return version.Schema
 }
 
-// Called under m.mu. The app never writes this root-owned capability document.
 func (m *Manager) compatibilityError(manifest Manifest) error {
+	snapshot := m.readCapabilitySnapshot()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.compatibilityErrorLocked(manifest, snapshot)
+}
+
+// The app never writes the root-owned capability document. Capture its path
+// under the lock, read outside it, then revalidate current state under the lock.
+type capabilitySnapshot struct {
+	state string
+	value workerCapabilities
+	err   error
+}
+
+func (m *Manager) readCapabilitySnapshot() capabilitySnapshot {
+	m.mu.Lock()
+	state, reader := m.workerState, m.readCapabilities
+	m.mu.Unlock()
+	if reader == nil {
+		reader = readWorkerCapabilities
+	}
+	snapshot := capabilitySnapshot{state: state}
+	if state == "" {
+		snapshot.err = errors.New(upgradeWorkerMessage)
+		return snapshot
+	}
+	snapshot.value, snapshot.err = reader(filepath.Join(filepath.Dir(state), capabilitiesName))
+	return snapshot
+}
+func (m *Manager) compatibilityErrorLocked(manifest Manifest, snapshot capabilitySnapshot) error {
 	source := m.sourceSchema()
 	if !compatibleFrom(manifest, source) {
 		return errors.New("database schema is incompatible; manual upgrade required (data will not be cleared)")
 	}
-	return m.workerCapabilityError(source, manifest.Schema)
+	return m.workerCapabilityErrorLocked(source, manifest.Schema, snapshot)
 }
 
-func (m *Manager) workerCapabilityError(source, target int) error {
+func (m *Manager) workerCapabilityErrorLocked(source, target int, snapshot capabilitySnapshot) error {
 	if !version.KnownSchema(source) || !version.KnownSchema(target) {
 		return errors.New("unknown database schema")
 	}
@@ -101,18 +130,13 @@ func (m *Manager) workerCapabilityError(source, target int) error {
 	if source == 7 && target == 7 {
 		return nil
 	}
-	reader := readWorkerCapabilities
-	if m.readCapabilities != nil {
-		reader = m.readCapabilities
-	}
-	if m.workerState == "" {
+	if m.workerState == "" || m.workerState != snapshot.state {
 		return errors.New(upgradeWorkerMessage)
 	}
-	c, err := reader(filepath.Join(filepath.Dir(m.workerState), capabilitiesName))
-	if err != nil {
-		return fmt.Errorf("%s: %w", upgradeWorkerMessage, err)
+	if snapshot.err != nil {
+		return fmt.Errorf("%s: %w", upgradeWorkerMessage, snapshot.err)
 	}
-	if !c.supports(source, target) {
+	if !snapshot.value.supports(source, target) {
 		return errors.New(upgradeWorkerMessage)
 	}
 	return nil

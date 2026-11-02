@@ -155,12 +155,13 @@ func ValidateRepository(raw string) error {
 }
 
 func (m *Manager) Status() Status {
+	capabilities := m.readCapabilitySnapshot()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.recoverOrphanedQueueLocked()
 	status := m.status
 	if m.plan == nil && status.Schema != 0 {
-		if err := m.workerCapabilityError(m.sourceSchema(), status.Schema); err != nil {
+		if err := m.workerCapabilityErrorLocked(m.sourceSchema(), status.Schema, capabilities); err != nil {
 			status.Compatible = false
 			if status.State == "available" || status.State == "incompatible" {
 				status.State, status.Message = "incompatible", err.Error()
@@ -168,7 +169,7 @@ func (m *Manager) Status() Status {
 		}
 	}
 	if m.plan != nil && m.plan.Manifest.Version == status.LatestVersion && m.plan.Repository == status.Repository {
-		if err := m.compatibilityError(m.plan.Manifest); err != nil {
+		if err := m.compatibilityErrorLocked(m.plan.Manifest, capabilities); err != nil {
 			status.Compatible = false
 			status.CanInstall = false
 			if status.State == "available" || status.State == "incompatible" {
@@ -397,8 +398,9 @@ func (m *Manager) checkRelease(ctx context.Context, status Status, path, ref str
 	if manifest.Version != status.LatestVersion {
 		return status, errors.New("manifest version differs from release tag")
 	}
+	capabilities := m.readCapabilitySnapshot()
 	m.mu.Lock()
-	compatibilityErr := m.compatibilityError(manifest)
+	compatibilityErr := m.compatibilityErrorLocked(manifest, capabilities)
 	m.mu.Unlock()
 	status.Commit, status.Schema, status.Notes, status.Compatible = manifest.Commit, manifest.Schema, latest.Body, compatibilityErr == nil
 	pkg, err := manifest.Platform(runtime.GOOS, runtime.GOARCH)
@@ -478,13 +480,14 @@ func (m *Manager) manifest(ctx context.Context, latest release) (Manifest, error
 
 // Prepare downloads a verified package without installing it. Checks never call this.
 func (m *Manager) Prepare(ctx context.Context) error {
+	capabilities := m.readCapabilitySnapshot()
 	m.mu.Lock()
 	if m.closed || (m.status.State != "available" && m.status.State != "incompatible") || m.plan == nil || m.plan.Repository != m.repository() {
 		m.mu.Unlock()
 		return errors.New("check a compatible release first")
 	}
 	plan := *m.plan
-	if err := m.compatibilityError(plan.Manifest); err != nil {
+	if err := m.compatibilityErrorLocked(plan.Manifest, capabilities); err != nil {
 		m.mu.Unlock()
 		return err
 	}
@@ -522,6 +525,7 @@ func (m *Manager) jobActiveLocked() bool {
 
 // Apply queues only a version, never a shell command or a caller-supplied path.
 func (m *Manager) Apply(expected string) error {
+	capabilities := m.readCapabilitySnapshot()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed || runtime.GOOS != "linux" || m.queueDir == "" || m.workerState == "" || m.repository() != Repository {
@@ -530,7 +534,7 @@ func (m *Manager) Apply(expected string) error {
 	if m.plan == nil {
 		return errors.New("check a verified compatible release first")
 	}
-	if err := m.compatibilityError(m.plan.Manifest); err != nil {
+	if err := m.compatibilityErrorLocked(m.plan.Manifest, capabilities); err != nil {
 		return err
 	}
 	if m.jobActiveLocked() || (m.status.State != "available" && m.status.State != "incompatible") || m.status.LatestVersion != expected || m.status.Repository != m.repository() || m.plan.Manifest.Version != expected || m.plan.Repository != m.repository() {
