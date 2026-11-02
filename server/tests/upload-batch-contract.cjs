@@ -6,11 +6,11 @@ async function until(check,label){for(let n=0;n<100;n++){if(check())return;await
 function upload(id){return {id,file:{name:id+'.wav',size:10},edits:{},status:'待暂存'}}
 function fixture(items){
  const elements=new Map(),calls=[],state={user:{id:'alice'},uploads:items,playlists:[],batch:0};
- function element(){return {value:'',checked:false,options:[],classList:{add(){}},after(){},append(){},setAttribute(){},replaceChildren(...items){this.options=items},add(item){this.options.push(item)},querySelector(){return null}}}
+ function element(){return {value:'',checked:false,options:[],classList:{add(){}},before(){},after(){},append(){},setAttribute(){},replaceChildren(...items){this.options=items},add(item){this.options.push(item)},querySelector(){return null}}}
  const get=id=>{if(!elements.has(id))elements.set(id,element());return elements.get(id)};
- const c={console,Map,WeakMap,Promise,Array,Math,JSON,Date,URLSearchParams,Option:function(text,value){this.text=text;this.value=value},document:{createElement:element,querySelector(){return null}},$:get,state,resumeWorkspaceEpoch:0,uploadFlowRun:null,uploadFlowControls:element(),
+ const c={console,Map,WeakMap,Promise,Array,Math,JSON,Date,URLSearchParams,browserUUID:()=> 'created',Option:function(text,value){this.text=text;this.value=value},document:{createElement:element,querySelector(){return null}},$:get,state,resumeWorkspaceEpoch:0,uploadFlowRun:null,uploadFlowControls:element(),
   uploadFlowCurrent:(owner,epoch)=>state.user?.id===owner&&c.resumeWorkspaceEpoch===epoch,uploadFlowPending:u=>!['完成','已去重'].includes(u.status),
-  renderUploads(){},parseLocalUpload:async()=>{},invalidateLocalParse:u=>{u.localGeneration=(u.localGeneration||0)+1;u.localPromise=null;return u.localGeneration},
+  renderUploads(){},resumeStageUpload:async()=>{},parseLocalUpload:async()=>{},invalidateLocalParse:u=>{u.localGeneration=(u.localGeneration||0)+1;u.localPromise=null;return u.localGeneration},
   startUploadFlow:async items=>{calls.push(['start',items.map(u=>u.id)])},confirmUpload:async()=>{},confirmUploads:async()=>{},persistResumeQueue:async()=>{},run:action=>action(),
   api:async(url,method)=>{calls.push(['api',url,method]);return {id:'target',version:1,owner_id:'alice'}},
  };
@@ -22,7 +22,7 @@ async function restoreCommitted(){
   describeFile:file=>({id:'new',file}),browserUUID:()=> 'new',completeResumeUpload:async u=>{u.resumeId=null},setStatus(){},renderUploads(){}});
  vm.runInContext(resume.slice(resume.indexOf('async function restoreResumeQueue('),resume.indexOf('function decorateResumableUploads(')),f.c);
  await f.c.restoreResumeQueue();assert.equal(f.state.uploads.length,1,'committed assignment must survive missing remote resume task');
- const u=f.state.uploads[0];assert.equal(u.commitResult.track.id,'existing-track');assert.equal(u.needsSourceFile,false);assert.equal(u.status,'完成');assert.equal(u.targetPlaylistID,'target');assert.ok(u.assignmentError);
+ const u=f.state.uploads[0];assert.equal(u.commitResult.track.id,'existing-track');assert.equal(u.needsSourceFile,false);assert.equal(u.status,'完成');assert.equal(u.targetPlaylistID,'target');assert.equal(u.targetLocked,true);assert.ok(u.assignmentError);
 }
 async function retryAccountBoundary(){
  const u={...upload('done'),status:'完成',commitResult:{track:{id:'old-track'}},targetPlaylistID:'target',assignmentError:'retry'};
@@ -52,5 +52,20 @@ async function targetCatalogSurvivesViewCache(){
  const u={...upload('targeted'),targetPlaylistID:'kept'},f=fixture([u]);f.state.playlists=[{id:'kept',name:'Kept playlist',owner_id:'alice'}];f.load();assert.equal(f.get('uploadTargetPlaylist').value,'kept');f.state.playlists=[];f.c.renderUploads();assert.equal(f.get('uploadTargetPlaylist').value,'kept','Filtering another page must not reset the queued target');
  f.c.api=async url=>{assert.match(url,/browse\/playlists\?/);return {items:[{id:'page-2',name:'Off-page target',owner_id:'alice'}],offset:50,total:80}};await f.c.loadUploadTargets(50);assert.ok(f.get('uploadTargetPlaylist').options.some(p=>p.value==='page-2'));assert.equal(u.targetPlaylistID,'kept');
 }
-async function main(){const failures=[];for(const test of [restoreCommitted,retryAccountBoundary,parsingInvalidation,assignmentDoesNotRetransmit,pagingAndParserLimit,targetCatalogSurvivesViewCache]){try{await test();console.log('PASS '+test.name)}catch(error){failures.push(test.name+': '+error.message);console.error('FAIL '+test.name+': '+error.message)}}assert.deepEqual(failures,[],'batch contracts failed')}
+async function startedTargetsStayFixed(){
+ const started={...upload('started'),resumeId:'remote',targetPlaylistID:'old'},waiting={...upload('waiting'),targetPlaylistID:'old'},f=fixture([started,waiting]);f.load();f.get('uploadTargetPlaylist').value='new';f.get('uploadTargetPlaylist').onchange();assert.equal(started.targetPlaylistID,'old');assert.equal(waiting.targetPlaylistID,'new');
+ f.get('uploadTargetPlaylist').value='';f.get('uploadTargetPlaylist').onchange();f.c.renderUploads();assert.equal(f.get('uploadTargetPlaylist').value,'');assert.equal(waiting.targetPlaylistID,'');assert.equal(started.targetPlaylistID,'old');
+}
+async function quickCreateGuardsOwner(){
+ const f=fixture([]);f.load();const pending=deferred();f.c.api=()=>pending.promise;const request=f.c.createUploadTarget('New playlist');f.state.user={id:'bob'};f.c.resumeWorkspaceEpoch++;pending.resolve({id:'created',name:'New playlist',owner_id:'alice'});await request;assert.equal(f.get('uploadTargetPlaylist').value,'');assert.equal(f.state.playlists.length,0);
+}
+async function freshAndPausedTargetsPersist(){
+ const fresh=upload('fresh'),f=fixture([fresh]);f.load();f.get('uploadTargetPlaylist').value='chosen';f.get('uploadTargetPlaylist').onchange();await f.c.resumeStageUpload(fresh);assert.equal(fresh.targetLocked,true);f.get('uploadTargetPlaylist').value='other';f.get('uploadTargetPlaylist').onchange();assert.equal(fresh.targetPlaylistID,'chosen');
+ vm.runInContext(resume.slice(resume.indexOf('function resumeDraft('),resume.indexOf('function persistResumeQueue(')),f.c);assert.equal(f.c.resumeDraft(fresh).targetLocked,true);
+}
+async function quickCreateSelectsWithoutChangingStarted(){
+ const started={...upload('started'),targetLocked:true,targetPlaylistID:'old'},waiting=upload('waiting'),f=fixture([started,waiting]);f.load();f.c.api=async(url,method,body)=>{assert.equal(url,'playlists');assert.equal(method,'POST');assert.equal(body.name,'New playlist');return {id:'created',name:body.name,owner_id:'alice'}};
+ await f.c.createUploadTarget('  New playlist  ');assert.equal(f.get('uploadTargetPlaylist').value,'created');assert.equal(waiting.targetPlaylistID,'created');assert.equal(started.targetPlaylistID,'old');assert.ok(f.state.playlists.some(p=>p.id==='created'));
+}
+async function main(){const failures=[];for(const test of [restoreCommitted,retryAccountBoundary,parsingInvalidation,assignmentDoesNotRetransmit,pagingAndParserLimit,targetCatalogSurvivesViewCache,startedTargetsStayFixed,quickCreateGuardsOwner,freshAndPausedTargetsPersist,quickCreateSelectsWithoutChangingStarted]){try{await test();console.log('PASS '+test.name)}catch(error){failures.push(test.name+': '+error.message);console.error('FAIL '+test.name+': '+error.message)}}assert.deepEqual(failures,[],'batch contracts failed')}
 main().catch(error=>{console.error(error);process.exitCode=1});

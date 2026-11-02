@@ -100,10 +100,36 @@ func TestCapabilityDeclarationsAreFiniteAndDirectional(t *testing.T) {
 func TestPrepareRechecksWorkerCapabilities(t *testing.T) {
 	m := NewManager(t.TempDir(), func() string { return Repository })
 	defer m.Close()
+	m.installedSchema = 8
 	m.status = Status{State: "available", Repository: Repository, Compatible: true, LatestVersion: "9.0.0"}
-	m.plan = &releasePlan{Manifest: Manifest{Version: "9.0.0", Schema: 8, MigrateFrom: []int{7}}, Repository: Repository}
+	m.plan = &releasePlan{Manifest: Manifest{Version: "9.0.0", Schema: 9, MigrateFrom: []int{8}}, Repository: Repository}
 	if err := m.Prepare(context.Background()); err == nil || !strings.Contains(err.Error(), upgradeWorkerMessage) {
 		t.Fatalf("direct prepare bypassed capability: %v", err)
+	}
+}
+
+func TestListeningSchemaRequiresUpdatedIndependentWorker(t *testing.T) {
+	m := NewManager(t.TempDir(), func() string { return Repository })
+	defer m.Close()
+	m.installedSchema = 8
+	m.workerState = filepath.Join(t.TempDir(), "job.json")
+	candidate := Manifest{Version: "9.0.0", Schema: 9, MigrateFrom: []int{8}}
+	m.readCapabilities = func(string) (workerCapabilities, error) {
+		return workerCapabilities{Format: 1, Schemas: []int{7, 8}, Migrations: []schemaMigration{{7, 8}}}, nil
+	}
+	if err := m.compatibilityError(candidate); err == nil || !strings.Contains(err.Error(), upgradeWorkerMessage) {
+		t.Fatalf("old worker accepted schema9: %v", err)
+	}
+	m.readCapabilities = func(string) (workerCapabilities, error) { return currentCapabilities(), nil }
+	if err := m.compatibilityError(candidate); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.compatibilityError(Manifest{Schema: 9}); err == nil {
+		t.Fatal("undeclared migration accepted")
+	}
+	m.installedSchema = 9
+	if err := m.compatibilityError(Manifest{Schema: 8}); err == nil {
+		t.Fatal("schema downgrade accepted")
 	}
 }
 

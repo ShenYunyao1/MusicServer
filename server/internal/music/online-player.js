@@ -4,12 +4,15 @@ const onlinePlayback={generation:0,track:null,controller:null,coverURL:null,cove
 let onlinePlayerBar=null,onlineLyricsPanel=null,onlineCover=null;
 let onlineQueue=null,onlineQueueSerial=0,onlineQueueController=null,onlineQueuePanel=null;
 let onlineTranslations=true;
+let onlineLyricsExpanded=false,onlineLyricsDrag=null,onlineLyricClickAfter=0;
 try{onlineTranslations=localStorage.getItem('musicserver.lyrics.translations')!=='off'}catch(_){}
+try{onlineLyricsExpanded=localStorage.getItem('musicserver.lyrics.expanded')==='on'}catch(_){}
 function playerTime(seconds){if(!Number.isFinite(seconds)||seconds<0)return '00:00';const whole=Math.floor(seconds);return String(Math.floor(whole/60)).padStart(2,'0')+':'+String(whole%60).padStart(2,'0')}
 function playerIcon(name){const paths={play:'<path d="m9 5 11 7-11 7Z"/>',pause:'<path d="M8 5v14M16 5v14"/>',volume:'<path d="m11 4-6 5H2v6h3l6 5Z"/><path d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/>',muted:'<path d="m11 4-6 5H2v6h3l6 5Z"/><path d="m16 9 6 6m0-6-6 6"/>',close:'<path d="m6 6 12 12M18 6 6 18"/>'};return '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+paths[name]+'</svg>'}
 function initializeOnlinePlayer(bar,audio){
  onlinePlayerBar=bar;audio.controls=false;audio.hidden=true;audio.preload='metadata';bar.classList.add('online-player');bar.setAttribute('aria-label','在线播放器');bar.innerHTML='<div id="onlineCover" class="online-cover" aria-hidden="true">♪</div><div class="online-player-body"><div class="online-player-heading"><div class="online-track-information"><strong id="previewTitle"></strong><span id="onlineArtist"></span></div><div class="online-player-actions"><button id="onlinePlay" type="button" class="online-icon online-play" aria-label="播放"></button><button id="onlineMute" type="button" class="online-icon" aria-label="静音"></button><input id="onlineVolume" class="online-volume" type="range" min="0" max="1" step="0.01" value="1" aria-label="音量"><button id="onlineLyricsToggle" type="button" class="online-lyrics-toggle" aria-expanded="false" aria-controls="onlineLyricsPanel">歌词</button><button id="onlineClose" type="button" class="online-icon" aria-label="关闭播放预览"></button></div></div><div class="online-progress-row"><time id="onlineElapsed">00:00</time><input id="onlineSeek" type="range" min="0" max="1000" value="0" step="1" aria-label="播放进度" disabled><time id="onlineDuration">00:00</time></div><p id="onlinePlayerStatus" class="online-player-status" role="status"></p></div>';
  bar.append(audio);onlineCover=$('onlineCover');
+ if(typeof initializeListeningReporter==='function')initializeListeningReporter(audio);
  const previous=makeButton('‹',()=>moveOnlineQueue(-1),'online-icon'),next=makeButton('›',()=>moveOnlineQueue(1),'online-icon'),queue=makeButton('播放列表',()=>showOnlineQueue(onlineQueuePanel.hidden),'online-lyrics-toggle'),position=document.createElement('span');
  previous.id='onlinePrevious';next.id='onlineNext';queue.id='onlineQueueToggle';position.id='onlineQueuePosition';previous.setAttribute('aria-label','上一首');next.setAttribute('aria-label','下一首');queue.setAttribute('aria-controls','onlineQueuePanel');queue.setAttribute('aria-expanded','false');
  for(const [button,paths] of [[previous,'M6 5v14M18 5 8 12l10 7Z'],[next,'M18 5v14M6 5l10 7-10 7Z']])button.innerHTML='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="'+paths+'"/></svg>';
@@ -19,9 +22,10 @@ function initializeOnlinePlayer(bar,audio){
  onlineLyricsPanel=panel;document.body.append(panel);
  const translate=makeButton('译文',()=>{onlineTranslations=!onlineTranslations;try{localStorage.setItem('musicserver.lyrics.translations',onlineTranslations?'on':'off')}catch(_){}translate.setAttribute('aria-pressed',String(onlineTranslations));highlightOnlineLyrics(true)},'btn small');translate.id='onlineTranslations';translate.setAttribute('aria-pressed',String(onlineTranslations));$('onlineLyricsClose').before(translate);
  translate.setAttribute('aria-label','显示译文');
+ const expand=makeButton(onlineLyricsExpanded?'折叠':'展开',()=>setOnlineLyricsExpanded(!onlineLyricsExpanded),'btn small');expand.id='onlineLyricsExpand';expand.setAttribute('aria-expanded',String(onlineLyricsExpanded));$('onlineLyricsClose').before(expand);panel.classList.toggle('online-lyrics-expanded',onlineLyricsExpanded);bindOnlineLyricsBrowsing($('onlineLyricsLines'));
  $('onlineClose').innerHTML=playerIcon('close');$('onlineLyricsClose').innerHTML=playerIcon('close');
  $('onlineClose').onclick=closeOnlinePlayer;$('onlinePlay').onclick=toggleOnlinePlayback;
- $('onlineMute').onclick=()=>{audio.muted=!audio.muted};$('onlineVolume').oninput=()=>{audio.volume=Number($('onlineVolume').value);audio.muted=audio.volume===0};
+ $('onlineMute').onclick=()=>{audio.muted=!audio.muted};initializeOnlineVolume(bar,audio);
  $('onlineLyricsToggle').onclick=()=>showOnlineLyrics(panel.hidden);$('onlineLyricsClose').onclick=()=>{showOnlineLyrics(false);$('onlineLyricsToggle').focus()};
  $('onlineLyricsFollow').onclick=()=>{onlinePlayback.follow=true;$('onlineLyricsFollow').hidden=true;highlightOnlineLyrics(true)};
  $('onlineSeek').oninput=()=>{onlinePlayback.seeking=true;$('onlineElapsed').textContent=playerTime(audio.duration*Number($('onlineSeek').value)/1000);$('onlineSeek').style.setProperty('--progress',Number($('onlineSeek').value)/10+'%')};
@@ -43,7 +47,7 @@ function updateOnlinePlayerLayout(){
 }
 function renderOnlinePlayer(){
  if(!onlinePlayerBar)return;const audio=memberPlayer,playing=!audio.paused&&!audio.ended,play=$('onlinePlay'),playIcon=playing?'pause':'play';if(play.dataset.icon!==playIcon){play.dataset.icon=playIcon;play.innerHTML=playerIcon(playIcon)}play.setAttribute('aria-label',playing?'暂停':'播放');play.setAttribute('aria-pressed',String(playing));
- const muted=audio.muted||audio.volume===0,muteIcon=muted?'muted':'volume';if($('onlineMute').dataset.icon!==muteIcon){$('onlineMute').dataset.icon=muteIcon;$('onlineMute').innerHTML=playerIcon(muteIcon)}$('onlineMute').setAttribute('aria-label',muted?'取消静音':'静音');$('onlineVolume').value=String(audio.volume);
+ const muted=audio.muted||onlineOutput.level===0,muteIcon=muted?'muted':'volume';if($('onlineMute').dataset.icon!==muteIcon){$('onlineMute').dataset.icon=muteIcon;$('onlineMute').innerHTML=playerIcon(muteIcon)}$('onlineMute').setAttribute('aria-label',muted?'取消静音':'静音');renderOnlineVolume();
  const duration=Number.isFinite(audio.duration)&&audio.duration>0?audio.duration:0;$('onlineDuration').textContent=playerTime(duration);$('onlineSeek').disabled=!duration;
  if(!onlinePlayback.seeking){const ratio=duration?Math.max(0,Math.min(1,audio.currentTime/duration)):0;$('onlineSeek').value=String(Math.round(ratio*1000));$('onlineSeek').style.setProperty('--progress',ratio*100+'%');$('onlineElapsed').textContent=playerTime(audio.currentTime)}
  $('onlineSeek').setAttribute('aria-valuetext',playerTime(audio.currentTime)+' / '+playerTime(duration));
@@ -52,9 +56,9 @@ function renderOnlinePlayer(){
 async function toggleOnlinePlayback(){
  if(onlineQueue?.busy)return;
  if(onlineQueue?.pendingIndex!==undefined)return selectOnlineQueue(onlineQueue.pendingIndex,onlineQueue.pendingDirection);
- if(!onlinePlayback.track)return;if(!memberPlayer.paused&&!memberPlayer.ended){memberPlayer.pause();return}
+ if(!onlinePlayback.track)return;if(!memberPlayer.error&&!memberPlayer.paused&&!memberPlayer.ended){memberPlayer.pause();return}
  const generation=onlinePlayback.generation;
- try{if(memberPlayer.error){memberPlayer.src='/api/v2/media/'+encodeURIComponent(onlinePlayback.track.id);memberPlayer.load()}await memberPlayer.play();if(generation===onlinePlayback.generation)$('onlinePlayerStatus').textContent=''}catch(error){if(generation===onlinePlayback.generation)$('onlinePlayerStatus').textContent='播放未开始，请再次点击播放。'}
+ try{await ensureOnlineAudio();if(generation!==onlinePlayback.generation)return;if(memberPlayer.error){memberPlayer.src='/api/v2/media/'+encodeURIComponent(onlinePlayback.track.id);memberPlayer.load()}await memberPlayer.play();if(generation===onlinePlayback.generation)$('onlinePlayerStatus').textContent=''}catch(error){if(generation===onlinePlayback.generation)$('onlinePlayerStatus').textContent=error.volume?error.message:'播放未开始，请再次点击播放。'}
 }
 function releaseOnlineCover(){onlinePlayback.coverSerial++;if(onlinePlayback.coverURL)URL.revokeObjectURL(onlinePlayback.coverURL);onlinePlayback.coverURL=null;if(onlineCover)onlineCover.textContent='♪'}
 async function loadOnlineCover(track,current,signal){
@@ -65,6 +69,7 @@ function setOnlineTrackText(track){$('previewTitle').textContent=track.title||'�
 function playOnlineTrack(track,fromQueue=false){
  if(!state.user||track.missing||track.removed||!onlinePlayerBar)return;
  if(!fromQueue)clearOnlineQueue();
+ if(typeof newListeningSession==='function')newListeningSession(track);
  onlinePlayback.plainLyrics='';onlinePlayback.textMode=false;
  const generation=++onlinePlayback.generation,owner=state.user.id;
  onlinePlayback.controller?.abort();const controller=new AbortController();onlinePlayback.controller=controller;
@@ -78,12 +83,14 @@ function playOnlineTrack(track,fromQueue=false){
  }catch(error){if(current()){if(onlineQueue&&[401,403].includes(error.status)){onlineQueueError(error);return}if(onlineQueue&&error.status===404){memberPlayer.pause();moveOnlineQueue(1);return}showOnlineLyricMessage('歌词读取失败，请点击重试。',true)}}})();
 }
 function closeOnlinePlayer(){
+ if(typeof finishListeningSession==='function')finishListeningSession();
+ showOnlineVolume(false);
  clearOnlineQueue();
  onlinePlayback.plainLyrics='';onlinePlayback.textMode=false;
  onlinePlayback.generation++;onlinePlayback.controller?.abort();onlinePlayback.controller=null;onlinePlayback.track=null;onlinePlayback.lyrics=[];onlinePlayback.active=-1;onlinePlayback.seeking=false;onlinePlayback.loaded=false;releaseOnlineCover();memberPlayer.pause();memberPlayer.removeAttribute('src');memberPlayer.load();memberPlayer.hidden=true;
  if(onlinePlayerBar){onlinePlayerBar.hidden=true;$('previewTitle').textContent='';$('onlineArtist').textContent='';$('onlineLyricsTitle').textContent='歌词';$('onlinePlayerStatus').textContent='';$('onlineLyricsLines').replaceChildren();showOnlineLyrics(false);renderOnlinePlayer();updateOnlinePlayerLayout()}
 }
-function showOnlineLyrics(open){if(!onlineLyricsPanel||!onlinePlayback.track&&open)return;if(open)showOnlineQueue(false);onlineLyricsPanel.hidden=!open;$('onlineLyricsToggle').setAttribute('aria-expanded',String(open));if(open){onlinePlayback.follow=true;$('onlineLyricsFollow').hidden=true;highlightOnlineLyrics(true);$('onlineLyricsLines').focus({preventScroll:true})}updateOnlinePlayerLayout()}
+function showOnlineLyrics(open){if(!onlineLyricsPanel||!onlinePlayback.track&&open)return;if(open){showOnlineQueue(false);showOnlineVolume(false)}onlineLyricsPanel.hidden=!open;$('onlineLyricsToggle').setAttribute('aria-expanded',String(open));if(open){onlinePlayback.follow=true;$('onlineLyricsFollow').hidden=true;highlightOnlineLyrics(true);$('onlineLyricsLines').focus({preventScroll:true})}updateOnlinePlayerLayout()}
 
 function clearOnlineQueue(){onlineQueueSerial++;onlineQueueController?.abort();onlineQueueController=null;onlineQueue=null;showOnlineQueue(false);renderOnlineQueueControls();if($('onlineQueueItems'))$('onlineQueueItems').replaceChildren();if($('onlineQueuePosition'))$('onlineQueuePosition').textContent='';if($('onlineQueueTitle'))$('onlineQueueTitle').textContent='播放列表'}
 function renderOnlineQueueControls(){
@@ -95,7 +102,7 @@ function renderOnlineQueueControls(){
 }
 function showOnlineQueue(open){
  if(!onlineQueuePanel)return;open=Boolean(open&&onlineQueue);onlineQueuePanel.hidden=!open;$('onlineQueueToggle').setAttribute('aria-expanded',String(open));
- if(!open)return;showOnlineLyrics(false);$('onlineQueueTitle').textContent=onlineQueue.name+' · 播放列表';const body=$('onlineQueueItems');body.replaceChildren();
+ if(!open)return;showOnlineLyrics(false);showOnlineVolume(false);$('onlineQueueTitle').textContent=onlineQueue.name+' · 播放列表';const body=$('onlineQueueItems');body.replaceChildren();
  onlineQueue.items.forEach((track,index)=>{const button=makeButton((index+1)+'. '+(track.title||'未命名曲目')+(track.missing||track.removed?' · 不可用':''),()=>selectOnlineQueue(index),'online-queue-item');button.disabled=Boolean(track.missing||track.removed);button.setAttribute('aria-current',String(index===onlineQueue.index));body.append(button)});
  body.querySelector('[aria-current="true"]')?.scrollIntoView?.({block:'nearest'});
 }
@@ -153,21 +160,36 @@ async function reloadOnlineLyrics(track){
  const generation=onlinePlayback.generation,owner=state.user?.id;showOnlineLyricMessage('正在读取歌词…');try{const response=await fetch('/api/v2/tracks/'+encodeURIComponent(track.id),{credentials:'same-origin',cache:'no-store',signal:onlinePlayback.controller?.signal});if(!response.ok)throw new Error('lyrics');const full=await response.json();if(generation!==onlinePlayback.generation||owner!==state.user?.id)return;onlinePlayback.track=full;renderOnlineLyrics(full.lyrics||'')}catch(_){if(generation===onlinePlayback.generation&&owner===state.user?.id)showOnlineLyricMessage('歌词读取失败，请点击重试。',true)}
 }
 function renderOnlineLyrics(text){
- const parsed=parsePlayerLyrics(text);onlinePlayback.lyrics=groupPlayerLyrics(parsed.lines);onlinePlayback.plainLyrics=parsed.lines.map(line=>line.text).join('\n');onlinePlayback.textMode=false;onlinePlayback.active=-1;const body=$('onlineLyricsLines');body.classList.remove('online-lyrics-text-mode');body.replaceChildren();$('onlineTranslations').hidden=!onlinePlayback.lyrics.some(line=>line.translations.length);
+ const parsed=parsePlayerLyrics(text);onlinePlayback.lyrics=groupPlayerLyrics(parsed.lines);onlinePlayback.plainLyrics=parsed.lines.map(line=>line.text).join('\n');onlinePlayback.textMode=false;onlinePlayback.active=-1;onlinePlayback.follow=true;const body=$('onlineLyricsLines');body.dataset.lyricMode='';body.classList.remove('online-lyrics-text-mode');body.replaceChildren();$('onlineTranslations').hidden=!onlinePlayback.lyrics.some(line=>line.translations.length);$('onlineLyricsExpand').hidden=!parsed.timed;$('onlineLyricsFollow').hidden=true;
  if(!parsed.lines.length){showOnlineLyricMessage('这首曲目暂无歌词');return}
  if(!parsed.timed){showOnlineLyricMessage('暂无同步歌词');body.append(makeButton('查看文本歌词',showOnlineTextLyrics,'btn small'));return}
  highlightOnlineLyrics(true);
 }
 function highlightOnlineLyrics(force=false){
  if(!onlineLyricsPanel||!onlinePlayback.lyrics.length||onlinePlayback.textMode)return;const index=playerLyricIndex(onlinePlayback.lyrics,memberPlayer.currentTime);if(index===onlinePlayback.active&&!force)return;
- onlinePlayback.active=index;const body=$('onlineLyricsLines');body.replaceChildren();
- for(const position of [-1,0,1]){
-  const lyricIndex=index+position,line=onlinePlayback.lyrics[lyricIndex],element=document.createElement(line?'button':'div');element.className='online-lyric-line';
+ onlinePlayback.active=index;const body=$('onlineLyricsLines'),savedScroll=body.scrollTop||0;
+ if(onlineLyricsExpanded&&body.dataset.lyricMode==='expanded'&&!force){body.querySelector('[aria-current="true"]')?.removeAttribute('aria-current');body.querySelector('[data-lyric-index="'+index+'"]')?.setAttribute('aria-current','true');followOnlineLyrics();return}
+ body.replaceChildren();body.dataset.lyricMode=onlineLyricsExpanded?'expanded':'collapsed';
+ const indices=onlineLyricsExpanded?onlinePlayback.lyrics.map((_,i)=>i):[index-1,index,index+1];
+ for(const lyricIndex of indices){
+  const line=onlinePlayback.lyrics[lyricIndex],element=document.createElement(line?'button':'div');element.className='online-lyric-line';
   if(!line){element.setAttribute('aria-hidden','true');body.append(element);continue}
-  element.type='button';element.dataset.lyricIndex=String(lyricIndex);element.setAttribute('aria-label',playerTime(line.time)+' '+(line.text||'间奏'));if(position===0)element.setAttribute('aria-current','true');
+  element.type='button';element.dataset.lyricIndex=String(lyricIndex);element.setAttribute('aria-label',playerTime(line.time)+' '+(line.text||'间奏'));if(lyricIndex===index)element.setAttribute('aria-current','true');
   const original=document.createElement('span');original.className='online-lyric-original';original.textContent=line.text||'♪';element.append(original);
   if(onlineTranslations)for(const text of line.translations){const translation=document.createElement('span');translation.className='online-lyric-translation';translation.textContent=text;element.append(translation)}
-  element.onclick=()=>{if(!Number.isFinite(memberPlayer.duration))return;memberPlayer.currentTime=Math.min(memberPlayer.duration,Math.max(0,line.time));renderOnlinePlayer();highlightOnlineLyrics(true)};body.append(element);
+  element.onclick=()=>{if(Date.now()<onlineLyricClickAfter||!Number.isFinite(memberPlayer.duration))return;memberPlayer.currentTime=Math.min(memberPlayer.duration,Math.max(0,line.time));onlinePlayback.follow=true;$('onlineLyricsFollow').hidden=true;renderOnlinePlayer();highlightOnlineLyrics(true);if(memberPlayer.paused||memberPlayer.ended)toggleOnlinePlayback()};body.append(element);
  }
+ if(onlineLyricsExpanded&&!onlinePlayback.follow)body.scrollTop=savedScroll;else followOnlineLyrics();
+}
+function setOnlineLyricsExpanded(expanded){onlineLyricsExpanded=Boolean(expanded);try{localStorage.setItem('musicserver.lyrics.expanded',onlineLyricsExpanded?'on':'off')}catch(_){}onlineLyricsPanel.classList.toggle('online-lyrics-expanded',onlineLyricsExpanded);$('onlineLyricsExpand').textContent=onlineLyricsExpanded?'折叠':'展开';$('onlineLyricsExpand').setAttribute('aria-expanded',String(onlineLyricsExpanded));onlinePlayback.follow=true;$('onlineLyricsFollow').hidden=true;highlightOnlineLyrics(true)}
+function followOnlineLyrics(){if(!onlineLyricsExpanded||!onlinePlayback.follow||onlineLyricsPanel.hidden)return;const body=$('onlineLyricsLines'),active=body.querySelector('[aria-current="true"]');if(active)body.scrollTo({top:Math.max(0,(body.scrollTop||0)+active.getBoundingClientRect().top-body.getBoundingClientRect().top-body.clientHeight*.4),behavior:'instant'})}
+function pauseOnlineLyricsFollow(){if(!onlineLyricsExpanded||onlinePlayback.textMode||!onlinePlayback.lyrics.length)return;onlinePlayback.follow=false;$('onlineLyricsFollow').hidden=false}
+function bindOnlineLyricsBrowsing(body){
+ body.addEventListener('wheel',pauseOnlineLyricsFollow,{passive:true});body.addEventListener('touchstart',pauseOnlineLyricsFollow,{passive:true});
+ body.addEventListener('keydown',event=>{if(['ArrowUp','ArrowDown','PageUp','PageDown','Home','End'].includes(event.key))pauseOnlineLyricsFollow()});
+ body.addEventListener('pointerdown',event=>{if(!onlineLyricsExpanded||event.pointerType!=='mouse'||event.button!==0)return;onlineLyricsDrag={id:event.pointerId,y:event.clientY,scroll:body.scrollTop||0,moved:false};event.preventDefault()});
+ body.addEventListener('pointermove',event=>{const drag=onlineLyricsDrag;if(!drag||drag.id!==event.pointerId)return;const distance=event.clientY-drag.y;if(Math.abs(distance)>6&&!drag.moved){drag.moved=true;body.setPointerCapture?.(event.pointerId)}if(drag.moved){pauseOnlineLyricsFollow();body.scrollTop=drag.scroll-distance;event.preventDefault()}});
+ const finish=event=>{if(onlineLyricsDrag?.id!==event.pointerId)return;if(onlineLyricsDrag.moved)onlineLyricClickAfter=Date.now()+400;onlineLyricsDrag=null;if(body.hasPointerCapture?.(event.pointerId))body.releasePointerCapture(event.pointerId)};
+ body.addEventListener('pointerup',finish);body.addEventListener('pointercancel',finish);body.addEventListener('lostpointercapture',()=>{onlineLyricsDrag=null});
 }
 function showOnlineTextLyrics(){const body=$('onlineLyricsLines');onlinePlayback.textMode=true;body.classList.add('online-lyrics-text-mode');body.replaceChildren();const text=document.createElement('pre');text.className='online-lyrics-plain';text.textContent=onlinePlayback.plainLyrics||'';body.append(text);if(onlinePlayback.lyrics.length)body.append(makeButton('返回同步歌词',()=>{onlinePlayback.textMode=false;body.classList.remove('online-lyrics-text-mode');highlightOnlineLyrics(true)},'btn small'))}

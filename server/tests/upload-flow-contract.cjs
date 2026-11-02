@@ -28,6 +28,14 @@ function fixture(items){
 
 async function main(){
  {
+  const f=fixture([upload('durable')]);let release,entered;
+  const gate=new Promise(resolve=>release=resolve),seen=new Promise(resolve=>entered=resolve);
+  f.context.persistResumeQueue=()=>{entered();return gate};
+  const work=f.context.startUploadFlow();await seen;
+  assert.equal(f.context.state.uploadBusy,true,'Controls stay busy until the final queue persistence finishes');
+  release();await work;assert.equal(f.context.state.uploadBusy,false);
+ }
+ {
   const a=upload('one'),b=upload('two'),f=fixture([a,b]);await f.context.startUploadFlow();
   assert.deepEqual(f.calls.filter(c=>c[0]==='stage').map(c=>c[1]),['one','two']);assert.equal(a.status,'完成');assert.equal(b.status,'完成');assert.equal(f.context.state.uploadBusy,false);
   const before=f.calls.length;await f.context.startUploadFlow();assert.equal(f.calls.length,before,'completed tasks must not repeat');

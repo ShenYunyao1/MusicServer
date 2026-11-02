@@ -126,9 +126,9 @@ func TestBackupSchemaMigrationRejectsDeclarationsDowngradeAndFailure(t *testing.
 		{"database ahead of declaration", 7, 8, 8, ""},
 		{"metadata mismatch before migration", 7, 7, 8, "UPDATE meta SET value='8' WHERE key='schema_version'"},
 		{"downgrade", 8, 8, 7, ""},
-		{"unknown declaration", 9, 7, 8, ""},
-		{"unknown target", 7, 7, 9, ""},
-		{"unknown database", 7, 9, 8, "PRAGMA user_version=9"},
+		{"unknown declaration", 10, 7, 8, ""},
+		{"unknown target", 7, 7, 10, ""},
+		{"unknown database", 7, 10, 8, "PRAGMA user_version=10"},
 		{"migration failure", 7, 7, 8, "CREATE TRIGGER reject_migration BEFORE UPDATE OF value ON meta WHEN NEW.key='schema_version' AND NEW.value='8' BEGIN SELECT RAISE(ABORT,'injected migration failure'); END"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -180,13 +180,13 @@ func TestBackupSchemaMigrationCreationUsesVerifiedDatabaseIdentity(t *testing.T)
 	if err := initializeSQLiteSchemaForTarget(s.db, 8); err != nil {
 		t.Fatal(err)
 	}
-	archive, err := s.CreateBackupBundle(context.Background(), false, nil)
+	archive, err := s.createBackupBundleForTarget(context.Background(), false, nil, 8)
 	if err != nil {
 		t.Fatal(err)
 	}
 	archivePath := filepath.Join(s.backupDirectory(), archive.Name)
 	destination := filepath.Join(t.TempDir(), "restored")
-	manifest, err := RestoreBackup(context.Background(), archivePath, destination)
+	manifest, err := restoreBackupForTarget(context.Background(), archivePath, destination, 8)
 	if err != nil {
 		t.Fatal(err)
 	}

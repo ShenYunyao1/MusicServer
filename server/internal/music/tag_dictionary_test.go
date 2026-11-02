@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"musicserver/internal/version"
 )
 
 func tagTestAuth(t *testing.T, s *Store, username string) authContext {
@@ -22,7 +23,7 @@ func tagTestStore(t *testing.T) (*Store, authContext) {
 	t.Helper()
 	s, _, _ := seedStore(t)
 	t.Cleanup(func() { closeStoreForTest(t, s) })
-	assertMigrationSchema(t, s.db, 8)
+	assertMigrationSchema(t, s.db, version.Schema)
 	return s, tagTestAuth(t, s, "admin")
 }
 

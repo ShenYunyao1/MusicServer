@@ -4,6 +4,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	_ "modernc.org/sqlite"
 	"net/http"
@@ -29,26 +30,27 @@ func main() {
 	if err = db.Ping(); err != nil {
 		log.Fatal(err)
 	}
-	if build["schema"] == float64(8) {
+	if build["schema"] == float64(8) || build["schema"] == float64(9) {
+		target := int(build["schema"].(float64))
 		// This isolated service emulates a new app's transactional migration.
 		// The real application's full-data migration is tested in music.
 		var schema int
 		if err = db.QueryRow("PRAGMA user_version").Scan(&schema); err != nil {
 			log.Fatal(err)
 		}
-		if schema == 7 {
+		if schema+1 == target {
 			tx, err := db.Begin()
 			if err != nil {
 				log.Fatal(err)
 			}
-			if _, err = tx.Exec("CREATE TABLE migration_fixture(id INTEGER PRIMARY KEY); UPDATE meta SET value='8' WHERE key='schema_version'; PRAGMA user_version=8;"); err != nil {
+			if _, err = tx.Exec(fmt.Sprintf("CREATE TABLE migration_fixture(id INTEGER PRIMARY KEY); UPDATE meta SET value='%d' WHERE key='schema_version'; PRAGMA user_version=%d;", target, target)); err != nil {
 				tx.Rollback()
 				log.Fatal(err)
 			}
 			if err = tx.Commit(); err != nil {
 				log.Fatal(err)
 			}
-		} else if schema != 8 {
+		} else if schema != target {
 			log.Fatal("unsupported fixture schema")
 		}
 	}

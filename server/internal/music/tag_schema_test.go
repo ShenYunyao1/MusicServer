@@ -6,11 +6,12 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"musicserver/internal/version"
 )
 
 func TestTagSchemaMigrationSeedsAndEnforcesRelationalBoundaries(t *testing.T) {
 	s, auth := tagTestStore(t)
-	assertMigrationSchema(t, s.db, 8)
+	assertMigrationSchema(t, s.db, version.Schema)
 	if err := requireTagsSchema(s.db); err != nil {
 		t.Fatal(err)
 	}

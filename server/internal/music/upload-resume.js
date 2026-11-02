@@ -51,7 +51,7 @@ function resumeDraft(upload) {
     tagDraft: upload.tagDraft ? JSON.parse(JSON.stringify(upload.tagDraft)) : undefined,
     ignoreAutomaticCover: Boolean(upload.ignoreAutomaticCover), ignoreAutomaticLyrics: Boolean(upload.ignoreAutomaticLyrics),
     detailsOpen: Boolean(upload.detailsOpen), editorOpen: Boolean(upload.editorOpen),
-    targetPlaylistID: upload.targetPlaylistID||'',playlistAssigned:Boolean(upload.playlistAssigned),
+    targetPlaylistID: upload.targetPlaylistID||'',targetLocked:Boolean(upload.targetLocked||upload.resumeId||upload.stageId||upload.commitResult),playlistAssigned:Boolean(upload.playlistAssigned),
     commitResult:upload.commitResult?.track?.id?{track:{id:upload.commitResult.track.id},duplicate:Boolean(upload.commitResult.duplicate)}:undefined,
     assignmentError:upload.assignmentError||'',
   };
@@ -278,6 +278,7 @@ function beginUploadPhasePolling(upload,task,owner,epoch){
 }
 
 function resumeStageUpload(upload) {
+  if (typeof lockUploadTarget === 'function') lockUploadTarget(upload);
   if (resumeRuns.has(upload)) return resumeRuns.get(upload);
   const owner = state.user?.id, epoch = resumeWorkspaceEpoch;
   upload.resumePaused = false; upload.resumeCanceled = false; upload.inFlight = true; upload.error = ''; upload.status = '准备续传';
@@ -413,7 +414,7 @@ async function restoreResumeQueue() {
     const upload = { ...describeFile(file, ++state.batch), id: saved.id || browserUUID(), path: saved.path || '', directory: saved.directory || '', file, sourceFile: null, needsSourceFile: true, edits: saved.edits || {}, preview: null, localPreview: null, localPromise: null, localStatus: '', stageId: null, status: '选择原文件继续', error: '', lyricsFile: null, coverFile: null, resumePaused: true, resumeMissingAttachments: saved.attachments || task?.attachments || {}, ignoreAutomaticCover: Boolean(saved.ignoreAutomaticCover), ignoreAutomaticLyrics: Boolean(saved.ignoreAutomaticLyrics), detailsOpen: saved.detailsOpen, editorOpen: saved.editorOpen };
     for (const name of ['title', 'artist', 'album', 'genre', 'comment', 'lyrics']) upload[name] = upload.edits[name] || '';
     if (saved.tagDraft) upload.tagDraft = JSON.parse(JSON.stringify(saved.tagDraft));
-    upload.targetPlaylistID=saved.targetPlaylistID||'';upload.playlistAssigned=Boolean(saved.playlistAssigned);
+    upload.targetPlaylistID=saved.targetPlaylistID||'';upload.targetLocked=Boolean(saved.targetLocked||task||saved.resumeId||saved.commitResult);upload.playlistAssigned=Boolean(saved.playlistAssigned);
     state.uploads.push(upload);
     if(saved.commitResult?.track?.id){upload.commitResult=saved.commitResult;upload.resumeCompleted=true;upload.needsSourceFile=false;upload.status=saved.commitResult.duplicate?'已去重':'完成';upload.assignmentError=saved.assignmentError||'加入目标歌单尚未完成';upload.error='已入库，仅加入歌单待重试';if(saved.resumeId){upload.resumeId=saved.resumeId;pendingReceiptCleanup.push(upload)}continue}
     if (task) {

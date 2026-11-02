@@ -66,6 +66,7 @@ def main():
     parser.add_argument('--old-server',type=Path,required=True)
     parser.add_argument('--new-server',type=Path,required=True)
     parser.add_argument('--from-schema',type=int,choices=(7,8),default=7)
+    parser.add_argument('--to-schema',type=int,choices=(8,9),default=8)
     args=parser.parse_args()
     old,new=args.old_server.resolve(),args.new_server.resolve()
     terminal=Path(__file__).with_name('admin-terminal.py')
@@ -107,11 +108,12 @@ def main():
             key=admin.call('auth/keys','POST',{'name':'Retained player','scopes':['library:read','media:read'],'allowed_playlist_ids':[playlist['id']]})
             stop(process);process=None
             before=snapshot(database)
-            process,upgraded,health=start(new,True);assert health['schema']==8
+            process,upgraded,health=start(new,True);assert health['schema']==args.to_schema
             after=snapshot(database)
-            for table,rows in before.items(): assert after[table]==rows,'old rows changed in '+table
-            backups=list(root.glob('.schema-7-to-8-*/snapshot.sqlite'))
-            expected_snapshots=1 if args.from_schema==7 else 0
+            for table,rows in before.items():
+                if table!='schema_migrations': assert after[table]==rows,'old rows changed in '+table
+            backups=list(root.glob(f'.schema-{args.from_schema}-to-{args.to_schema}-*/snapshot.sqlite'))
+            expected_snapshots=1 if args.from_schema!=args.to_schema else 0
             expected_migrations=len(before.get('schema_migrations',[]))+expected_snapshots
             assert len(backups)==expected_snapshots,'unexpected migration snapshot count'
             if backups:
@@ -119,7 +121,7 @@ def main():
                 with closing(sqlite3.connect(backups[0])) as db:
                     assert db.execute('PRAGMA user_version').fetchone()[0]==args.from_schema
             with closing(sqlite3.connect(database)) as db:
-                assert db.execute('PRAGMA user_version').fetchone()[0]==8
+                assert db.execute('PRAGMA user_version').fetchone()[0]==args.to_schema
                 assert db.execute('PRAGMA foreign_key_check').fetchall()==[]
                 assert db.execute('SELECT count(*) FROM schema_migrations').fetchone()[0]==expected_migrations
             upgraded.login('admin',password)
@@ -129,11 +131,11 @@ def main():
             assert upgraded.call('playlists/'+playlist['id'])['playlist']['track_notes'][track['id']]=='preserved cue'
             assert len(upgraded.call('tag-groups'))==6
             stop(process);process=None
-            process,restarted,health=start(new,True);assert health['schema']==8
-            assert list(root.glob('.schema-7-to-8-*/snapshot.sqlite'))==backups,'schema-8 restart created another migration snapshot'
+            process,restarted,health=start(new,True);assert health['schema']==args.to_schema
+            assert list(root.glob(f'.schema-{args.from_schema}-to-{args.to_schema}-*/snapshot.sqlite'))==backups,'same-schema restart created another migration snapshot'
             restarted.login('admin',password)
             with closing(sqlite3.connect(database)) as db: assert db.execute('SELECT count(*) FROM schema_migrations').fetchone()[0]==expected_migrations
-            print(f'PASS real binary {args.from_schema}->8: all old table rows, password, Key, media UUID/hash, playlist notes and repeated startup')
+            print(f'PASS real binary {args.from_schema}->{args.to_schema}: all old table rows, password, Key, media UUID/hash, playlist notes and repeated startup')
         finally:
             if process is not None: stop(process)
 

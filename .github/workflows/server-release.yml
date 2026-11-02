@@ -136,6 +136,7 @@ jobs:
           npm ci --prefix tests --ignore-scripts --no-audit --no-fund
           cd tests
           npx playwright install --with-deps chromium
+          if [ '${{ matrix.suite }}' = management ]; then npx playwright install --with-deps firefox; fi
       - name: Install ffprobe
         timeout-minutes: 8
         run: |
@@ -177,7 +178,7 @@ jobs:
             MUSIC_SERVER_TEST_EMAIL_BINARY="$PWD/build/email-browser-fixture" node tests/registration-email-ui.cjs
           elif [ "$SUITE" = tags ]; then
             python tests/test-admin-terminal.py
-            python tests/schema-upgrade-process.py --old-server build/schema-preview/released/musicserver --new-server build/musicserver --from-schema 8
+            python tests/schema-upgrade-process.py --old-server build/schema-preview/released/musicserver --new-server build/musicserver --from-schema 8 --to-schema 9
             MUSIC_SERVER_TEST_TAG_BACKUP_ONLY=1 node tests/management-ui.cjs
             node tests/tag-editor-ui.cjs
             node tests/tagger-ui.cjs
@@ -190,7 +191,10 @@ jobs:
             node tests/selection-ui.cjs
             node tests/lyrics-parser-test.cjs
             node tests/online-player-contract.cjs
+            node tests/listening-ui.cjs
+            node --test tests/listening-reporter-test.cjs
             MUSIC_SERVER_TEST_ONLINE_PLAYER_ONLY=1 node tests/management-ui.cjs
+            MUSIC_SERVER_BROWSER_ENGINE=firefox MUSIC_SERVER_TEST_ONLINE_PLAYER_ONLY=1 node tests/management-ui.cjs
             MUSIC_SERVER_TEST_SELECTION_ONLY=1 node tests/management-ui.cjs
             node tests/upload-flow-contract.cjs
             node tests/upload-batch-contract.cjs
@@ -222,7 +226,7 @@ jobs:
       fail-fast: false
       matrix:
         player: [33da837016e01419db3200bb0adcc58aae179c56, f36c07dbe7f3890080b0290dd4ad32bb7729711d]
-        schema: [8]
+        schema: [9]
     defaults:
       run:
         shell: pwsh

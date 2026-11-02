@@ -221,7 +221,7 @@ func TestSchemaMigrationRejectsUnsupportedOrInconsistentDatabases(t *testing.T) 
 	}{
 		{"unknown source", "PRAGMA user_version=99", 8},
 		{"unsupported old source", "PRAGMA user_version=6; UPDATE meta SET value='6' WHERE key='schema_version'", 8},
-		{"unknown target", "", 9},
+		{"unknown target", "", 10},
 		{"downgrade", "PRAGMA user_version=8; UPDATE meta SET value='8' WHERE key='schema_version'", 7},
 		{"metadata mismatch", "UPDATE meta SET value='8' WHERE key='schema_version'", 8},
 		{"unversioned nonempty", "PRAGMA user_version=0", 8},

@@ -80,7 +80,11 @@ func testSystemdRealApplicationAndRollback(t *testing.T, baselineSchema int) {
 	releases := filepath.Join(root, "releases")
 	must(os.Mkdir(releases, 0755))
 	old := Manifest{Version: oldVersion, Commit: strings.Repeat("1", 40), Schema: baselineSchema}
-	next := Manifest{Version: newVersion, Commit: strings.Repeat("2", 40), Schema: 8, MigrateFrom: []int{7}}
+	targetSchema := 8
+	if baselineSchema == 8 {
+		targetSchema = 9
+	}
+	next := Manifest{Version: newVersion, Commit: strings.Repeat("2", 40), Schema: targetSchema, MigrateFrom: []int{baselineSchema}}
 	prepared := map[string]string{}
 	prepare := func(_ context.Context, v string) (Manifest, string, error) {
 		m, binary := next, newBinary
@@ -186,7 +190,7 @@ func testSystemdRealApplicationAndRollback(t *testing.T, baselineSchema int) {
 		if marker != "preserve old data" || setting != `{"keep":true}` {
 			t.Fatal("legacy data changed")
 		}
-		if schema == 8 {
+		if schema >= 8 {
 			var n int
 			must(db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('tags','tag_groups','track_tags','saved_track_filters','track_tag_imports','tag_batches')").Scan(&n))
 			if n != 6 {
@@ -200,6 +204,14 @@ func testSystemdRealApplicationAndRollback(t *testing.T, baselineSchema int) {
 			if n != want {
 				t.Fatal("migration is not idempotent", n)
 			}
+			must(db.QueryRow("SELECT count(*) FROM schema_migrations WHERE from_version=8 AND to_version=9").Scan(&n))
+			want = 0
+			if schema == 9 {
+				want = 1
+			}
+			if n != want {
+				t.Fatal("listening migration is not idempotent", n)
+			}
 		}
 	}
 	// Force failure only after the actual candidate has migrated and served health.
@@ -208,7 +220,7 @@ func testSystemdRealApplicationAndRollback(t *testing.T, baselineSchema int) {
 			return err
 		}
 		if m.Version == next.Version {
-			checkData(8)
+			checkData(next.Schema)
 			return errors.New("injected failure after real migration")
 		}
 		return nil
@@ -220,11 +232,11 @@ func testSystemdRealApplicationAndRollback(t *testing.T, baselineSchema int) {
 	must(health(ctx, old))
 	i.Healthy = health
 	must(i.Install(ctx, Request{ID: strings.Repeat("a", 32), Version: newVersion}))
-	checkData(8)
+	checkData(next.Schema)
 	must(i.Stop(ctx))
 	must(i.Start(ctx))
 	must(health(ctx, next))
-	checkData(8)
+	checkData(next.Schema)
 	// A worker interrupted after switching must restore the matching old DB,
 	// not start the old schema 7 process against a migrated schema 8 database.
 	job, err := i.loadJob()

@@ -40,7 +40,8 @@ var usersPageScript []byte
 //go:embed upload-batch.js upload-flow.css
 //go:embed selection-ui.js selection-ui.css track-interaction.js
 //go:embed library-pagination.js library-pagination.css
-//go:embed online-player.js online-player.css lyrics-parser.js
+//go:embed online-player.js online-player.css lyrics-parser.js online-volume.js
+//go:embed listening-ui.js listening-ui.css listening-reporter.js
 var workspaceAssets embed.FS
 
 type API struct {
@@ -191,6 +192,10 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		assets["/assets/library-pagination.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/library-pagination.css"] = "text/css; charset=utf-8"
 		assets["/assets/online-player.js"] = "text/javascript; charset=utf-8"
+		assets["/assets/online-volume.js"] = "text/javascript; charset=utf-8"
+		assets["/assets/listening-ui.js"] = "text/javascript; charset=utf-8"
+		assets["/assets/listening-ui.css"] = "text/css; charset=utf-8"
+		assets["/assets/listening-reporter.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/online-player.css"] = "text/css; charset=utf-8"
 		assets["/assets/lyrics-parser.js"] = "text/javascript; charset=utf-8"
 		assets["/assets/email-ui.js"] = "text/javascript; charset=utf-8"
@@ -355,6 +360,10 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	}
 	if strings.HasPrefix(request.URL.Path, "/api/v2/public/") || request.URL.Path == "/api/v2/subscriptions" || strings.HasPrefix(request.URL.Path, "/api/v2/subscriptions/") {
 		a.community(response, request)
+		return
+	}
+	if strings.HasPrefix(request.URL.Path, "/api/v2/listening/") {
+		a.listening(response, request)
 		return
 	}
 	if a.uploadReceipt(response, request) {
@@ -712,6 +721,9 @@ func firstPasswordEndpoint(request *http.Request) bool {
 }
 
 func playerEndpoint(request *http.Request) bool {
+	if request.URL.Path == "/api/v2/listening/sessions" && request.Method == "POST" {
+		return true
+	}
 	if request.URL.Path == "/api/v2/sync/tracks" && request.Method == "POST" {
 		return true
 	}

@@ -27,7 +27,7 @@ func TestSystemdSchemaMigrationAndRollback(t *testing.T) {
 }
 
 func TestSystemdCurrentSchemaInstallAndRollback(t *testing.T) {
-	testSystemdInstallAndRollback(t, 8, 8)
+	testSystemdInstallAndRollback(t, 8, 9)
 }
 
 func testSystemdInstallAndRollback(t *testing.T, baselineSchema, targetSchema int) {

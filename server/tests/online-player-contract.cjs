@@ -9,7 +9,7 @@ const source=fs.readFileSync(path.join(directory,'online-player.js'),'utf8');
 const parser=fs.readFileSync(path.join(directory,'lyrics-parser.js'),'utf8');
 function deferred(){let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no});return {promise,resolve,reject}}
 async function settle(){for(let index=0;index<4;index++)await new Promise(resolve=>setImmediate(resolve))}
-function fixture(){
+function fixture(options={}){
  const ids=new Map(),requests=[],revoked=[],created=[],properties=new Map();
  class Element{
   constructor(tag='div'){this.tagName=tag;this.children=[];this.attributes=new Map();this.listeners=new Map();this.hidden=false;this.disabled=false;this.value='';this.dataset={};this.style={setProperty:(name,value)=>properties.set(name,value)};this.classList={add(){},remove(){},toggle(){}};this.clientHeight=300;this.offsetTop=0;this.offsetHeight=80;this.parentNode=null;this.isConnected=true;this.ownText=''}
@@ -36,12 +36,13 @@ function fixture(){
  }
  const audio=new Audio(),bar=new Element();bar.id='previewBar';bar.hidden=true;
  const doc={body:new Element(),documentElement:new Element(),createElement:tag=>new Element(tag),createDocumentFragment:()=>new Element('fragment'),addEventListener(){}};
- const c={console,document:doc,window:{addEventListener(){}},AbortController,URLSearchParams,Number,Math,Date,Set,Map,Promise,state:{user:{id:'alice'}},browseState:{epoch:1},memberPlayer:audio,
+ const stored=new Map(Object.entries(options.stored||{}));
+ const c={console,document:doc,window:{addEventListener(){},AudioContext:options.AudioContext},localStorage:{getItem:key=>stored.get(key)??null,setItem:(key,value)=>stored.set(key,value)},AbortController,URLSearchParams,Number,Math,Date,Set,Map,Promise,state:{user:{id:'alice'}},browseState:{epoch:1},memberPlayer:audio,
   $:id=>ids.get(id),makeButton:(text,action)=>{const element=new Element('button');element.textContent=text;element.onclick=action;return element},
   URL:{createObjectURL:blob=>{const url='blob:test-'+created.length;created.push({url,blob});return url},revokeObjectURL:url=>revoked.push(url)},
   fetch:(url,options)=>{const pending=deferred();requests.push({url,options,pending});return pending.promise},
  };
- vm.createContext(c);vm.runInContext(parser+'\n'+source,c);c.initializeOnlinePlayer(bar,audio);
+ vm.createContext(c);const volumePath=path.join(directory,'online-volume.js');vm.runInContext(parser+'\n'+(fs.existsSync(volumePath)?fs.readFileSync(volumePath,'utf8'):'')+'\n'+source,c);c.initializeOnlinePlayer(bar,audio);
  return {c,audio,bar,ids,requests,created,revoked,properties,get:id=>ids.get(id),snapshot:()=>vm.runInContext('({generation:onlinePlayback.generation,track:onlinePlayback.track,lyrics:onlinePlayback.lyrics,active:onlinePlayback.active,coverURL:onlinePlayback.coverURL,seeking:onlinePlayback.seeking})',c)};
 }
 
@@ -135,3 +136,27 @@ test('lyrics show three groups with translations, seek immediately and panels ex
  f.c.showOnlineLyrics(true);assert.equal(f.get('onlineQueuePanel').hidden,true);
  f.c.renderOnlineLyrics('原文\n<script>bad()</script>');assert.match(body.textContent,/暂无同步歌词/);body.children.at(-1).onclick();assert.equal(body.textContent,'原文\n<script>bad()</script>');f.c.closeOnlinePlayer();assert.equal(body.textContent,'');
 });
+
+test('expanded lyrics retain full groups, suspend follow during browsing and clicking seeks and plays',async()=>{
+ const f=fixture();f.c.playOnlineTrack({id:'a',lyrics:Array.from({length:12},(_,i)=>'[00:'+String(i).padStart(2,'0')+']Line '+i).join('\n')});
+ f.audio.duration=20;f.audio.currentTime=4;f.c.setOnlineLyricsExpanded(true);
+ const body=f.get('onlineLyricsLines');assert.equal(body.children.length,12);
+ body.emit('wheel');assert.equal(f.get('onlineLyricsFollow').hidden,false);
+ const oldChildren=body.children.slice();f.audio.currentTime=5;f.c.highlightOnlineLyrics();assert.equal(body.children[0],oldChildren[0],'time updates never reset a user browsing full lyrics');
+ f.audio.pause();const calls=f.audio.playCalls;body.children[8].onclick();await settle();assert.equal(f.audio.currentTime,8);assert.ok(f.audio.playCalls>calls);assert.equal(f.get('onlineLyricsFollow').hidden,true);
+ f.c.setOnlineLyricsExpanded(false);assert.equal(body.children.length,3);assert.equal(body.children[1].textContent,'Line 8');
+});
+
+test('saved low output gain is set before first play and one graph is reused across tracks',async()=>{
+ let sources=0,resumes=0,gain;class Context{constructor(){this.state='suspended';this.destination={}}createGain(){return gain={gain:{value:1},connect(){}}}createMediaElementSource(){sources++;return {connect(){}}}async resume(){resumes++;this.state='running'}}
+ const f=fixture({AudioContext:Context,stored:{'musicserver.player.volume':'0.05'}});f.c.playOnlineTrack({id:'first',lyrics:''});await settle();
+ assert.equal(gain.gain.value,.05);assert.equal(f.audio.volume,1);assert.equal(sources,1);assert.equal(resumes,1);assert.equal(f.audio.paused,false);
+ f.c.playOnlineTrack({id:'second',lyrics:''});await settle();assert.equal(sources,1);assert.equal(gain.gain.value,.05);
+ await f.c.setOnlineVolume(.1);assert.equal(gain.gain.value,.1);assert.equal(f.get('onlineVolumeFine').value,'0.1');
+});
+test('broken gain graph never falls back to loud playback',async()=>{
+ class Broken{constructor(){this.state='running';this.destination={}}createGain(){return {gain:{value:1},connect(){throw new Error('graph failed')}}}createMediaElementSource(){return {connect(){}}}}
+ const f=fixture({AudioContext:Broken,stored:{'musicserver.player.volume':'0.05'}});f.c.playOnlineTrack({id:'a',lyrics:''});await settle();assert.equal(f.audio.playCalls,0);assert.equal(f.audio.paused,true);assert.match(f.get('onlinePlayerStatus').textContent,/音量/);
+});
+
+test('media error retries even when browser leaves paused false',async()=>{const f=fixture();f.c.playOnlineTrack({id:'failed',lyrics:''});await settle();f.audio.error={code:4};f.audio.paused=false;const before=f.audio.playCalls;await f.c.toggleOnlinePlayback();assert.ok(f.audio.playCalls>before);});

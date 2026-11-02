@@ -3,7 +3,7 @@ package music
 import "errors"
 
 var (
-	errTagsUnavailable = errors.New("tags require the schema 8 database")
+	errTagsUnavailable = errors.New("tags require a supported schema 8 or newer database")
 	errTagInvalid      = errors.New("invalid tag input")
 	errTagNameTaken    = errors.New("tag name or alias already exists")
 	errTagLimit        = errors.New("tag dictionary limit reached")

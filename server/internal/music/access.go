@@ -69,6 +69,9 @@ func hasScope(auth authContext, scope string) bool {
 // routes are left unscoped so handlers added later can decide their own policy
 // while the server still returns a normal NOT_FOUND response.
 func endpointScope(path, method string) string {
+	if path == "/api/v2/listening/sessions" && method == "POST" {
+		return ScopeMediaRead
+	}
 	if path == "/api/v2/sync/tracks" && method == "POST" {
 		return ScopeLibraryRead
 	}

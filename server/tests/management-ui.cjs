@@ -4,7 +4,8 @@ const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
 const { spawn, spawnSync } = require('node:child_process');
-const { chromium } = require(process.env.MUSIC_SERVER_PLAYWRIGHT || 'playwright');
+const browserEngines = require(process.env.MUSIC_SERVER_PLAYWRIGHT || 'playwright');
+const chromium = browserEngines[process.env.MUSIC_SERVER_BROWSER_ENGINE || 'chromium'];
 const {waitForAsync}=require('./browser-wait.cjs');
 
 async function main() {

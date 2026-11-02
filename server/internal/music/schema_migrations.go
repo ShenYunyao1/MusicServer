@@ -17,7 +17,7 @@ type sqliteMigration struct {
 // initializeSQLiteSchemaForTarget exposes the planned target only to package
 // code and tests. Normal server startup is always bound to version.Schema.
 func initializeSQLiteSchemaForTarget(db *sql.DB, target int) error {
-	return initializeSQLiteSchemaWithMigrations(db, target, []sqliteMigration{{from: 7, to: 8, apply: migrateSQLite7To8}})
+	return initializeSQLiteSchemaWithMigrations(db, target, []sqliteMigration{{from: 7, to: 8, apply: migrateSQLite7To8}, {from: 8, to: 9, apply: migrateSQLite8To9}})
 }
 
 func sqliteSchemaIdentity(reader sqlReader) (int, error) {
@@ -51,7 +51,8 @@ func initializeSQLiteSchemaWithMigrations(db *sql.DB, target int, migrations []s
 	if err := tx.QueryRow("PRAGMA user_version").Scan(&source); err != nil {
 		return err
 	}
-	if source == 0 {
+	fresh := source == 0
+	if fresh {
 		var tables int
 		if err := tx.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").Scan(&tables); err != nil {
 			return err
@@ -77,34 +78,51 @@ func initializeSQLiteSchemaWithMigrations(db *sql.DB, target int, migrations []s
 	if source == target {
 		return tx.Commit()
 	}
-	if !version.CanMigrateSchema(source, target) {
+	// Only a brand new database may traverse the internal base-7 chain in one
+	// transaction. Existing installs must follow an explicit signed upgrade edge.
+	if !fresh && !version.CanMigrateSchema(source, target) {
 		return fmt.Errorf("unsupported SQLite schema migration %d to %d", source, target)
 	}
-	var migration *sqliteMigration
-	for i := range migrations {
-		if migrations[i].from == source && migrations[i].to == target {
-			if migration != nil {
-				return errors.New("duplicate SQLite schema migration")
-			}
-			migration = &migrations[i]
+	for source != target {
+		next := target
+		if fresh && source == 7 && target == 9 {
+			next = 8
 		}
-	}
-	if migration == nil || migration.apply == nil {
-		return fmt.Errorf("missing SQLite schema migration %d to %d", source, target)
-	}
-	if err := migration.apply(tx); err != nil {
-		return fmt.Errorf("migrate SQLite schema %d to %d: %w", source, target, err)
-	}
-	if _, err := tx.Exec("UPDATE meta SET value=? WHERE key='schema_version'", strconv.Itoa(target)); err != nil {
-		return err
-	}
-	if _, err := tx.Exec("PRAGMA user_version=" + strconv.Itoa(target)); err != nil {
-		return err
-	}
-	if _, err := sqliteSchemaIdentity(tx); err != nil {
-		return err
+		var migration *sqliteMigration
+		for i := range migrations {
+			if migrations[i].from == source && migrations[i].to == next {
+				if migration != nil {
+					return errors.New("duplicate SQLite schema migration")
+				}
+				migration = &migrations[i]
+			}
+		}
+		if migration == nil || migration.apply == nil {
+			return fmt.Errorf("missing SQLite schema migration %d to %d", source, target)
+		}
+		if err := migration.apply(tx); err != nil {
+			return fmt.Errorf("migrate SQLite schema %d to %d: %w", source, target, err)
+		}
+		if _, err := tx.Exec("UPDATE meta SET value=? WHERE key='schema_version'", strconv.Itoa(next)); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("PRAGMA user_version=" + strconv.Itoa(next)); err != nil {
+			return err
+		}
+		if _, err := sqliteSchemaIdentity(tx); err != nil {
+			return err
+		}
+		source = next
 	}
 	return tx.Commit()
+}
+
+func migrateSQLite8To9(tx *sql.Tx) error {
+	if _, err := tx.Exec(listeningSchema); err != nil {
+		return err
+	}
+	_, err := tx.Exec("INSERT INTO schema_migrations VALUES(8,9,strftime('%Y-%m-%dT%H:%M:%fZ','now'))")
+	return err
 }
 
 // Schema 8 adds the relational tag dictionary and links while retaining all

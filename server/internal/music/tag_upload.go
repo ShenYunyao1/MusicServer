@@ -102,7 +102,7 @@ func (s *Store) uploadPreviewTags(preview *UploadPreview, record stagedRecord) e
 	if err != nil {
 		return err
 	}
-	if schema != 8 {
+	if schema < 8 {
 		return nil
 	}
 	if err := requireTagsSchema(s.db); err != nil {

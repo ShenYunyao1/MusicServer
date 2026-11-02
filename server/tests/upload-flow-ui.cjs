@@ -4,6 +4,8 @@ module.exports=async({page,directory})=>{
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(new URL('/#/uploads',page.url()).href);await page.locator('#uploadReview').waitFor();
  assert.equal(await page.locator('#uploadReview').isChecked(),false,'Default uploads must automatically commit');
+ assert.ok((await page.locator('#uploadDestination').boundingBox()).y<(await page.locator('#uploadZone').boundingBox()).y,'Upload destination precedes file chooser');
+ await page.locator('#createUploadPlaylist').click();await page.fill('#uploadCreateName','Discarded draft');await page.locator('#uploadCreateCancel').click();await page.locator('#createUploadPlaylist').click();assert.equal(await page.locator('#uploadCreateName').inputValue(),'');await page.fill('#uploadCreateName','Quick upload destination');await page.locator('#uploadCreateSave').click();await page.waitForFunction(()=>$('uploadTargetPlaylist').selectedOptions[0]?.textContent==='Quick upload destination');const quickTarget=await page.locator('#uploadTargetPlaylist').inputValue();await page.selectOption('#uploadTargetPlaylist','');
  await page.evaluate(()=>{const bytes=new Uint8Array(844),v=new DataView(bytes.buffer);bytes.set(new TextEncoder().encode('RIFF'));v.setUint32(4,836,true);bytes.set(new TextEncoder().encode('WAVEfmt '),8);v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,8000,true);v.setUint32(28,16000,true);v.setUint16(32,2,true);v.setUint16(34,16,true);bytes.set(new TextEncoder().encode('data'),36);v.setUint32(40,800,true);bytes[843]=23;addFiles([new File([bytes],'automatic.wav',{type:'audio/wav'})])});
  await page.click('#uploadAll');await page.waitForFunction(()=>state.uploads[0]?.status==='完成'&&!state.uploadBusy);
  assert.match(await page.locator('#uploadFlowSummary').textContent(),/新增 1/);
@@ -19,7 +21,7 @@ module.exports=async({page,directory})=>{
  await page.click('#clearUploads');await page.uncheck('#uploadReview');
  await page.setInputFiles('#uploadInput',{name:'broken.wav',mimeType:'audio/wav',buffer:Buffer.from('not an audio file')});
  await page.click('#uploadAll');await page.waitForFunction(()=>state.uploads[0]?.status==='失败'&&!state.uploadBusy);
- assert.equal(await page.locator('#retryUploads').isEnabled(),true);
+ assert.equal(await page.locator('#retryUploads').isEnabled(),true,JSON.stringify(await page.evaluate(()=>({busy:state.uploadBusy,run:!!uploadFlowRun,uploads:state.uploads.map(u=>({status:u.status,inFlight:!!u.inFlight,error:u.error})),disabled:$('retryUploads').disabled}))));
  assert.match(await page.locator('#uploadFlowSummary').textContent(),/失败 1/);
  await page.click('#clearUploads');await page.waitForFunction(()=>state.uploads.length===0&&!state.uploadBusy);
  const target=await page.evaluate(async()=>{const p=await api('playlists','POST',{id:browserUUID(),name:'Upload destination',track_ids:[]});await refreshCore();renderUploads();return p});
@@ -31,12 +33,13 @@ module.exports=async({page,directory})=>{
  await page.evaluate(()=>{for(let i=0;i<2;i++){const b=new Uint8Array(844),v=new DataView(b.buffer);b.set(new TextEncoder().encode('RIFF'));v.setUint32(4,836,true);b.set(new TextEncoder().encode('WAVEfmt '),8);v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,8000,true);v.setUint32(28,16000,true);v.setUint16(32,2,true);v.setUint16(34,16,true);b.set(new TextEncoder().encode('data'),36);v.setUint32(40,800,true);b[843]=40+i;addFiles([new File([b],'pipeline-'+i+'.wav')])}});
  await page.click('#applyUploadMetadata');
  await page.click('#uploadAll');await seen;
- try{await page.waitForFunction(()=>state.uploads[1]?.progress?.loaded===844)}finally{releaseFinish()}
+ try{await page.waitForFunction(()=>state.uploads[1]?.progress?.loaded===844);assert.equal(await page.locator('#uploadTargetPlaylist').isEnabled(),true);await page.selectOption('#uploadTargetPlaylist',quickTarget);assert.ok(await page.evaluate(id=>state.uploads.every(u=>u.targetPlaylistID===id),target.id),'Started tasks keep their original target when the next-upload choice changes');assert.equal(await page.locator('.upload-task-target').count(),2)}finally{releaseFinish()}
  await page.waitForFunction(()=>state.uploads.every(u=>u.status==='完成')&&!state.uploadBusy);
  await page.waitForFunction(()=>state.uploads.every(u=>u.playlistAssigned));
  const saved=await page.evaluate(async id=>api('playlists/'+id),target.id);assert.equal(saved.playlist.track_ids.length,2);
  assert.ok(saved.tracks.every(t=>t.artist==='Batch performer'&&t.album==='Batch album'));
  await page.unroute('**/uploads/resumable/*/finish');
+ await page.selectOption('#uploadTargetPlaylist',target.id);
  // Drop the commit response after the server has committed. Recover by receipt.
  await page.click('#clearUploads');await page.waitForFunction(()=>state.uploads.length===0&&!state.uploadBusy);
  await page.route('**/uploads/stage/*/commit',async route=>{await route.fetch();await route.abort('failed')});

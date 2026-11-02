@@ -45,7 +45,7 @@ async function startUploadFlow(items=state.uploads.filter(uploadFlowPending)){
    if(jobs.size>=concurrency+2)await Promise.race(jobs);
   }
   await Promise.all(jobs);
- }finally{if(uploadFlowCurrent(owner,epoch)){state.uploadBusy=false;await persistResumeQueue();renderUploads()}}})();
+ }finally{if(uploadFlowCurrent(owner,epoch)){await persistResumeQueue();if(uploadFlowCurrent(owner,epoch)){state.uploadBusy=false;renderUploads()}}}})();
  uploadFlowRun=run;
  try{await run}finally{if(uploadFlowRun===run)uploadFlowRun=null}
 }

@@ -27,7 +27,7 @@ type workerCapabilities struct {
 
 func currentCapabilities() workerCapabilities {
 	commit, _ := version.Source()
-	return workerCapabilities{Format: 1, Version: version.Version, Commit: commit, Schemas: []int{7, 8}, Migrations: []schemaMigration{{From: 7, To: 8}}}
+	return workerCapabilities{Format: 1, Version: version.Version, Commit: commit, Schemas: []int{7, 8, 9}, Migrations: []schemaMigration{{From: 7, To: 8}, {From: 8, To: 9}}}
 }
 
 func (c workerCapabilities) supports(source, target int) bool {

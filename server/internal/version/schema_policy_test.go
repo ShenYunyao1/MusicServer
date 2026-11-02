@@ -3,7 +3,7 @@ package version
 import "testing"
 
 func TestSchemaPolicyBridgeIsFiniteAndDirected(t *testing.T) {
-	for _, schema := range []int{-1, 0, 1, 6, 9, 100} {
+	for _, schema := range []int{-1, 0, 1, 6, 10, 100} {
 		if KnownSchema(schema) || len(MigrationSources(schema)) != 0 {
 			t.Fatalf("unsupported schema %d was accepted", schema)
 		}
@@ -24,7 +24,7 @@ func TestSchemaPolicyBridgeIsFiniteAndDirected(t *testing.T) {
 	if MigrationSources(8)[0] != 7 {
 		t.Fatal("caller mutated the schema policy")
 	}
-	if Schema != 8 {
-		t.Fatal("tag release must activate schema 8")
+	if Schema != 9 {
+		t.Fatal("listening release must activate schema 9")
 	}
 }

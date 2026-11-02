@@ -40,7 +40,7 @@ func normalizeTagName(value string) (string, string, error) {
 
 func requireTagsSchema(reader sqlReader) error {
 	schema, err := sqliteSchemaIdentity(reader)
-	if err != nil || schema != 8 {
+	if err != nil || schema < 8 {
 		return errTagsUnavailable
 	}
 	var count int
