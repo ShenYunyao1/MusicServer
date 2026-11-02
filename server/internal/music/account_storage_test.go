@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"musicserver/internal/diskspace"
 )
@@ -59,5 +60,24 @@ func TestAccountStorageDeletedHistoryIsPaged(t *testing.T) {
 	var page accountStoragePage
 	if err := json.Unmarshal(response.Body.Bytes(), &page); err != nil || response.Code != 200 || page.Total != 2 || len(page.Items) != 1 || page.Offset != 1 || !page.Items[0].Deleted {
 		t.Fatal(response.Code, response.Body, err)
+	}
+}
+
+func TestAccountStorageReadDoesNotTakeGlobalWriter(t *testing.T) {
+	a, _ := testAPI(t)
+	_, token := readyMember(t, a, "storage-unlocked-reader")
+	a.store.writeMu.Lock()
+	done := make(chan int, 1)
+	go func() { done <- sessionRequest(a, token, "GET", "/api/v2/auth/storage", "").Code }()
+	select {
+	case status := <-done:
+		a.store.writeMu.Unlock()
+		if status != 200 {
+			t.Fatal(status)
+		}
+	case <-time.After(time.Second):
+		a.store.writeMu.Unlock()
+		<-done
+		t.Fatal("account storage read took global writer lock")
 	}
 }

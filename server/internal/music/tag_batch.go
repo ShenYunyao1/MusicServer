@@ -6,7 +6,6 @@ import (
 	"errors"
 	"slices"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -83,6 +82,7 @@ type TagBatchSummary struct {
 	ExpiresAt string `json:"expires_at"`
 }
 type tagBatchRuntime struct {
+	preview  tagPreviewAdmission
 	mu       sync.Mutex
 	running  map[string]bool
 	failures map[string]string
@@ -200,7 +200,17 @@ func tagBatchTrack(tx *sql.Tx, auth authContext, scope, id string) (int64, error
 
 func (s *Store) PreviewTagBatch(auth authContext, input TagBatchInput) (TagBatch, error) {
 	var job TagBatch
-	err := s.tagTransaction(false, func(tx *sql.Tx) error {
+	// Recheck the actor before spending shared admission; the transaction below
+	// independently validates it again before freezing versions and saving.
+	if _, err := tagActor(s.db, auth); err != nil {
+		return job, err
+	}
+	release, err := s.acquireTagPreview(auth.userID)
+	if err != nil {
+		return job, err
+	}
+	defer release()
+	err = s.tagTransaction(false, func(tx *sql.Tx) error {
 		if input.Scope != "public" && input.Scope != "personal" || input.Query != nil && len(input.TrackIDs) != 0 {
 			return errTagInvalid
 		}
@@ -244,24 +254,10 @@ func (s *Store) PreviewTagBatch(auth authContext, input TagBatchInput) (TagBatch
 			default:
 				return errTagInvalid
 			}
-			for offset := 0; ; offset += 100 {
-				var page browsePage
-				if err := browseTracks(tx, auth, browseQuery{Limit: 100, Offset: offset, Search: strings.TrimSpace(q.Search), Filter: q.Filter}, &page); err != nil {
-					return err
-				}
-				if page.Total > tagBatchMaxTracks {
-					return errTagLimit
-				}
-				for _, track := range page.Items {
-					id, ok := track["id"].(string)
-					if !ok {
-						return errTagInvalid
-					}
-					ids = append(ids, id)
-				}
-				if offset+len(page.Items) >= page.Total {
-					break
-				}
+			var err error
+			ids, err = legacyTagBatchIDs(tx, auth, *q)
+			if err != nil {
+				return err
 			}
 		}
 		if len(ids) == 0 {
@@ -272,26 +268,18 @@ func (s *Store) PreviewTagBatch(auth authContext, input TagBatchInput) (TagBatch
 		}
 		seen := map[string]bool{}
 		job = TagBatch{ID: uuid.NewString(), Scope: input.Scope, State: "preview", Version: 1, Total: len(ids), Items: []TagBatchItem{}, AddIDs: slices.Clone(input.AddIDs), RemoveIDs: slices.Clone(input.RemoveIDs), CommonTagIDs: []string{}, PartialTagIDs: []string{}, CreatedAt: persistedTime(now), ExpiresAt: persistedTime(now.Add(24 * time.Hour))}
-		counts := map[string]int{}
 		scopeID, _ := tagScopeID(auth.userID, input.Scope)
 		for _, id := range ids {
 			if !tagUUID(id) || seen[id] {
 				return errTagInvalid
 			}
 			seen[id] = true
-			version, err := tagBatchTrack(tx, auth, input.Scope, id)
-			if err != nil {
-				return err
-			}
-			job.Items = append(job.Items, TagBatchItem{TrackID: id, Version: version, State: "pending"})
-			tags, err := trackTagsInScope(tx, id, scopeID)
-			if err != nil {
-				return err
-			}
-			for _, tag := range tags {
-				counts[tag.ID]++
-			}
 		}
+		items, counts, err := tagBatchSelection(tx, ids, scopeID)
+		if err != nil {
+			return err
+		}
+		job.Items = items
 		for id, count := range counts {
 			if count == len(ids) {
 				job.CommonTagIDs = append(job.CommonTagIDs, id)

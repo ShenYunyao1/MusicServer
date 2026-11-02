@@ -90,7 +90,6 @@ func (s *Store) accountStorageRows(reader sqlReader, where string, args []any, o
 	if err != nil {
 		return page, err
 	}
-	ids := []string{}
 	for rows.Next() {
 		var item accountStorageView
 		var quotaRaw, emailRaw string
@@ -109,19 +108,11 @@ func (s *Store) accountStorageRows(reader sqlReader, where string, args []any, o
 		}
 		item.Email, item.QuotaSource = email.Email, email.QuotaSource
 		page.Items = append(page.Items, item)
-		ids = append(ids, item.ID)
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
 		return page, err
-	}
-	used, err := s.accountUsageForIDs(reader, ids)
-	if err != nil {
-		return page, err
-	}
-	for i := range page.Items {
-		page.Items[i].UsedBytes = used[page.Items[i].ID]
 	}
 	return page, nil
 }
@@ -184,7 +175,7 @@ func (a *API) accountStorage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var page accountStoragePage
-	err := a.store.transaction(func(tx *sql.Tx) error {
+	validate := func(tx *sql.Tx) error {
 		if err := validateAccountSession(tx, auth); err != nil {
 			return err
 		}
@@ -193,10 +184,33 @@ func (a *API) accountStorage(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
+		return nil
+	}
+	err := a.store.readSnapshot(r.Context(), func(tx *sql.Tx) error {
+		if err := validate(tx); err != nil {
+			return err
+		}
 		var err error
 		page, err = a.store.accountStorageRows(tx, where, args, offset, limit)
 		return err
 	})
+	if err == nil {
+		ids := make([]string, len(page.Items))
+		for i, item := range page.Items {
+			ids[i] = item.ID
+		}
+		var used map[string]int64
+		used, err = a.store.accountUsageForIDs(a.store.db, ids)
+		if err == nil {
+			for i := range page.Items {
+				page.Items[i].UsedBytes = used[page.Items[i].ID]
+			}
+		}
+	}
+	// Revocation during slow media-disk I/O must still prevent disclosure.
+	if err == nil {
+		err = a.store.readSnapshot(r.Context(), validate)
+	}
 	if err != nil {
 		if errors.Is(err, errResourceHidden) {
 			writeError(w, 401, "AUTH_INVALID", "sign in again")

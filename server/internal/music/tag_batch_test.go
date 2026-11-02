@@ -41,6 +41,23 @@ func batchTracks(t *testing.T, s *Store, n int) []string {
 	return ids
 }
 
+func TestTagPreviewCancellationDoesNotResetAdmissionBudget(t *testing.T) {
+	s, auth := batchStore(t)
+	id := batchTracks(t, s, 1)[0]
+	for i := 0; i < 20; i++ {
+		job, err := s.PreviewTagBatch(auth, TagBatchInput{Scope: "personal", TrackIDs: []string{id}})
+		if err != nil {
+			t.Fatal(i, err)
+		}
+		if _, err = s.CancelTagBatch(auth, job.ID, job.Version); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.PreviewTagBatch(auth, TagBatchInput{Scope: "personal", TrackIDs: []string{id}}); !errors.Is(err, errTagPreviewRate) {
+		t.Fatal("cancel bypassed rate budget", err)
+	}
+}
+
 func TestTagBatchFrozenPreviewAndAtomicConflict(t *testing.T) {
 	s, auth := batchStore(t)
 	ids := batchTracks(t, s, 2)

@@ -7,7 +7,7 @@ const invitationBadge=document.createElement('span');invitationBadge.id='invitat
 function communityLiveView(){
   const view={};
   if(state.page==='public'){
-    if(state.publicDetailId)view.public_detail=state.publicDetailId;
+    if(state.publicDetailId){const values=publicDetailRouteValues();view.public_detail=state.publicDetailId;view.public_offset=values.offset;view.public_limit=values.limit;view.public_query=values.q}
     else {view.catalog=true;view.query=state.publicQuery||'';view.offset=state.publicOffset||0}
   }
   if(state.page==='public'||state.page==='keys'||state.page==='playlists'&&(state.subscriptionsTab||state.invitationsTab))view.subscriptions=true;
@@ -100,7 +100,7 @@ function applyCommunityRealtime(entry,changed,deltas={}){
   if(entry.sections.has('subscriptions')&&JSON.stringify(state.playlists.filter(p=>p.subscription_status))!==JSON.stringify(liveSectionItems(entry,'subscriptions')))changed.add('subscriptions');
   if(entry.sections.has('invitations')&&JSON.stringify(state.receivedInvitations||[])!==JSON.stringify(liveSectionItems(entry,'invitations')))changed.add('invitations');
   if([...changed].every(name=>name==='badge'))return;
-  if(state.communityMutating||sharingBusy||state.playlistEditing){
+  if(state.communityMutating||sharingBusy||state.playlistEditing||publicDetailSearchTimer!==null){
     communityLive.deferred=true;clearTimeout(communityLive.renderTimer);communityLive.renderTimer=setTimeout(()=>{if(state.user&&!document.hidden){communityLive.deferred=false;applyCommunityRealtime(entry,new Set(entry.sections.keys()))}},200);return;
   }
   const y=scrollY,detailId=state.publicDetailId,active=document.activeElement,focusID=active?.id,start=active?.selectionStart,end=active?.selectionEnd,direction=active?.selectionDirection;
@@ -117,7 +117,7 @@ function applyCommunityRealtime(entry,changed,deltas={}){
   }
   if(state.page==='public'&&detailId&&(changed.has('detail_playlist')||changed.has('detail_tracks')||changed.has('subscriptions'))){
     const playlist=liveSectionItems(entry,'detail_playlist')[0];
-    if(!playlist)renderRealtimePublicUnavailable();else{const tracks=liveSectionItems(entry,'detail_tracks');state.publicDetail={playlist,tracks};renderPlaylistDetail(playlist,{target:$('publicDetail'),publicView:true,tracks})}
+    if(!playlist)renderRealtimePublicUnavailable();else{const tracks=liveSectionItems(entry,'detail_tracks');renderPublicDetailPage({playlist,tracks,...entry.sections.get('detail_tracks')?.meta})}
   }
   if(state.page==='playlists'&&state.invitationsTab&&(changed.has('invitations')||changed.has('subscriptions'))){
     const data=liveSectionPage(entry,'invitations');state.receivedInvitations=data.items;

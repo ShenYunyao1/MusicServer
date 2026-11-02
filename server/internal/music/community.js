@@ -2,6 +2,16 @@
 
 const PUBLIC_REFRESH_MS=5*60*1000;
 const communityCache=new Map();let communityTimer=null,communityRequest=0,communityLastCheck=0;
+let publicDetailSearchTimer=null;
+function publicDetailRouteValues(){const query=new URLSearchParams(location.hash.split('?')[1]||''),raw=Number(query.get('offset'));return {offset:Number.isSafeInteger(raw)&&raw>=0&&raw<=1000000?raw:0,limit:50,q:(query.get('q')||'').trim().slice(0,256)}}
+function navigatePublicDetail(offset=0,query=publicDetailRouteValues().q){const values=new URLSearchParams();if(offset)values.set('offset',String(offset));if(query)values.set('q',query);location.hash='#/public/playlists/'+encodeURIComponent(state.publicDetailId)+(values.size?'?'+values:'')}
+function searchPublicDetail(value){clearTimeout(publicDetailSearchTimer);communityRequest++;const owner=state.user?.id,id=state.publicDetailId;publicDetailSearchTimer=setTimeout(()=>{publicDetailSearchTimer=null;if(owner===state.user?.id&&state.page==='public'&&id===state.publicDetailId){const query=value.trim().slice(0,256);if(publicDetailRouteValues().q===query)loadPublicDetail(id).catch(error=>setStatus(error.message,'error'));else navigatePublicDetail(0,query)}},220)}
+function renderPublicDetailPage(detail){
+ const values=publicDetailRouteValues();
+ if(detail.offset!==undefined&&detail.total!==undefined&&detail.offset>0&&detail.offset>=detail.total){navigatePublicDetail(detail.total?Math.floor((detail.total-1)/50)*50:0);return}
+ state.publicDetail=detail;state.playlistTrackSearchID=detail.playlist.id;state.playlistTrackQuery=values.q;
+ renderPlaylistDetail(detail.playlist,{target:$('publicDetail'),publicView:true,tracks:detail.tracks,page:detail.total===undefined?null:{total:detail.total,offset:detail.offset,limit:detail.limit}});
+}
 const publicNav=document.createElement('button');publicNav.dataset.page='public';publicNav.innerHTML='<span class="nav-icon"></span><span class="nav-label">公开歌单</span>';document.querySelector('.nav').append(publicNav);
 const communityPage=document.createElement('section');communityPage.id='page-public';communityPage.className='page';
 communityPage.innerHTML='<div class="page-intro"><div><h1>公开歌单</h1><p>发现本平台用户分享的歌单，订阅后可在播放器中使用。</p></div><button id="refreshPublic" class="btn">刷新</button></div><div id="publicBrowse"><form id="publicSearchForm" class="toolbar"><input id="publicSearch" class="search" placeholder="搜索歌单或作者" aria-label="搜索公开歌单"><button class="btn" type="submit">搜索</button></form><p id="publicCatalogStatus" class="status" role="status"></p><div id="publicCatalogList" class="playlist-list"></div><div class="toolbar public-paging"><button id="publicPrevious" class="btn">上一页</button><button id="publicNext" class="btn">下一页</button><span id="publicCount" class="status"></span></div></div><div id="publicDetail" hidden></div>';
@@ -30,7 +40,7 @@ async function communityCheck(){
   finally{communityLastCheck=Date.now();scheduleCommunityRefresh()}
 }
 document.addEventListener('visibilitychange',()=>{if(document.hidden)clearTimeout(communityTimer);else if(communityRelevant())communityCheck().catch(error=>setStatus(error.message,'error'))});
-function clearCommunityWorkspace(){if(typeof stopCommunityRealtime==='function')stopCommunityRealtime(true);clearTimeout(communityTimer);communityRequest++;communityCache.clear();communityLastCheck=0;state.publicDetailId=null;state.publicDetail=null;state.subscriptionsTab=false;$('publicCatalogList').replaceChildren();$('publicDetail').querySelector('.playlist-tracks')?.sortCleanup?.();$('publicDetail').replaceChildren();$('publicCatalogStatus').textContent='';$('publicSearch').value=''}
+function clearCommunityWorkspace(){clearTimeout(publicDetailSearchTimer);publicDetailSearchTimer=null;if(typeof stopCommunityRealtime==='function')stopCommunityRealtime(true);clearTimeout(communityTimer);communityRequest++;communityCache.clear();communityLastCheck=0;state.publicDetailId=null;state.publicDetail=null;state.subscriptionsTab=false;$('publicCatalogList').replaceChildren();$('publicDetail').querySelector('.playlist-tracks')?.sortCleanup?.();$('publicDetail').replaceChildren();$('publicCatalogStatus').textContent='';$('publicSearch').value=''}
 function renderPublicCatalog(data){
   const list=$('publicCatalogList');list.replaceChildren();
   for(const p of data.items){
@@ -58,9 +68,10 @@ async function loadPublicCatalog(force=false){
   finally{$('refreshPublic').disabled=false;communityLastCheck=Date.now();scheduleCommunityRefresh()}
 }
 async function loadPublicDetail(id){
-  const generation=++communityRequest,userID=state.user?.id;communityLastCheck=Date.now();$('publicBrowse').hidden=true;communityPage.querySelector('.page-intro').hidden=true;$('publicDetail').hidden=false;
-  try{const detail=await api('public/playlists/'+encodeURIComponent(id));if(generation!==communityRequest||state.user?.id!==userID||state.page!=='public'||state.publicDetailId!==id)return;
-    state.publicDetail=detail;renderPlaylistDetail(detail.playlist,{target:$('publicDetail'),publicView:true,tracks:detail.tracks});
+  clearTimeout(publicDetailSearchTimer);publicDetailSearchTimer=null;
+  const generation=++communityRequest,userID=state.user?.id,route=location.hash;communityLastCheck=Date.now();$('publicBrowse').hidden=true;communityPage.querySelector('.page-intro').hidden=true;$('publicDetail').hidden=false;
+  try{const detail=await api('public/playlists/'+encodeURIComponent(id)+'?'+new URLSearchParams(publicDetailRouteValues()));if(generation!==communityRequest||state.user?.id!==userID||state.page!=='public'||state.publicDetailId!==id||route!==location.hash)return;
+    renderPublicDetailPage(detail);
   }catch(error){if(generation===communityRequest){state.publicDetail=null;$('publicDetail').replaceChildren();if(error.status===404){const back=routeLink('← 公开歌单','public/playlists'),title=document.createElement('h1'),notice=document.createElement('p');back.classList.add('page-back');title.textContent='歌单暂不可用';notice.className='notice';notice.textContent='歌单可能已转为私有、被删除或作者账户已停用。';$('publicDetail').append(back,title,notice);document.title='歌单暂不可用 · 音乐服务器'}else throw error}}
   finally{communityLastCheck=Date.now();scheduleCommunityRefresh()}
 }

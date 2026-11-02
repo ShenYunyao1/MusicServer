@@ -15,6 +15,7 @@ import (
 
 	"musicserver/internal/activity"
 	"musicserver/internal/music"
+	"musicserver/internal/netlimit"
 	"musicserver/internal/update"
 	"musicserver/internal/version"
 )
@@ -161,7 +162,7 @@ func main() {
 	}
 	defer func() { stopUpdates(); <-deferredScanDone }()
 	updater.Start(updateContext)
-	server := &http.Server{Addr: *address, Handler: handler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
+	server := &http.Server{Addr: *address, Handler: handler, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 5 * time.Minute, WriteTimeout: 5 * time.Minute, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	signalContext, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 	serverDone := make(chan struct{})
@@ -189,7 +190,11 @@ func main() {
 	} else {
 		log.Printf("Open http://%s/ in your browser. Press Ctrl+C to stop.", *address)
 	}
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	listener, listenErr := net.Listen("tcp", server.Addr)
+	if listenErr == nil {
+		listenErr = server.Serve(netlimit.New(listener, 1024))
+	}
+	if err := listenErr; err != nil && err != http.ErrServerClosed {
 		log.Printf("listen: %v", err)
 		stopSignals()
 	}

@@ -1,6 +1,7 @@
 package music
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -25,9 +26,15 @@ type realtimeView struct {
 	OwnerPlaylist      string `json:"owner_playlist"`
 	OwnerOffset        int    `json:"owner_offset"`
 	PublicDetail       string `json:"public_detail"`
+	PublicOffset       int    `json:"public_offset"`
+	PublicLimit        int    `json:"public_limit"`
+	PublicQuery        string `json:"public_query"`
 }
 
 func (v realtimeView) valid() bool {
+	if v.PublicOffset < 0 || v.PublicOffset > 1000000 || v.PublicLimit < 0 || v.PublicLimit > 100 || len(v.PublicQuery) > 1024 {
+		return false
+	}
 	if len(v.Query) > 1024 || v.Offset < 0 || v.InvitationOffset < 0 || v.OwnerOffset < 0 || v.Offset > 1000000 || v.InvitationOffset > 1000000 || v.OwnerOffset > 1000000 {
 		return false
 	}
@@ -231,33 +238,26 @@ func (s *Store) realtimeSnapshot(auth authContext, view realtimeView) (realtimeS
 	if view.PublicDetail != "" {
 		playlist := newRealtimeSection(map[string]any{"available": false})
 		tracks := newRealtimeSection(map[string]any{})
-		err := s.transaction(func(tx *sql.Tx) error {
-			p, err := readPlaylistFrom(tx, view.PublicDetail)
-			if errors.Is(err, sql.ErrNoRows) || err == nil && !publishedPlaylist(tx, p) {
+		limit := view.PublicLimit
+		if limit == 0 {
+			limit = 50
+		}
+		err := s.readSnapshot(context.Background(), func(tx *sql.Tx) error {
+			page, err := readPublicDetailPage(tx, auth, view.PublicDetail, browseQuery{Offset: view.PublicOffset, Limit: limit, Search: view.PublicQuery})
+			if errors.Is(err, errResourceHidden) {
 				return nil
 			}
 			if err != nil {
 				return err
 			}
-			p, err = publicPlaylistView(tx, p, auth.userID)
-			if err != nil {
-				return err
-			}
-			for _, id := range p.TrackIDs {
-				t, err := readTrackFrom(tx, id, true)
-				if err != nil {
-					return err
-				}
-				if t.Removed || t.Missing {
-					p.UnavailableTrackIDs = append(p.UnavailableTrackIDs, id)
-					t = unavailableTrack(t)
-				}
-				if err := tracks.add(id, publicTrack(t, authContext{role: "member"})); err != nil {
+			tracks.Meta = map[string]any{"total": page.Total, "offset": page.Offset, "limit": page.Limit}
+			for _, track := range page.Tracks {
+				if err := tracks.add(track["id"].(string), track); err != nil {
 					return err
 				}
 			}
 			playlist.Meta["available"] = true
-			return playlist.add(p.ID, p)
+			return playlist.add(view.PublicDetail, page.Playlist)
 		})
 		if err != nil {
 			return nil, err

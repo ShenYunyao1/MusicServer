@@ -151,6 +151,22 @@ func TestPlaylistCoverVisibilityAndInjection(t *testing.T) {
 			t.Fatalf("cover permission: %d want %d", out.Code, status)
 		}
 	}
+	rConditional := httptest.NewRequest("GET", "http://example.com/api/v2/covers/"+hashBytes(data), nil)
+	rConditional.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+	rConditional.Header.Set("If-None-Match", `"`+hashBytes(data)+`"`)
+	conditional := httptest.NewRecorder()
+	api.ServeHTTP(conditional, rConditional)
+	if conditional.Code != 304 || conditional.Body.Len() != 0 {
+		t.Fatal("cover conditional request not honored", conditional.Code, conditional.Body)
+	}
+	rConditional = httptest.NewRequest("GET", "http://example.com/api/v2/covers/"+hashBytes(data), nil)
+	rConditional.AddCookie(&http.Cookie{Name: sessionCookie, Value: other})
+	rConditional.Header.Set("If-None-Match", `"`+hashBytes(data)+`"`)
+	conditional = httptest.NewRecorder()
+	api.ServeHTTP(conditional, rConditional)
+	if conditional.Code != 404 {
+		t.Fatal("cached validator bypassed visibility", conditional.Code)
+	}
 	if hidden := editorRequest(t, api, p.ID, other, p.Version, "Hijack", data, false); hidden.Code != 404 {
 		t.Fatal("cross-account editor write")
 	}
@@ -174,5 +190,22 @@ func TestPlaylistCoverVisibilityAndInjection(t *testing.T) {
 	api.ServeHTTP(out, r)
 	if out.Code != 200 {
 		t.Fatalf("granted key cannot read cover: %d %s", out.Code, out.Body)
+	}
+}
+
+func TestAdminPlayerKeyCannotReadCoverOutsideItsGrants(t *testing.T) {
+	a, _ := testAPI(t)
+	admin, _, _ := loginTestAccount(t, a.store, "admin")
+	if err := a.store.PutPlaylist(Playlist{ID: "empty-cover-grant", Name: "Empty player grant"}, MutationOptions{UserID: admin.ID}); err != nil {
+		t.Fatal(err)
+	}
+	data := playlistImage(t, 16, 16, color.White)
+	if err := a.store.SetTrackCover(a.store.Tracks()[0].ID, data, MutationOptions{UserID: admin.ID}); err != nil {
+		t.Fatal(err)
+	}
+	_, secret := createPersistentKey(t, a, APIKeyCreateRequest{Name: "restricted admin player", Scopes: []string{ScopeMediaRead}, AllowedPlaylistIDs: []string{"empty-cover-grant"}})
+	w := callAPIWithKey(a, "GET", "/api/v2/covers/"+hashBytes(data), "", secret)
+	if w.Code != 404 {
+		t.Fatal("admin account role bypassed player grants", w.Code, w.Body)
 	}
 }

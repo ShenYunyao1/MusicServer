@@ -64,6 +64,12 @@ func tagGroupID(id string) bool {
 
 func writeTagError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, errTagPreviewRate):
+		w.Header().Set("Retry-After", "60")
+		writeError(w, 429, "TAG_PREVIEW_RATE", err.Error())
+	case errors.Is(err, errTagPreviewBusy):
+		w.Header().Set("Retry-After", "1")
+		writeError(w, 429, "TAG_PREVIEW_BUSY", err.Error())
 	case errors.Is(err, errTagBatchEmpty):
 		writeError(w, 409, "TAG_BATCH_EMPTY", "no tracks match this selection")
 	case errors.Is(err, errFilterReference):

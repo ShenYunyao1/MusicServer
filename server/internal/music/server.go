@@ -54,6 +54,7 @@ type API struct {
 	active          map[string]int
 	authConfig      AuthConfig
 	hashSlots       chan struct{}
+	uploadRequests  chan struct{}
 	updating        func() bool
 	setupMu         sync.Mutex
 	setupToken      string
@@ -76,7 +77,7 @@ type authContext struct {
 }
 
 func NewAPI(store *Store) *API {
-	api := &API{store: store, active: map[string]int{}, hashSlots: make(chan struct{}, 2)}
+	api := &API{store: store, active: map[string]int{}, hashSlots: make(chan struct{}, 2), uploadRequests: make(chan struct{}, 16)}
 	return api
 }
 
@@ -84,10 +85,20 @@ func (a *API) SetUpdater(manager *update.Manager) { a.updater = manager }
 func (a *API) SetMaintenance(check func() bool)   { a.updating = check }
 
 func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
-	if request.Method != "GET" && request.Method != "HEAD" && !strings.HasPrefix(request.URL.Path, "/api/v2/uploads") {
-		controller := http.NewResponseController(response)
-		_ = controller.SetReadDeadline(time.Now().Add(30 * time.Second))
+	controller := http.NewResponseController(response)
+	if request.Method != "GET" && request.Method != "HEAD" {
+		deadline := 30 * time.Second
+		if uploadBodyRequest(request) {
+			deadline = 2 * time.Minute
+			request.Body = &progressBody{request.Body, controller}
+		}
+		_ = controller.SetReadDeadline(time.Now().Add(deadline))
 		defer controller.SetReadDeadline(time.Time{})
+	}
+	if request.URL.Path != "/api/v2/community/events" {
+		_ = controller.SetWriteDeadline(time.Now().Add(2 * time.Minute))
+		defer controller.SetWriteDeadline(time.Time{})
+		response = &progressResponse{response, controller}
 	}
 	if a.updating != nil && a.updating() && request.URL.Path != "/api/v2/health" {
 		response.Header().Set("Cache-Control", "no-store")
@@ -287,6 +298,13 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		if auth.mustChangePassword && !firstPasswordEndpoint(request) {
 			writeError(response, 403, "PASSWORD_CHANGE_REQUIRED", "change your temporary password before using the account")
 			return
+		}
+		if auth.session {
+			var ok bool
+			release, ok = a.acquireSessionRequest(response, request, auth)
+			if !ok {
+				return
+			}
 		}
 		if !auth.session {
 			if !playerEndpoint(request) {
@@ -611,36 +629,19 @@ func (a *API) cover(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	auth := authFromRequest(request)
-	if auth.role != "admin" {
-		allowed := false
-		tracks, err := a.store.ReadTracks(false)
-		if err != nil {
-			writeError(response, 503, "DATABASE_UNAVAILABLE", "tracks unavailable")
+	var allowed bool
+	err := a.store.readSnapshot(request.Context(), func(tx *sql.Tx) error { var err error; allowed, err = coverReadable(tx, auth, id); return err })
+	if err != nil {
+		if errors.Is(err, errResourceHidden) || errors.Is(err, sql.ErrNoRows) {
+			writeError(response, 401, "AUTH_INVALID", "sign in again")
 			return
 		}
-		for _, track := range tracks {
-			if track.CoverID == id && canReadTrack(auth, a.store, track.ID) {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			playlists, err := a.store.ReadPlaylists()
-			if err != nil {
-				writeError(response, 503, "DATABASE_UNAVAILABLE", "playlists unavailable")
-				return
-			}
-			for _, playlist := range playlists {
-				if playlist.CoverID == id && canReadPlaylist(auth, a.store, playlist) {
-					allowed = true
-					break
-				}
-			}
-		}
-		if !allowed {
-			writeError(response, http.StatusNotFound, "COVER_NOT_FOUND", "cover not found")
-			return
-		}
+		writeError(response, 503, "DATABASE_UNAVAILABLE", "cover visibility unavailable")
+		return
+	}
+	if !allowed {
+		writeError(response, 404, "COVER_NOT_FOUND", "cover not found")
+		return
 	}
 	asset, ok := a.store.Cover(id)
 	if !ok {
@@ -648,9 +649,13 @@ func (a *API) cover(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	response.Header().Set("Content-Type", asset.MIME)
-	response.Header().Set("Cache-Control", "private, no-store")
+	response.Header().Set("Cache-Control", "private, no-cache")
 	response.Header().Set("Vary", "X-API-Key, Authorization, Cookie")
 	response.Header().Set("ETag", fmt.Sprintf("\"%s\"", id))
+	if matchesETag(request.Header.Get("If-None-Match"), response.Header().Get("ETag")) {
+		response.WriteHeader(http.StatusNotModified)
+		return
+	}
 	if request.Method == http.MethodHead {
 		response.WriteHeader(http.StatusOK)
 		return

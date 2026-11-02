@@ -78,7 +78,7 @@ MusicPlayer2 服务器适配 0.13.0 显示 `[订阅]`／`[分享]`／`[失效]` 
 | 方法 | `/api/v2` 路径 | 用途 |
 | --- | --- | --- |
 | GET | `/public/playlists?q=&offset=0&limit=30` | 分页摘要、ETag；limit 为 1–100 |
-| GET | `/public/playlists/{id}` | 公开只读详情及曲目 |
+| GET | `/public/playlists/{id}?q=&offset=0&limit=50` | 公开只读详情及曲目摘要分页，返回 `total/offset/limit`；limit 为 1–100。成员与个人备注仅包含当前页，曲目详情另行按 UUID 读取；播放顺序不受分页影响 |
 | GET | `/subscriptions` | 本人订阅，包括最小失效项 |
 | PUT / DELETE | `/subscriptions/{id}` | 幂等订阅／取消 |
 | PATCH | `/subscriptions/{id}/tracks/{trackID}` | 本人备注 `{ "note": "…" }`，If-Match 为 subscription_version |

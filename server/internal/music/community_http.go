@@ -3,7 +3,6 @@ package music
 import (
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -127,38 +126,22 @@ func (a *API) community(response http.ResponseWriter, request *http.Request) {
 			writeError(response, 404, "NOT_FOUND", "playlist not found")
 			return
 		}
-		var view Playlist
-		tracks := []Track{}
-		err := a.store.transaction(func(tx *sql.Tx) error {
-			p, err := readPlaylistFrom(tx, id)
-			if errors.Is(err, sql.ErrNoRows) || err == nil && !publishedPlaylist(tx, p) {
-				return errResourceHidden
-			}
-			if err != nil {
-				return err
-			}
-			view, err = publicPlaylistView(tx, p, authFromRequest(request).userID)
-			if err != nil {
-				return err
-			}
-			for _, id := range p.TrackIDs {
-				track, err := readTrackFrom(tx, id, true)
-				if err != nil {
-					return err
-				}
-				if track.Removed || track.Missing {
-					view.UnavailableTrackIDs = append(view.UnavailableTrackIDs, id)
-					track = unavailableTrack(track)
-				}
-				tracks = append(tracks, publicTrack(track, authContext{role: "member"}))
-			}
-			return nil
+		q, err := parseBrowseQuery(request)
+		if err != nil || q.Offset > 1000000 || len(q.Search) > 1024 {
+			writeError(response, 400, "INVALID_PAGE", "invalid public playlist page")
+			return
+		}
+		var page publicDetailPage
+		err = a.store.readSnapshot(request.Context(), func(tx *sql.Tx) error {
+			var err error
+			page, err = readPublicDetailPage(tx, authFromRequest(request), id, q)
+			return err
 		})
 		if err != nil {
 			writePlaylistMutationError(response, err)
 			return
 		}
-		writeJSON(response, 200, map[string]any{"playlist": view, "tracks": tracks})
+		writeJSON(response, 200, page)
 		return
 	}
 	if path == "subscriptions" {

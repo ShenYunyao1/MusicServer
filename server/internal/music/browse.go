@@ -295,16 +295,16 @@ func writeBrowseError(response http.ResponseWriter, err error) {
 // instr keeps '%' and '_' literal, matching the existing browser search.
 const browseTrackSearch = `instr(lower(COALESCE(json_extract(t.payload,'$.title'),'') || ' ' || COALESCE(json_extract(t.payload,'$.artist'),'') || ' ' || COALESCE(json_extract(t.payload,'$.album'),'') || ' ' || COALESCE(json_extract(t.payload,'$.genre'),'')),lower(?))>0`
 
-func browseTracks(tx *sql.Tx, auth authContext, q browseQuery, page *browsePage) error {
+func browseTrackWhere(tx sqlReader, auth authContext, q browseQuery) (string, []any, error) {
 	where := "t.removed=0"
 	args := []any{}
 	if q.ExcludePlaylistID != "" {
 		var allowed bool
 		if err := tx.QueryRow("SELECT EXISTS(SELECT 1 FROM playlists WHERE id=? AND system=0 AND (owner_id=? OR ?='admin'))", q.ExcludePlaylistID, auth.userID, auth.role).Scan(&allowed); err != nil {
-			return err
+			return "", nil, err
 		}
 		if !allowed {
-			return errResourceHidden
+			return "", nil, errResourceHidden
 		}
 		where += " AND NOT EXISTS (SELECT 1 FROM playlist_tracks m WHERE m.playlist_id=? AND m.track_id=t.id)"
 		args = append(args, q.ExcludePlaylistID)
@@ -312,7 +312,7 @@ func browseTracks(tx *sql.Tx, auth authContext, q browseQuery, page *browsePage)
 	switch q.Filter {
 	case "missing":
 		if auth.role != "admin" {
-			return errResourceHidden
+			return "", nil, errResourceHidden
 		}
 		where += " AND t.missing=1"
 	case "mine":
@@ -328,6 +328,14 @@ func browseTracks(tx *sql.Tx, auth authContext, q browseQuery, page *browsePage)
 	if q.Search != "" {
 		where += " AND " + browseTrackSearch
 		args = append(args, q.Search)
+	}
+	return where, args, nil
+}
+
+func browseTracks(tx *sql.Tx, auth authContext, q browseQuery, page *browsePage) error {
+	where, args, err := browseTrackWhere(tx, auth, q)
+	if err != nil {
+		return err
 	}
 	if err := tx.QueryRow("SELECT count(*) FROM tracks t WHERE "+where, args...).Scan(&page.Total); err != nil {
 		return err

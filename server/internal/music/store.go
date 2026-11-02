@@ -536,11 +536,8 @@ func (s *Store) mutatePlaylistActionGuarded(id string, members bool, action stri
 		if err := edit(&result); err != nil {
 			return err
 		}
-		for _, trackID := range result.TrackIDs {
-			track, err := readTrackFrom(tx, trackID, true)
-			if err != nil || track.Removed && !slices.Contains(before.TrackIDs, trackID) {
-				return fmt.Errorf("unknown track: %s", trackID)
-			}
+		if err := validatePlaylistMembers(tx, before.TrackIDs, result.TrackIDs); err != nil {
+			return err
 		}
 		if reflect.DeepEqual(before, result) {
 			return nil
