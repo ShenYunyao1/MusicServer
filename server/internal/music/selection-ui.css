@@ -4,3 +4,4 @@
 @media(prefers-reduced-motion:reduce){.selection-float{transition:none}}
 @media(max-width:620px){#trackRows tr td.track-selection-cell{grid-row:1/span 2;align-self:stretch;height:100%;box-sizing:border-box}}
 #trackRows tr:has([data-track-id]:checked),.playlist-track:has([data-playlist-select]:checked),.key-grant-grid label:has(input:checked),#userResources .resource-item:has(input:checked){background:var(--blue-soft)}
+body:has(dialog[open]) .selection-float{display:none}
