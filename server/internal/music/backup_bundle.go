@@ -43,6 +43,8 @@ type BackupManifest struct {
 	MissingMedia []string     `json:"missing_media"`
 }
 type BackupArchive struct {
+	Kind         string    `json:"kind,omitempty"`
+	Warning      string    `json:"warning,omitempty"`
 	ID           string    `json:"id"`
 	Name         string    `json:"name"`
 	CreatedAt    time.Time `json:"created_at"`
@@ -63,6 +65,23 @@ func backupArchiveName(id string) (string, error) {
 		return "", errors.New("invalid backup ID")
 	}
 	return "backup-" + id + ".tar.gz", nil
+}
+
+func backupManagedName(id string) (string, error) {
+	if !strings.HasPrefix(id, "snapshot-") {
+		return backupArchiveName(id)
+	}
+	name := strings.TrimPrefix(id, "snapshot-")
+	if len(name) != 16+36 || name[15] != '-' {
+		return "", errors.New("invalid backup snapshot ID")
+	}
+	if _, err := time.Parse("20060102T150405", name[:15]); err != nil {
+		return "", err
+	}
+	if _, err := backupArchiveName(name[16:]); err != nil {
+		return "", err
+	}
+	return name + ".sqlite", nil
 }
 func validBackupPath(name string) bool {
 	if name == "database.sqlite" || name == "config.json" {
@@ -160,6 +179,9 @@ func (s *Store) createBackupBundleForTarget(ctx context.Context, includeMedia bo
 		return BackupArchive{}, err
 	}
 	defer s.backupBundleMu.Unlock()
+	if err := s.cleanupBackupTemporaryLocked(); err != nil {
+		return BackupArchive{}, err
+	}
 	if err := backupAcquire(ctx, s.mediaMu.TryRLock); err != nil {
 		return BackupArchive{}, err
 	}
@@ -169,7 +191,7 @@ func (s *Store) createBackupBundleForTarget(ctx context.Context, includeMedia bo
 		}
 	}
 	report("snapshot", 0, 0)
-	snapshot, err := s.backupSnapshot(ctx)
+	snapshot, err := s.backupSnapshot(ctx, true)
 	s.mediaMu.RUnlock()
 	if err != nil {
 		return BackupArchive{}, err

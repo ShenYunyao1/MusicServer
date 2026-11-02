@@ -210,8 +210,11 @@ func (s *Store) checkAccountQuota(tx *sql.Tx, id string, additional int64) error
 	return nil
 }
 func directoryBytes(path string) (int64, error) {
+	return directoryBytesWithWalker(path, filepath.WalkDir)
+}
+func directoryBytesWithWalker(path string, walk func(string, fs.WalkDirFunc) error) (int64, error) {
 	var total int64
-	err := filepath.WalkDir(path, func(name string, entry fs.DirEntry, err error) error {
+	err := walk(path, func(name string, entry fs.DirEntry, err error) error {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
@@ -220,6 +223,9 @@ func directoryBytes(path string) (int64, error) {
 		}
 		if entry.Type().IsRegular() {
 			info, err := entry.Info()
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
 			if err != nil {
 				return err
 			}

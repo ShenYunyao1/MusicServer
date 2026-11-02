@@ -219,9 +219,12 @@ func (s *Store) resumeOwned(id string, auth authContext) (resumableUpload, error
 	return task, nil
 }
 
-// recoverResume discards unacknowledged tails. At startup it also verifies every
-// acknowledged block before any offset is advertised to another browser.
+// Recovery validates checkpoints and discards unacknowledged tails. Full block
+// verification runs before staging, rather than blocking startup on every byte.
 func (s *Store) recoverResume(task resumableUpload, verify bool) error {
+	return s.recoverResumeContext(context.Background(), task, verify)
+}
+func (s *Store) recoverResumeContext(ctx context.Context, task resumableUpload, verify bool) error {
 	if task.State == "canceled" || task.State == "ready" {
 		return nil
 	}
@@ -270,7 +273,10 @@ func (s *Store) recoverResume(task resumableUpload, verify bool) error {
 	if verify {
 		for _, chunk := range task.Chunks {
 			hash := sha256.New()
-			if _, err := io.CopyN(hash, f, chunk.Size); err != nil {
+			if _, err := io.CopyN(hash, contextReader{ctx, f}, chunk.Size); err != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
 				return errResumeCorrupt
 			}
 			if hex.EncodeToString(hash.Sum(nil)) != chunk.SHA256 {
@@ -497,13 +503,16 @@ func resumeChecksum(header string) (string, bool) {
 	return hex.EncodeToString(decoded), err == nil && len(decoded) == sha256.Size
 }
 
-func (s *Store) finishResume(ctx context.Context, auth authContext, task resumableUpload, input resumableFinish, options MutationOptions) (UploadPreview, error) {
+func (s *Store) finishResume(ctx context.Context, auth authContext, task resumableUpload, input resumableFinish, options MutationOptions) (result UploadPreview, resultErr error) {
 	phaseKey := uploadPhaseIdentity{s, task.ID}
 	uploadPhases.Store(phaseKey, "queued")
 	defer uploadPhases.Delete(phaseKey)
 	ctx = context.WithValue(ctx, uploadPhaseKey{}, func(phase string) { uploadPhases.Store(phaseKey, phase) })
 	if task.State == "canceled" {
 		return UploadPreview{}, errResourceHidden
+	}
+	if task.State == "corrupt" {
+		return UploadPreview{}, errResumeCorrupt
 	}
 	if task.TargetPlaylistID == nil && input.TargetPlaylistID != nil {
 		task.TargetPlaylistID = input.TargetPlaylistID
@@ -537,9 +546,6 @@ func (s *Store) finishResume(ctx context.Context, auth authContext, task resumab
 	if task.Offset != task.Size {
 		return UploadPreview{}, errResumeConflict
 	}
-	if err := s.recoverResume(task, true); err != nil {
-		return UploadPreview{}, err
-	}
 	if err := checkResumeUploadActor(s.db, auth); err != nil {
 		return UploadPreview{}, err
 	}
@@ -551,12 +557,28 @@ func (s *Store) finishResume(ctx context.Context, auth authContext, task resumab
 		return UploadPreview{}, errResourceHidden
 	}
 	if !exists {
+		if err := s.admitResumeVerification(task.ID, time.Now()); err != nil {
+			return UploadPreview{}, err
+		}
+		defer func() { s.finishResumeVerification(task.ID, resultErr, time.Now()) }()
 		fields := map[string]string{}
 		for key, value := range task.Fields {
 			fields[key] = value
 		}
 		for key, value := range input.Fields {
 			fields[key] = value
+		}
+		if err := validMetadataFields(fields); err != nil {
+			return UploadPreview{}, err
+		}
+		if err := s.recoverResumeContext(ctx, task, true); err != nil {
+			if errors.Is(err, errResumeCorrupt) {
+				task.State = "corrupt"
+				if persistErr := s.transaction(func(tx *sql.Tx) error { return saveResume(tx, task, s.temporaryLimits()) }); persistErr != nil {
+					return UploadPreview{}, persistErr
+				}
+			}
+			return UploadPreview{}, err
 		}
 		root, err := os.OpenRoot(s.mediaRoot)
 		if err != nil {
@@ -664,6 +686,9 @@ func writeResumeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, errResumeBusy):
 		w.Header().Set("Retry-After", "1")
 		writeError(w, 429, "UPLOAD_BUSY", err.Error())
+	case errors.Is(err, errResumeVerificationRetry):
+		w.Header().Set("Retry-After", "3")
+		writeError(w, 429, "UPLOAD_VERIFY_RETRY", err.Error())
 	case errors.Is(err, errResumeExpiredPreview):
 		writeError(w, 410, "UPLOAD_PREVIEW_EXPIRED", err.Error())
 	case errors.Is(err, errResumeConflict):
@@ -882,7 +907,7 @@ func (s *Store) InitializeResumableUploads() error {
 		lock.Lock()
 		task, e := readResume(s.db, id)
 		if e == nil && task.State == "uploading" && time.Now().Before(task.ExpiresAt) {
-			e = s.recoverResume(task, true)
+			e = s.recoverResume(task, false)
 			if errors.Is(e, errResumeCorrupt) {
 				task.State = "corrupt"
 				e = s.transaction(func(tx *sql.Tx) error { return saveResume(tx, task, s.temporaryLimits()) })

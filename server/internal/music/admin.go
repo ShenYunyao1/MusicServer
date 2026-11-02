@@ -44,7 +44,7 @@ func (s *Store) Audit(limit int, before int64) ([]AuditEntry, error) {
 func (s *Store) Backup() (string, error) {
 	return s.backupSnapshot(context.Background())
 }
-func (s *Store) backupSnapshot(ctx context.Context) (string, error) {
+func (s *Store) backupSnapshot(ctx context.Context, managed ...bool) (string, error) {
 	var size int64
 	for _, suffix := range []string{"", "-wal"} {
 		if stat, err := os.Stat(s.dataPath + suffix); err == nil {
@@ -62,7 +62,11 @@ func (s *Store) backupSnapshot(ctx context.Context) (string, error) {
 	if err := os.MkdirAll(directory, 0700); err != nil {
 		return "", err
 	}
-	absolute, err := filepath.Abs(filepath.Join(directory, time.Now().UTC().Format("20060102T150405")+"-"+uuid.NewString()+".sqlite"))
+	name := time.Now().UTC().Format("20060102T150405") + "-" + uuid.NewString() + ".sqlite"
+	if len(managed) > 0 && managed[0] {
+		name = ".backup-snapshot-" + uuid.NewString() + ".sqlite"
+	}
+	absolute, err := filepath.Abs(filepath.Join(directory, name))
 	if err != nil {
 		return "", err
 	}

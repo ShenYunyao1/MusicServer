@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,6 +33,34 @@ func TestBackupBundleReleasesMediaPublicationLockAfterSnapshot(t *testing.T) {
 	}
 	if !checked {
 		t.Fatal("packing phase was not reached")
+	}
+}
+
+func TestBackupBundlePreventsPurgeWithoutBlockingPublication(t *testing.T) {
+	a, _ := testAPI(t)
+	track := a.store.Tracks()[0]
+	if err := a.store.DeleteTrack(track.ID); err != nil {
+		t.Fatal(err)
+	}
+	track = a.store.RemovedTracks()[0]
+	admin, _, _ := loginTestAccount(t, a.store, "admin")
+	checked := false
+	_, err := a.store.CreateBackupBundle(context.Background(), true, func(phase string, _, _ int64) {
+		if phase == "packing" && !checked {
+			checked = true
+			if err := a.store.PurgeTrack(track.ID, MutationOptions{UserID: admin.ID, ExpectedVersion: track.Version}); !errors.Is(err, errBackupBusy) {
+				t.Error("purge was not rejected while archive needs media", err)
+			}
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !checked {
+		t.Fatal("packing phase not reached")
+	}
+	if err := a.store.PurgeTrack(track.ID, MutationOptions{UserID: admin.ID, ExpectedVersion: track.Version}); err != nil {
+		t.Fatal("backup completion did not release purge", err)
 	}
 }
 
@@ -105,7 +134,7 @@ func TestBackupRestoreRejectsSchemaMetadataMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	config, _ := json.Marshal(api.store.Settings())
-	manifest := BackupManifest{Format: 1, ID: "b0e3e30d-00be-4fdd-bc75-398e3a21f321", CreatedAt: time.Now(), Version: "test", Schema: 7}
+	manifest := BackupManifest{Format: 1, ID: "b0e3e30d-00be-4fdd-bc75-398e3a21f321", CreatedAt: time.Now(), Version: "test", Schema: sqliteSchemaVersion}
 	contents := map[string][]byte{"database.sqlite": database, "config.json": config}
 	for name, data := range contents {
 		hash := sha256.Sum256(data)
@@ -222,7 +251,7 @@ func TestBackupBundleRejectsChangedMediaAndOccupiedRestoreTarget(t *testing.T) {
 func TestBackupRestoreRejectsUnsafePathsLinksAndChecksumMismatch(t *testing.T) {
 	for _, kind := range []string{"path", "link", "checksum"} {
 		t.Run(kind, func(t *testing.T) {
-			manifest := BackupManifest{Format: 1, ID: "b0e3e30d-00be-4fdd-bc75-398e3a21f321", CreatedAt: time.Now(), Version: "test", Schema: 7, Files: []BackupFile{{Path: "database.sqlite", Size: 1, SHA256: strings.Repeat("0", 64)}, {Path: "config.json", Size: 1, SHA256: strings.Repeat("0", 64)}}}
+			manifest := BackupManifest{Format: 1, ID: "b0e3e30d-00be-4fdd-bc75-398e3a21f321", CreatedAt: time.Now(), Version: "test", Schema: sqliteSchemaVersion, Files: []BackupFile{{Path: "database.sqlite", Size: 1, SHA256: strings.Repeat("0", 64)}, {Path: "config.json", Size: 1, SHA256: strings.Repeat("0", 64)}}}
 			if kind == "path" {
 				manifest.Files[0].Path = "media/../../escape.mp3"
 			}

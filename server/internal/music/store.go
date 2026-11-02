@@ -37,6 +37,8 @@ var errVersionConflict = errors.New("record changed; refresh before editing")
 var errTrackInUse = errors.New("this track is used by another account's playlist; contact an administrator")
 
 type Store struct {
+	resumeVerifyMu   sync.Mutex
+	resumeVerifyNext map[string]time.Time
 	tempMu           sync.Mutex
 	tempLimits       *temporaryUploadLimits
 	tempReservations map[*temporaryUploadReservation]bool
@@ -101,6 +103,9 @@ func openStoreForSchema(dataPath, mediaRoot string, schema int, runtimeInitializ
 	}
 	if !runtimeInitialization {
 		return store, nil
+	}
+	if err := store.CleanupBackupTemporary(); err != nil {
+		log.Printf("backup temporary cleanup deferred: %v", err)
 	}
 	if err := store.recoverPurgedMedia(); err != nil {
 		_ = store.db.Close()

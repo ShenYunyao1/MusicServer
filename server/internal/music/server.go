@@ -1771,6 +1771,9 @@ func (a *API) maintenance(response http.ResponseWriter, request *http.Request) {
 		id := strings.TrimPrefix(path, "/api/v2/admin/removed/")
 		if err := a.store.PurgeTrack(id, mutationOptions(request)); err != nil {
 			switch {
+			case errors.Is(err, errBackupBusy):
+				response.Header().Set("Retry-After", "5")
+				writeError(response, 409, "BACKUP_BUSY", "备份或媒体清理正在进行，请完成后重试")
 			case errors.Is(err, errTrackNotRemoved):
 				writeError(response, 409, "TRACK_NOT_REMOVED", err.Error())
 			case errors.Is(err, sql.ErrNoRows):

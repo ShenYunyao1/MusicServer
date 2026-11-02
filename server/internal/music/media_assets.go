@@ -66,13 +66,21 @@ func externalCoverNamesForMetadata(relativeAudioPath string, metadata audioMetad
 	return candidates
 }
 
-func readExternalCoverForMetadata(root *os.Root, relativeAudioPath string, metadata audioMetadata) (data []byte, mime, source string) {
+func readExternalCoverForMetadata(root *os.Root, relativeAudioPath string, metadata audioMetadata, indices ...*assetDirectoryIndex) (data []byte, mime, source string) {
 	if root == nil {
 		return nil, "", ""
 	}
 	candidates := externalCoverNamesForMetadata(relativeAudioPath, metadata)
+	index := assetLookup(indices)
 	for _, candidate := range candidates {
-		for _, actual := range []string{candidate, findCaseInsensitive(root, candidate)} {
+		for attempt := 0; attempt < 2; attempt++ {
+			actual := candidate
+			if attempt == 1 {
+				actual = index.find(root, candidate)
+				if actual == candidate {
+					continue
+				}
+			}
 			if actual == "" {
 				continue
 			}
@@ -98,13 +106,14 @@ func readExternalCoverForMetadata(root *os.Root, relativeAudioPath string, metad
 	return nil, "", ""
 }
 
-func readExternalLyrics(root *os.Root, relativeAudioPath string) (text, source string) {
+func readExternalLyrics(root *os.Root, relativeAudioPath string, indices ...*assetDirectoryIndex) (text, source string) {
 	if root == nil {
 		return "", ""
 	}
 	base := strings.TrimSuffix(relativeAudioPath, filepath.Ext(relativeAudioPath))
+	index := assetLookup(indices)
 	for _, ext := range []string{".lrc", ".elrc", ".txt"} {
-		candidate := findCaseInsensitive(root, base+ext)
+		candidate := index.find(root, base+ext)
 		if candidate == "" {
 			continue
 		}
@@ -180,38 +189,17 @@ func decodeLyricsFile(data []byte) (string, error) {
 }
 
 func findCaseInsensitive(root *os.Root, relative string) string {
-	dir, name := filepath.ToSlash(filepath.Dir(relative)), filepath.Base(relative)
-	if dir == "." {
-		dir = "."
-	}
-	directory, err := root.Open(dir)
-	if err != nil {
-		return ""
-	}
-	entries, err := directory.Readdir(-1)
-	_ = directory.Close()
-	if err != nil {
-		return ""
-	}
-	for _, entry := range entries {
-		if strings.EqualFold(entry.Name(), name) {
-			if dir == "." {
-				return entry.Name()
-			}
-			return filepath.ToSlash(filepath.Join(dir, entry.Name()))
-		}
-	}
-	return ""
+	return (&assetDirectoryIndex{}).find(root, relative)
 }
 
 // selectCover preserves embedded artwork precedence while allowing a caller
 // to fill in an external fallback. It is deliberately independent of Store so
 // upload and scan code can apply the same policy.
-func selectCover(root *os.Root, relativeAudioPath string, metadata audioMetadata) audioMetadata {
+func selectCover(root *os.Root, relativeAudioPath string, metadata audioMetadata, indices ...*assetDirectoryIndex) audioMetadata {
 	if len(metadata.Cover) > 0 {
 		return metadata
 	}
-	data, mime, source := readExternalCoverForMetadata(root, relativeAudioPath, metadata)
+	data, mime, source := readExternalCoverForMetadata(root, relativeAudioPath, metadata, indices...)
 	if len(data) > 0 {
 		metadata.Cover, metadata.CoverMIME, metadata.CoverSource = data, mime, source
 	}

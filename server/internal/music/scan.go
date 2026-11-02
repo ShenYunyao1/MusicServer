@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -71,8 +72,9 @@ func (s *Store) readTrackWithTechnical(ctx context.Context, path, name string, s
 		return Track{}, audioMetadata{}, err
 	}
 	metadata, _ := readAudioMetadata(file)
+	index := assetIndex(ctx)
 	if settings.ScanExternalCovers {
-		metadata = selectCover(root, relative, metadata)
+		metadata = selectCover(root, relative, metadata, index)
 	}
 	var technical audioTechnical
 	if validated != nil {
@@ -93,7 +95,7 @@ func (s *Store) readTrackWithTechnical(ctx context.Context, path, name string, s
 	}
 	lyrics, source := metadata.Lyrics, metadata.LyricsSource
 	if settings.ScanExternalLyrics {
-		if text, origin := readExternalLyrics(root, relative); origin != "" {
+		if text, origin := readExternalLyrics(root, relative, index); origin != "" {
 			lyrics, source = text, origin
 		}
 	}
@@ -217,6 +219,11 @@ func (s *Store) Scan() (int, error) {
 }
 
 func (s *Store) runScan(ctx context.Context, full bool, options []MutationOptions) (changedResult int, scanErr error) {
+	return s.runScanWithWalker(ctx, full, options, filepath.WalkDir)
+}
+
+func (s *Store) runScanWithWalker(ctx context.Context, full bool, options []MutationOptions, walk func(string, fs.WalkDirFunc) error) (changedResult int, scanErr error) {
+	ctx = context.WithValue(ctx, assetDirectoryIndexKey{}, &assetDirectoryIndex{})
 	started := time.Now()
 	fields := activity.Fields{}
 	if len(options) > 0 {
@@ -259,6 +266,7 @@ func (s *Store) runScan(ctx context.Context, full bool, options []MutationOption
 		return 0, err
 	}
 	seen := map[string]bool{}
+	unreadable := map[string]bool{}
 	candidates := []scanCandidate{}
 	newHashes := map[string]int{}
 	directoryStamps := map[string]string{}
@@ -267,12 +275,29 @@ func (s *Store) runScan(ctx context.Context, full bool, options []MutationOption
 		return 0, err
 	}
 	dataDirectory := filepath.Dir(dataPath)
-	err = filepath.WalkDir(s.mediaRoot, func(path string, entry os.DirEntry, walkErr error) error {
+	err = walk(s.mediaRoot, func(path string, entry os.DirEntry, walkErr error) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if walkErr != nil {
-			return walkErr
+			if path == s.mediaRoot {
+				return walkErr
+			}
+			relative, err := filepath.Rel(s.mediaRoot, path)
+			if err != nil || !filepath.IsLocal(relative) {
+				return walkErr
+			}
+			relative = filepath.ToSlash(relative)
+			unreadable[relative] = true
+			s.scanMu.Lock()
+			if len(s.scanStatus.Errors) < 100 {
+				s.scanStatus.Errors = append(s.scanStatus.Errors, relative+": "+walkErr.Error())
+			}
+			s.scanMu.Unlock()
+			if entry != nil && entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		if entry.IsDir() {
 			if path != s.mediaRoot && (entry.Name() == ".staging" || entry.Name() == ".server-archive" || path == dataDirectory) {
@@ -364,6 +389,9 @@ func (s *Store) runScan(ctx context.Context, full bool, options []MutationOption
 			}
 			if exists {
 				current, err := readTrackFrom(tx, previous.ID, true)
+				if errors.Is(err, sql.ErrNoRows) {
+					continue
+				}
 				if err != nil {
 					return err
 				}
@@ -449,7 +477,13 @@ func (s *Store) runScan(ctx context.Context, full bool, options []MutationOption
 			if seen[previous.Path] || matched[previous.ID] || previous.Missing {
 				continue
 			}
+			if scanPathUnreadable(previous.Path, unreadable) {
+				continue
+			}
 			current, err := readTrackFrom(tx, previous.ID, true)
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
 			if err != nil {
 				return err
 			}

@@ -90,7 +90,7 @@ func (a *API) backups(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(204)
 		return
 	}
-	name, err := backupArchiveName(parts[0])
+	name, err := backupManagedName(parts[0])
 	if err != nil {
 		writeError(w, 404, "BACKUP_NOT_FOUND", "backup not found")
 		return
@@ -146,6 +146,9 @@ func (a *API) backups(w http.ResponseWriter, r *http.Request) {
 			a.store.backupMu.Unlock()
 		}()
 		w.Header().Set("Content-Type", "application/gzip")
+		if strings.HasSuffix(name, ".sqlite") {
+			w.Header().Set("Content-Type", "application/octet-stream")
+		}
 		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name))
 		w.Header().Set("ETag", fmt.Sprintf("\"backup-%s\"", parts[0]))
 		http.ServeContent(w, r, name, info.ModTime(), file)

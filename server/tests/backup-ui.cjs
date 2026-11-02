@@ -32,6 +32,14 @@ module.exports=async function({page,directory}){
   page.once('dialog',d=>d.dismiss());await row.locator('[data-backup-delete]').click();assert.equal(await row.count(),1);
   page.once('dialog',d=>d.accept());await row.locator('[data-backup-delete]').click();await row.waitFor({state:'detached'});
   await page.reload();await page.waitForFunction(()=>backupPolicyLoaded&&!backupLoading);assert.equal(await page.locator('[data-backup-id="'+archive.id+'"]').count(),0);
+  const snapshotName='20261102T120000-b0e3e30d-00be-4fdd-bc75-398e3a21f321.sqlite',snapshotID='snapshot-'+snapshotName.replace(/\.sqlite$/,''),snapshotBytes=Buffer.from('legacy snapshot fixture');
+  await fs.writeFile(path.join(directory,'backups',snapshotName),snapshotBytes);
+  await page.click('#refreshBackups');const snapshotRow=page.locator('[data-backup-id="'+snapshotID+'"]');await snapshotRow.waitFor();
+  assert.ok((await snapshotRow.textContent()).includes('历史数据库快照'));assert.ok((await snapshotRow.textContent()).includes('不能直接作为归档恢复'));
+  const snapshotEvent=page.waitForEvent('download');await snapshotRow.locator('[data-backup-download]').click();const snapshotDownload=await snapshotEvent;
+  const snapshotCopy=path.join(directory,'downloaded-'+snapshotName);await snapshotDownload.saveAs(snapshotCopy);assert.deepEqual(await fs.readFile(snapshotCopy),snapshotBytes);
+  page.once('dialog',d=>d.accept());await snapshotRow.locator('[data-backup-delete]').click();await snapshotRow.waitFor({state:'detached'});
+  await assert.rejects(fs.stat(path.join(directory,'backups',snapshotName)),{code:'ENOENT'});
   assert.deepEqual(errors,[]);
   console.log('Backup UI passed: policy persistence/draft, full archive task, download, real CLI restore/media hash, occupied destination rejection, deletion and mobile layout.');
  }finally{page.off('pageerror',onError)}

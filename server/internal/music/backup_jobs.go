@@ -155,7 +155,7 @@ func (s *Store) CancelBackup() {
 	}
 }
 func (s *Store) DeleteBackup(id string, options MutationOptions) error {
-	name, err := backupArchiveName(id)
+	name, err := backupManagedName(id)
 	if err != nil {
 		return err
 	}
@@ -248,6 +248,9 @@ func (s *Store) StartBackupScheduler(blocked func() bool) func() {
 			case now := <-ticker.C:
 				if blocked != nil && blocked() {
 					continue
+				}
+				if err := s.CleanupBackupTemporary(); err != nil {
+					_ = s.activity.Emit("server.backup_prune_failed", activity.Fields{Reason: "temporary"})
 				}
 				if err := s.MaybeRunScheduledBackup(now); err != nil {
 					_ = s.activity.Emit("server.backup_failed", activity.Fields{})

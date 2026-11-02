@@ -44,6 +44,8 @@ function renderBackupArchives(items){
  for(const archive of items){
   const row=document.createElement('div');row.className='resource-item';row.dataset.backupId=archive.id;
   const label=document.createElement('div');label.className='resource-title';const title=document.createElement('strong');title.textContent=new Date(archive.created_at).toLocaleString()+' · '+(archive.include_media?'完整备份':'仅数据库');const meta=document.createElement('p');meta.className='status';meta.textContent=formatBytes(archive.size)+' · '+archive.file_count+' 个文件 · '+(archive.automatic?'自动':'手动')+(archive.missing_count?' · '+archive.missing_count+' 个原始缺失文件':'');label.append(title,meta);
+  if(archive.kind==='snapshot')title.textContent=new Date(archive.created_at).toLocaleString()+' · 历史数据库快照';
+  if(archive.warning)meta.textContent+=' · '+archive.warning;
   const actions=document.createElement('div');actions.className='actions';const download=document.createElement('a');download.className='btn small';download.href='/api/v2/admin/backups/'+archive.id+'/download';download.download=archive.name;download.textContent='下载';download.dataset.backupDownload=archive.id;
   const remove=makeButton('删除',()=>{if(confirm('删除这份备份？不会删除曲库，已下载的副本不受影响。'))run(async()=>{await api('admin/backups/'+archive.id,'DELETE');await loadBackupManagement()})},'btn small danger');remove.dataset.backupDelete=archive.id;if(archive.error){title.textContent='不可用备份';meta.textContent=archive.name+' · '+archive.error;actions.append(remove)}else actions.append(download,remove);row.append(label,actions);list.append(row);
  }

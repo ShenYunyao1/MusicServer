@@ -192,7 +192,7 @@ func TestResumableFinishUsesExistingPreview(t *testing.T) {
 }
 
 func TestResumableFinishRecoversStageBeforeCheckpoint(t *testing.T) {
-	api, _ := testAPI(t)
+	api, root := testAPI(t)
 	user, _, _ := loginTestAccount(t, api.store, "admin")
 	audio := validTestAudio(t)
 	task := resumeCreate(t, api, user, len(audio))
@@ -206,6 +206,11 @@ func TestResumableFinishRecoversStageBeforeCheckpoint(t *testing.T) {
 	}
 	if preview.ID != task.ID {
 		t.Fatalf("resumable stage ID must be deterministic: %s != %s", preview.ID, task.ID)
+	}
+	// The validated, persisted stage is authoritative even if the redundant
+	// resume input has already been removed after a crash.
+	if err := os.Remove(filepath.Join(root, filepath.FromSlash(resumeFilePath(task.ID)))); err != nil {
+		t.Fatal(err)
 	}
 	w := resumeCall(api, user, "POST", "/"+task.ID+"/finish", []byte(`{}`), "")
 	if w.Code != 200 {
@@ -221,6 +226,40 @@ func TestResumableFinishRecoversStageBeforeCheckpoint(t *testing.T) {
 	}
 	if w := resumeCall(api, user, "DELETE", "/"+task.ID, nil, ""); w.Code != 204 {
 		t.Fatalf("repeat ready cancel: %d %s", w.Code, w.Body)
+	}
+}
+
+func TestResumableFailedVerificationRetryIsBounded(t *testing.T) {
+	a, _ := testAPI(t)
+	user, _, _ := loginTestAccount(t, a.store, "admin")
+	task := resumeCreate(t, a, user, 3)
+	if w := resumeCall(a, user, "PATCH", "/"+task.ID, []byte("bad"), "0"); w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
+	if w := resumeCall(a, user, "POST", "/"+task.ID+"/finish", []byte(`{}`), ""); w.Code != 400 {
+		t.Fatal(w.Code, w.Body)
+	}
+	if w := resumeCall(a, user, "POST", "/"+task.ID+"/finish", []byte(`{}`), ""); w.Code != 429 || w.Header().Get("Retry-After") != "3" {
+		t.Fatal("repeated verification not bounded", w.Code, w.Body)
+	}
+	// Expired admission entries do not retain an unbounded task history.
+	if err := a.store.admitResumeVerification("later", time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if len(a.store.resumeVerifyNext) != 1 {
+		t.Fatal("expired retry guard retained")
+	}
+	now := time.Now().Add(2 * time.Minute)
+	a.store.finishResumeVerification("later", errors.New("long verification failed"), now)
+	if err := a.store.admitResumeVerification("later", now.Add(time.Second)); !errors.Is(err, errResumeVerificationRetry) {
+		t.Fatal("long failure bypassed cooldown", err)
+	}
+	if err := a.store.admitResumeVerification("later", now.Add(4*time.Second)); err != nil {
+		t.Fatal("cooldown never expires", err)
+	}
+	a.store.finishResumeVerification("later", nil, now.Add(4*time.Second))
+	if len(a.store.resumeVerifyNext) != 0 {
+		t.Fatal("successful verification retained guard")
 	}
 }
 
@@ -255,7 +294,7 @@ func TestResumableChecksumAndSizeDoNotAdvanceCheckpoint(t *testing.T) {
 	}
 }
 
-func TestResumableStartupRejectsDamagedPrefix(t *testing.T) {
+func TestResumableRecoveryDefersHashButRejectsDamageBeforeStaging(t *testing.T) {
 	for _, damage := range []string{"modified", "short", "missing"} {
 		t.Run(damage, func(t *testing.T) {
 			api, root := testAPI(t)
@@ -275,6 +314,21 @@ func TestResumableStartupRejectsDamagedPrefix(t *testing.T) {
 			}
 			if err := api.store.InitializeResumableUploads(); err != nil {
 				t.Fatal(err)
+			}
+			if damage == "modified" {
+				if w := resumeCall(api, user, "GET", "/"+task.ID, nil, ""); w.Code != 200 {
+					t.Fatal("startup unexpectedly hashed prefix", w.Code, w.Body)
+				}
+				if w := resumeCall(api, user, "PATCH", "/"+task.ID, []byte("def"), "3"); w.Code != 200 {
+					t.Fatal(w.Code, w.Body)
+				}
+				if w := resumeCall(api, user, "POST", "/"+task.ID+"/finish", []byte(`{}`), ""); w.Code != 409 || !strings.Contains(w.Body.String(), "UPLOAD_CORRUPT") {
+					t.Fatal("modified prefix accepted by finish", w.Code, w.Body)
+				}
+				var count int
+				if err := api.store.db.QueryRow("SELECT count(*) FROM upload_staging").Scan(&count); err != nil || count != 0 {
+					t.Fatal("corrupted bytes reached staging", count, err)
+				}
 			}
 			if w := resumeCall(api, user, "GET", "/"+task.ID, nil, ""); w.Code != 409 || !strings.Contains(w.Body.String(), "UPLOAD_CORRUPT") {
 				t.Fatalf("damaged prefix advertised: %d %s", w.Code, w.Body)

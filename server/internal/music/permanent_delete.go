@@ -15,6 +15,12 @@ var errTrackNotRemoved = errors.New("请先下架曲目，再永久删除")
 // PurgeTrack serializes with scanning/import and quarantines the audio until
 // the database commit succeeds. A crash is reconciled at the next store open.
 func (s *Store) PurgeTrack(id string, options MutationOptions) error {
+	// The archive releases mediaMu after its DB snapshot so unrelated immutable
+	// uploads can proceed. Deletion must still retain every snapshot input.
+	if !s.backupBundleMu.TryLock() {
+		return errBackupBusy
+	}
+	defer s.backupBundleMu.Unlock()
 	s.mediaMu.Lock()
 	defer s.mediaMu.Unlock()
 	root, err := os.OpenRoot(s.mediaRoot)

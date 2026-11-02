@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -158,8 +159,19 @@ func TestBackupSchemaMigrationRejectsDeclarationsDowngradeAndFailure(t *testing.
 				t.Fatal("failed restore published destination")
 			}
 			entries, err := os.ReadDir(parent)
-			if err != nil || len(entries) != 0 {
+			if err != nil {
 				t.Fatal("failed restore leaked staging", err)
+			}
+			for _, entry := range entries {
+				// OS lock files intentionally persist: unlinking one while another
+				// process holds its inode would split the restore exclusion lock.
+				if !entry.Type().IsRegular() || !strings.HasPrefix(entry.Name(), ".musicserver-restorelock-") || !strings.HasSuffix(entry.Name(), ".lock") {
+					t.Fatal("failed restore leaked staging", entry.Name())
+				}
+				info, err := entry.Info()
+				if err != nil || info.Size() != 0 {
+					t.Fatal("unexpected restore lock contents", err)
+				}
 			}
 			assertMigrationSchema(t, s.db, 7)
 		})

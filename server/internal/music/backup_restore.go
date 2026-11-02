@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"musicserver/internal/diskspace"
@@ -32,9 +33,8 @@ func readBackupManifestForTarget(archive *tar.Reader, target int) (BackupManifes
 	if err := decoder.Decode(&manifest); err != nil {
 		return manifest, errors.New("invalid backup manifest JSON")
 	}
-	compatible := version.KnownSchema(target) && version.KnownSchema(manifest.Schema) && (manifest.Schema == target || version.CanMigrateSchema(manifest.Schema, target))
-	if decoder.Decode(new(any)) != io.EOF || manifest.Format != 1 || !compatible || manifest.CreatedAt.IsZero() || len(manifest.Files) < 2 || len(manifest.Files) > maxBackupFiles {
-		return manifest, errors.New("invalid or incompatible backup manifest")
+	if decoder.Decode(new(any)) != io.EOF || manifest.Format != 1 || manifest.CreatedAt.IsZero() || len(manifest.Files) < 2 || len(manifest.Files) > maxBackupFiles {
+		return manifest, errors.New("invalid backup manifest")
 	}
 	if _, err := backupArchiveName(manifest.ID); err != nil {
 		return manifest, err
@@ -57,6 +57,10 @@ func readBackupManifestForTarget(archive *tar.Reader, target int) (BackupManifes
 	if !seen["database.sqlite"] || !seen["config.json"] {
 		return manifest, errors.New("backup database or configuration is missing")
 	}
+	compatible := version.KnownSchema(target) && version.KnownSchema(manifest.Schema) && (manifest.Schema == target || version.CanMigrateSchema(manifest.Schema, target))
+	if !compatible {
+		return manifest, &backupSchemaError{Source: manifest.Schema, Target: target}
+	}
 	return manifest, nil
 }
 
@@ -70,6 +74,15 @@ func (s *Store) BackupArchives() ([]BackupArchive, error) {
 		return nil, err
 	}
 	for _, entry := range entries {
+		if entry.Type().IsRegular() && strings.HasSuffix(entry.Name(), ".sqlite") {
+			id := "snapshot-" + strings.TrimSuffix(entry.Name(), ".sqlite")
+			if name, err := backupManagedName(id); err == nil && name == entry.Name() {
+				if info, err := entry.Info(); err == nil {
+					items = append(items, BackupArchive{ID: id, Name: name, Kind: "snapshot", CreatedAt: info.ModTime(), Size: info.Size(), FileCount: 1, Warning: "历史独立 SQLite 快照，不含媒体和完整配置；可先下载留存，再删除释放空间，不能直接作为归档恢复"})
+				}
+				continue
+			}
+		}
 		if !entry.Type().IsRegular() || !strings.HasPrefix(entry.Name(), "backup-") || !strings.HasSuffix(entry.Name(), ".tar.gz") {
 			continue
 		}
@@ -100,6 +113,12 @@ func (s *Store) BackupArchives() ([]BackupArchive, error) {
 		file.Close()
 		if readErr != nil || statErr != nil || manifest.ID != id {
 			item := BackupArchive{ID: id, Name: entry.Name(), Error: "备份清单损坏或不匹配"}
+			var unsupported *backupSchemaError
+			if errors.As(readErr, &unsupported) && statErr == nil && manifest.ID == id {
+				item.Error = ""
+				item.Warning = unsupported.Error()
+				item.IncludeMedia, item.FileCount, item.MissingCount, item.Automatic = manifest.IncludeMedia, len(manifest.Files), len(manifest.MissingMedia), manifest.Automatic
+			}
 			if info != nil {
 				item.Size = info.Size()
 				item.CreatedAt = info.ModTime()
@@ -119,6 +138,9 @@ func RestoreBackup(ctx context.Context, archivePath, destination string) (Backup
 }
 
 func restoreBackupForTarget(ctx context.Context, archivePath, destination string, targetSchema int) (BackupManifest, error) {
+	return restoreBackupWithMountCheck(ctx, archivePath, destination, targetSchema, restoreDestinationMount)
+}
+func restoreBackupWithMountCheck(ctx context.Context, archivePath, destination string, targetSchema int, mountCheck func(string) (bool, error)) (BackupManifest, error) {
 	var manifest BackupManifest
 	target, err := filepath.Abs(destination)
 	if err != nil || strings.TrimSpace(destination) == "" {
@@ -134,6 +156,13 @@ func restoreBackupForTarget(ctx context.Context, archivePath, destination string
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return manifest, err
+	}
+	// A mount root cannot be atomically replaced by a sibling directory. Reject
+	// it before reading the archive or extracting onto the wrong filesystem.
+	if mounted, err := mountCheck(target); err != nil {
+		return manifest, err
+	} else if mounted {
+		return manifest, errors.New("恢复目标不能直接为挂载点或磁盘根目录，请选择挂载点内新的子目录后重试")
 	}
 	input, err := os.Open(archivePath)
 	if err != nil {
@@ -153,6 +182,24 @@ func restoreBackupForTarget(ctx context.Context, archivePath, destination string
 	if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
 		return manifest, err
 	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(target))
+	if err != nil {
+		return manifest, err
+	}
+	identity := filepath.Join(parent, filepath.Base(target))
+	if runtime.GOOS == "windows" {
+		identity = strings.ToLower(identity)
+	}
+	key := sha256.Sum256([]byte(identity))
+	prefix := ".musicserver-restore-" + hex.EncodeToString(key[:16]) + "-"
+	unlock, err := LockDatabaseProcess(filepath.Join(parent, ".musicserver-restorelock-"+hex.EncodeToString(key[:16])))
+	if err != nil {
+		return manifest, err
+	}
+	defer unlock()
+	if err := cleanupRestoreTemporary(parent, prefix); err != nil {
+		return manifest, err
+	}
 	var required int64
 	for _, file := range manifest.Files {
 		required += file.Size
@@ -160,14 +207,14 @@ func restoreBackupForTarget(ctx context.Context, archivePath, destination string
 			required += file.Size
 		}
 	}
-	space, err := diskspace.Read(filepath.Dir(target))
+	space, err := diskspace.Read(parent)
 	if err != nil {
 		return manifest, err
 	}
 	if uint64(required+diskspace.DefaultReserve) > space.Available {
 		return manifest, errStorageLow
 	}
-	temporary, err := os.MkdirTemp(filepath.Dir(target), ".musicserver-restore-*")
+	temporary, err := os.MkdirTemp(parent, prefix+"*")
 	if err != nil {
 		return manifest, err
 	}
