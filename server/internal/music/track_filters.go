@@ -413,7 +413,7 @@ func (s *Store) QueryTrackFilter(auth authContext, q TrackFilterQuery) (TrackFil
 	if !ok || q.Direction != "asc" && q.Direction != "desc" {
 		return page, errTagInvalid
 	}
-	err = s.tagTransaction(false, func(tx *sql.Tx) error {
+	err = s.tagRead(func(tx *sql.Tx) error {
 		f, redirects, err := resolveTrackFilter(tx, auth, q.Filter)
 		if err != nil {
 			return err

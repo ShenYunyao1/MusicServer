@@ -11,6 +11,12 @@ import (
 func browseAccountRevision(reader sqlReader, auth authContext) (int64, error) {
 	return browseAccountRevisionData(reader, auth, true)
 }
+
+func playbackRevision(account int64, id, source string, version int64) int64 {
+	encoded, _ := json.Marshal([]any{account, id, source, version})
+	hash := sha256.Sum256(encoded)
+	return int64(binary.BigEndian.Uint64(hash[:8]) & ((1 << 53) - 1))
+}
 func browseAccountRevisionData(reader sqlReader, auth authContext, includeTags bool) (int64, error) {
 	hash := sha256.New()
 	encoder := json.NewEncoder(hash)
@@ -21,8 +27,7 @@ func browseAccountRevisionData(reader sqlReader, auth authContext, includeTags b
 		query string
 		args  []any
 	}{
-		{`SELECT t.id,CAST(t.version AS TEXT),CAST(t.removed AS TEXT)||':'||CAST(t.missing AS TEXT)||':'||COALESCE(CAST(u.enabled AS TEXT),'') FROM tracks t LEFT JOIN users u ON u.id=t.owner_id ORDER BY t.id`, nil},
-		{`SELECT p.id,CAST(p.version AS TEXT),CAST(p.sort_order AS TEXT)||':'||COALESCE(CAST(u.enabled AS TEXT),'')||':'||p.visibility||':'||COALESCE(CAST(s.version AS TEXT),'') FROM playlists p LEFT JOIN users u ON u.id=p.owner_id LEFT JOIN subscriptions s ON s.playlist_id=p.id AND s.user_id=? WHERE p.system=0 AND (p.owner_id=? OR s.user_id IS NOT NULL OR ?='admin') ORDER BY p.id`, []any{auth.userID, auth.userID, auth.role}},
+		{`SELECT key,value,'' FROM meta WHERE key IN ('browse/epoch','browse/library','browse/account/'||?,CASE WHEN ?='admin' THEN 'browse/admin' ELSE '' END) ORDER BY key`, []any{auth.userID, auth.role}},
 	}
 	for _, q := range queries {
 		rows, err := reader.Query(q.query, q.args...)

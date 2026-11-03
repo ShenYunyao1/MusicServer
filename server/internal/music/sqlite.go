@@ -118,6 +118,12 @@ func (s *Store) loadSQLiteForTarget(target int) error {
 	if err := initializeSQLiteSchemaForTarget(db, target); err != nil {
 		return err
 	}
+	s.schema = target
+	if target >= 8 {
+		if err := initializeBrowseIndexes(db); err != nil {
+			return err
+		}
+	}
 	if err := os.Chmod(s.dataPath, 0600); err != nil {
 		return err
 	}

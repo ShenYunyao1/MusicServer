@@ -62,6 +62,7 @@ type Store struct {
 	dataPath         string
 	mediaRoot        string
 	db               *sql.DB
+	schema           int
 	writeMu          sync.Mutex
 	stageMu          sync.Mutex
 	mediaMu          sync.RWMutex

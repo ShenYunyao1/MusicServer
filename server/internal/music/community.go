@@ -1,6 +1,7 @@
 package music
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"slices"
@@ -252,7 +253,7 @@ func subscriptionViews(reader sqlReader, userID string) ([]Playlist, error) {
 }
 func (s *Store) Subscriptions(userID string) ([]Playlist, error) {
 	var result []Playlist
-	err := s.transaction(func(tx *sql.Tx) error { var err error; result, err = subscriptionViews(tx, userID); return err })
+	err := s.readSnapshot(context.Background(), func(tx *sql.Tx) error { var err error; result, err = subscriptionViews(tx, userID); return err })
 	return result, err
 }
 func (s *Store) UpdateSubscriptionNote(id, trackID, note string, options MutationOptions) (Playlist, error) {

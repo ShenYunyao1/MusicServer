@@ -37,7 +37,7 @@ func (s *Store) TrackTagFacets(auth authContext, q TagFacetQuery) (TagFacetPage,
 	if q.Scope != "public" && q.Scope != "personal" || !tagGroupID(q.GroupID) || !validFilterText(q.Search, 64) {
 		return page, errTagInvalid
 	}
-	err = s.tagTransaction(false, func(tx *sql.Tx) error {
+	err = s.tagRead(func(tx *sql.Tx) error {
 		actor, err := tagActor(tx, auth)
 		if err != nil {
 			return err

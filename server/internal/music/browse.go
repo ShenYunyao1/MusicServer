@@ -102,13 +102,26 @@ func (a *API) browse(response http.ResponseWriter, request *http.Request) {
 	}
 	auth := authFromRequest(request)
 	var result any
-	err = a.store.transaction(func(tx *sql.Tx) error {
+	transact := func(run func(*sql.Tx) error) error { return a.store.readSnapshot(request.Context(), run) }
+	// Explicit administrator inspection writes an audit row; ordinary reads
+	// neither acquire writeMu nor wake community streams.
+	if auth.role == "admin" && (len(parts) == 2 && parts[0] == "playback" && request.URL.Query().Get("source") == "own" || len(parts) == 3 && parts[0] == "playlists") {
+		transact = a.store.transaction
+	}
+	err = transact(func(tx *sql.Tx) error {
 		if err := browseIdentity(tx, auth); err != nil {
 			return err
 		}
 		revision, err := browseAccountRevision(tx, auth)
 		if err != nil {
 			return err
+		}
+		if len(parts) == 2 && parts[0] == "playback" {
+			var sourceVersion int64
+			if err := tx.QueryRow("SELECT version FROM playlists WHERE id=?", parts[1]).Scan(&sourceVersion); err != nil {
+				return err
+			}
+			revision = playbackRevision(revision, parts[1], request.URL.Query().Get("source"), sourceVersion)
 		}
 		if q.Revision != nil && *q.Revision != revision {
 			return errBrowseRestart

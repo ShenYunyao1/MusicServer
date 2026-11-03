@@ -1,6 +1,7 @@
 package music
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,15 @@ import (
 	"golang.org/x/text/cases"
 	"golang.org/x/text/unicode/norm"
 )
+
+func (s *Store) tagRead(run func(*sql.Tx) error) error {
+	return s.readSnapshot(context.Background(), func(tx *sql.Tx) error {
+		if err := requireTagsSchema(tx); err != nil {
+			return err
+		}
+		return run(tx)
+	})
+}
 
 const tagNameRunes = 64
 const tagAliasLimit = 32
@@ -211,7 +221,7 @@ func readTagGroup(reader sqlReader, id string) (TagGroup, error) {
 
 func (s *Store) ListTagGroups(auth authContext) ([]TagGroup, error) {
 	groups := []TagGroup{}
-	err := s.tagTransaction(false, func(tx *sql.Tx) error {
+	err := s.tagRead(func(tx *sql.Tx) error {
 		if _, err := tagActor(tx, auth); err != nil {
 			return err
 		}
@@ -478,7 +488,7 @@ func (s *Store) CreateTag(auth authContext, input TagInput) (Tag, error) {
 
 func (s *Store) GetTag(auth authContext, id string) (Tag, error) {
 	var tag Tag
-	err := s.tagTransaction(false, func(tx *sql.Tx) error {
+	err := s.tagRead(func(tx *sql.Tx) error {
 		actor, err := tagActor(tx, auth)
 		if err != nil {
 			return err
@@ -610,7 +620,7 @@ func (s *Store) ListTags(auth authContext, query TagQuery) (TagPage, error) {
 	if page.Offset < 0 || page.Offset > 1000000 || page.Limit < 1 || page.Limit > 100 {
 		return page, errTagInvalid
 	}
-	err := s.tagTransaction(false, func(tx *sql.Tx) error {
+	err := s.tagRead(func(tx *sql.Tx) error {
 		actor, err := tagActor(tx, auth)
 		if err != nil {
 			return err

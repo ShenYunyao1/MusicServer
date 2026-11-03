@@ -81,8 +81,7 @@ func listeningTrackAllowed(reader sqlReader, auth authContext, id string) bool {
 }
 
 func (s *Store) listeningEnabled() bool {
-	schema, err := sqliteSchemaIdentity(s.db)
-	return err == nil && schema >= 9
+	return s.schema >= 9
 }
 
 func (a *API) listening(w http.ResponseWriter, r *http.Request) {

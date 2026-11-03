@@ -11,7 +11,7 @@ function communityLiveView(){
     else {view.catalog=true;view.query=state.publicQuery||'';view.offset=state.publicOffset||0}
   }
   if(state.page==='public'||state.page==='keys'||state.page==='playlists'&&(state.subscriptionsTab||state.invitationsTab))view.subscriptions=true;
-  if(state.page==='playlists'&&state.subscriptionsTab&&state.playlistDetailId)view.subscription_detail=state.playlistDetailId;
+  if(state.page==='playlists'&&state.subscriptionsTab&&state.playlistDetailId){view.subscription_detail=state.playlistDetailId;view.subscription_offset=browseRouteOffset();view.subscription_limit=50;view.subscription_query=browseRouteQuery().get('q')||''}
   if(state.page==='playlists'&&state.invitationsTab){view.invitations=true;view.invitation_id=state.invitationDetailID||'';view.invitation_offset=state.invitationOffset||0}
   if(sharingDialog.open&&state.sharingPlaylist){view.owner_playlist=state.sharingPlaylist.id;view.owner_offset=state.ownerInvitationOffset||0}
   return view;
@@ -104,7 +104,7 @@ function applyCommunityRealtime(entry,changed,deltas={}){
     communityLive.deferred=true;clearTimeout(communityLive.renderTimer);communityLive.renderTimer=setTimeout(()=>{if(state.user&&!document.hidden){communityLive.deferred=false;applyCommunityRealtime(entry,new Set(entry.sections.keys()))}},200);return;
   }
   const y=scrollY,detailId=state.publicDetailId,active=document.activeElement,focusID=active?.id,start=active?.selectionStart,end=active?.selectionEnd,direction=active?.selectionDirection;
-  if(changed.has('subscription_tracks')){state.liveSubscriptionTracksID=communityLive.view.subscription_detail;state.liveSubscriptionTracks=liveSectionItems(entry,'subscription_tracks')}
+  if(changed.has('subscription_tracks')){state.liveSubscriptionTracksID=communityLive.view.subscription_detail;state.liveSubscriptionTracks=liveSectionItems(entry,'subscription_tracks');state.liveSubscriptionPage=entry.sections.get('subscription_tracks')?.meta;state.playlistTrackQuery=communityLive.view.subscription_query||'';state.playlistTrackSearchID=communityLive.view.subscription_detail}
   if(changed.has('subscriptions')){
     state.playlists=state.playlists.filter(p=>!p.subscription_status).concat(liveSectionItems(entry,'subscriptions'));
   }

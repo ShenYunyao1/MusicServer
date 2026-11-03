@@ -20,6 +20,9 @@ type realtimeView struct {
 	Offset             int    `json:"offset"`
 	Subscriptions      bool   `json:"subscriptions"`
 	SubscriptionDetail string `json:"subscription_detail"`
+	SubscriptionOffset int    `json:"subscription_offset"`
+	SubscriptionLimit  int    `json:"subscription_limit"`
+	SubscriptionQuery  string `json:"subscription_query"`
 	Invitations        bool   `json:"invitations"`
 	InvitationID       string `json:"invitation_id"`
 	InvitationOffset   int    `json:"invitation_offset"`
@@ -32,6 +35,9 @@ type realtimeView struct {
 }
 
 func (v realtimeView) valid() bool {
+	if v.SubscriptionOffset < 0 || v.SubscriptionOffset > 1000000 || v.SubscriptionLimit < 0 || v.SubscriptionLimit > 100 || len(v.SubscriptionQuery) > 1024 {
+		return false
+	}
 	if v.PublicOffset < 0 || v.PublicOffset > 1000000 || v.PublicLimit < 0 || v.PublicLimit > 100 || len(v.PublicQuery) > 1024 {
 		return false
 	}
@@ -178,26 +184,21 @@ func (s *Store) realtimeSnapshot(auth authContext, view realtimeView) (realtimeS
 	}
 	if view.SubscriptionDetail != "" {
 		tracks := newRealtimeSection(map[string]any{})
-		err := s.transaction(func(tx *sql.Tx) error {
-			p, err := subscriptionView(tx, auth.userID, view.SubscriptionDetail)
-			if errors.Is(err, sql.ErrNoRows) {
+		limit := view.SubscriptionLimit
+		if limit == 0 {
+			limit = 50
+		}
+		err := s.readSnapshot(context.Background(), func(tx *sql.Tx) error {
+			page, err := readExternalDetailPage(tx, auth, view.SubscriptionDetail, browseQuery{Offset: view.SubscriptionOffset, Limit: limit, Search: view.SubscriptionQuery}, true)
+			if errors.Is(err, sql.ErrNoRows) || errors.Is(err, errResourceHidden) {
 				return nil
 			}
 			if err != nil {
 				return err
 			}
-			if p.SubscriptionStatus != "active" {
-				return nil
-			}
-			for _, id := range p.TrackIDs {
-				track, err := readTrackFrom(tx, id, true)
-				if err != nil {
-					return err
-				}
-				if track.Removed || track.Missing {
-					track = unavailableTrack(track)
-				}
-				if err := tracks.add(id, publicTrack(track, auth)); err != nil {
+			tracks.Meta = map[string]any{"total": page.Total, "offset": page.Offset, "limit": page.Limit, "playlist": page.Playlist}
+			for _, track := range page.Tracks {
+				if err := tracks.add(track["id"].(string), track); err != nil {
 					return err
 				}
 			}

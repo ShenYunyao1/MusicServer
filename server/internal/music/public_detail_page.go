@@ -18,6 +18,10 @@ type publicDetailPage struct {
 // through the authorized track endpoint when opened; playback has its own
 // complete ordered catalog. Neither path depends on the visible page.
 func readPublicDetailPage(reader sqlReader, auth authContext, id string, q browseQuery) (publicDetailPage, error) {
+	return readExternalDetailPage(reader, auth, id, q, false)
+}
+
+func readExternalDetailPage(reader sqlReader, auth authContext, id string, q browseQuery, subscription bool) (publicDetailPage, error) {
 	page := publicDetailPage{Tracks: []map[string]any{}, Offset: q.Offset, Limit: q.Limit}
 	if q.Offset < 0 || q.Offset > 1000000 || q.Limit < 1 || q.Limit > 100 || len(q.Search) > 1024 {
 		return page, errTagInvalid
@@ -37,7 +41,7 @@ func readPublicDetailPage(reader sqlReader, auth authContext, id string, q brows
 	if err = json.Unmarshal([]byte(raw), &p); err != nil {
 		return page, err
 	}
-	if !publishedPlaylist(reader, p) {
+	if (!subscription && !publishedPlaylist(reader, p)) || (subscription && (!hasSubscription(reader, auth.userID, id) || !externalPlaylistAccess(reader, auth.userID, p))) {
 		return page, errResourceHidden
 	}
 	p.ReadOnly = true
