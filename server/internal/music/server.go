@@ -1016,6 +1016,9 @@ func (a *API) playlist(response http.ResponseWriter, request *http.Request) {
 }
 
 func writePlaylistMutationError(response http.ResponseWriter, err error) {
+	if writeStorageError(response, err) {
+		return
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(response, 404, "NOT_FOUND", "playlist or member not found")
 		return
@@ -1130,6 +1133,9 @@ func (a *API) track(response http.ResponseWriter, request *http.Request) {
 			return
 		}
 		if err := a.store.UpdateTrack(id, fields, mutationOptions(request)); err != nil {
+			if writeStorageError(response, err) {
+				return
+			}
 			writeError(response, 400, err.Error())
 			return
 		}

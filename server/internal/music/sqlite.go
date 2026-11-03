@@ -230,7 +230,10 @@ func writeTrack(tx *sql.Tx, track Track) error {
 	}
 	_, err = tx.Exec(`INSERT INTO tracks(id,path,content_hash,title,payload,version,removed,missing,owner_id,uploaded_by) VALUES(?,?,?,?,?,?,?,?,?,?)
  ON CONFLICT(id) DO UPDATE SET path=excluded.path,content_hash=excluded.content_hash,title=excluded.title,payload=excluded.payload,version=excluded.version,removed=excluded.removed,missing=excluded.missing,owner_id=excluded.owner_id,uploaded_by=excluded.uploaded_by`, track.ID, track.Path, track.ContentHash, track.Title, string(encoded), track.Version, track.Removed, track.Missing, track.OwnerID, track.UploadedBy)
-	return err
+	if err != nil {
+		return err
+	}
+	return writeTrackStorage(tx, track)
 }
 func writePlaylist(tx *sql.Tx, playlist Playlist) error {
 	before, err := readPlaylistFrom(tx, playlist.ID)
@@ -254,6 +257,9 @@ func writePlaylist(tx *sql.Tx, playlist Playlist) error {
 		owner = playlist.OwnerID
 	}
 	if _, err = tx.Exec("INSERT INTO playlists(id,payload,version,owner_id,system,sort_order,visibility,published_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,version=excluded.version,owner_id=excluded.owner_id,sort_order=excluded.sort_order,visibility=excluded.visibility,published_at=excluded.published_at", playlist.ID, string(encoded), playlist.Version, owner, playlist.System, playlist.SortOrder, playlist.Visibility, persistedTime(playlist.PublishedAt)); err != nil {
+		return err
+	}
+	if err := writePlaylistStorage(tx, playlist); err != nil {
 		return err
 	}
 	if _, err = tx.Exec("DELETE FROM playlist_tracks WHERE playlist_id=?", playlist.ID); err != nil {
@@ -319,6 +325,7 @@ func (s *Store) transaction(run func(*sql.Tx) error) error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	s.tempEpoch.Add(1)
 	s.notifyCommunityCommit()
 	return nil
 }

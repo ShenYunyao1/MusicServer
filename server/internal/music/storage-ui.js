@@ -37,7 +37,7 @@ async function openStorageQuota(id){
  const account=accountStorageCache.get(id);if(!account)throw new Error('该账户不可设置额度');
  const unit=account.limit_bytes&&account.limit_bytes<1073741824?'MiB':'GiB',size=unit==='GiB'?1073741824:1048576;
  quotaDraft={id,username:account.username,version:account.version,used:account.used_bytes,limitBytes:account.limit_bytes,mode:account.limit_bytes?'limited':'unlimited',unit,amount:String(account.limit_bytes?account.limit_bytes/size:Math.max(1,Math.ceil(account.used_bytes/1073741824))),saving:false};
- $('quotaAccount').textContent='@'+account.username;$('quotaUsed').textContent='当前已用 '+storageBytes(account.used_bytes);
+ $('quotaAccount').textContent='@'+account.username;$('quotaUsed').textContent='当前已用 '+storageBytes(account.used_bytes)+'（音频 '+storageBytes(account.audio_bytes||0)+'、封面 '+storageBytes(account.cover_bytes||0)+'、歌词 '+storageBytes(account.lyrics_bytes||0)+'）';
  $('quotaUnit').value=unit;$('quotaLimit').value=quotaDraft.amount;document.querySelector('[name="quotaMode"][value="'+quotaDraft.mode+'"]').checked=true;
  $('quotaError').textContent='';$('quotaError').hidden=true;updateQuotaEditor();$('quotaEditor').showModal();
 }

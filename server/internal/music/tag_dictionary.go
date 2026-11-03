@@ -77,6 +77,7 @@ func (s *Store) tagTransaction(notify bool, run func(*sql.Tx) error) error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	s.tempEpoch.Add(1)
 	if notify {
 		s.notifyCommunityCommit()
 	}

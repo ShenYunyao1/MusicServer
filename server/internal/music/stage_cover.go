@@ -55,7 +55,10 @@ func (s *Store) updateStageCover(id string, data []byte, source string, options 
 			return err
 		}
 		_, err := tx.Exec("UPDATE upload_staging SET track_json=? WHERE id=?", string(encoded), id)
-		return err
+		if err != nil {
+			return err
+		}
+		return writeStageStorage(tx, id, owner, record, true)
 	}); err != nil {
 		return UploadPreview{}, err
 	}

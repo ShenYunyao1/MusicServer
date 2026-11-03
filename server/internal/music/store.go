@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -40,6 +41,7 @@ type Store struct {
 	resumeVerifyMu    sync.Mutex
 	resumeVerifyNext  map[string]time.Time
 	tempMu            sync.Mutex
+	tempEpoch         atomic.Uint64
 	tempLimits        *temporaryUploadLimits
 	tempReservations  map[*temporaryUploadReservation]bool
 	badResumeOnce     sync.Once

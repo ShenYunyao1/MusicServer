@@ -24,6 +24,7 @@ type StorageQuota struct {
 	Version    int64 `json:"version"`
 }
 type AccountStorage struct {
+	storageBreakdown
 	ID        string `json:"id"`
 	Username  string `json:"username"`
 	Deleted   bool   `json:"deleted"`
@@ -159,38 +160,29 @@ func (w storageWriter) Write(data []byte) (int, error) {
 	return w.writer.Write(data)
 }
 
-// Account quotas count original uploaders, including soft-removed tracks, but
-// only regular files that still physically exist. The caller's SQL transaction
-// serializes quota checks with new track publication.
+// The scanner and mutations maintain reference sizes atomically. External file
+// changes become visible on scan, rather than forcing every upload to stat the
+// entire library under the global write/admission lock.
 func (s *Store) accountUsage(reader sqlReader) (map[string]int64, error) {
-	tracks, err := queryJSON[Track](reader, "SELECT payload FROM tracks")
+	rows, err := reader.Query("SELECT id FROM users")
 	if err != nil {
 		return nil, err
 	}
-	root, err := os.OpenRoot(s.mediaRoot)
-	if err != nil {
-		return nil, err
-	}
-	defer root.Close()
-	used := map[string]int64{}
-	seen := map[string]bool{}
-	for _, track := range tracks {
-		if seen[track.Path] {
-			continue
-		}
-		seen[track.Path] = true
-		info, err := root.Stat(track.Path)
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err != nil {
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
 			return nil, err
 		}
-		if info.Mode().IsRegular() {
-			used[track.UploadedBy] += info.Size()
-		}
+		ids = append(ids, id)
 	}
-	return used, nil
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	return s.accountUsageForIDs(reader, ids)
 }
 func (s *Store) checkAccountQuota(tx *sql.Tx, id string, additional int64) error {
 	var quota StorageQuota
@@ -200,7 +192,7 @@ func (s *Store) checkAccountQuota(tx *sql.Tx, id string, additional int64) error
 	if quota.LimitBytes == 0 {
 		return nil
 	}
-	used, err := s.accountUsage(tx)
+	used, err := s.accountUsageForIDs(tx, []string{id})
 	if err != nil {
 		return err
 	}
@@ -238,6 +230,9 @@ func directoryBytesWithWalker(path string, walk func(string, fs.WalkDirFunc) err
 func (s *Store) StorageOverview() (StorageSummary, error) {
 	var out StorageSummary
 	var err error
+	if err := s.reconcileAudioStorage(); err != nil {
+		return out, err
+	}
 	if out.Policy, err = s.StoragePolicy(); err != nil {
 		return out, err
 	}
@@ -280,7 +275,6 @@ func (s *Store) StorageOverview() (StorageSummary, error) {
 		}
 		account.Deleted = deleted != ""
 		account.UsedBytes = used[account.ID]
-		out.MediaBytes += account.UsedBytes
 		out.Accounts = append(out.Accounts, account)
 	}
 	err = rows.Err()
@@ -289,6 +283,12 @@ func (s *Store) StorageOverview() (StorageSummary, error) {
 		return out, err
 	}
 	for i := range out.Accounts {
+		b, err := accountStorageBreakdown(s.readDatabase(), out.Accounts[i].ID)
+		if err != nil {
+			return out, err
+		}
+		out.Accounts[i].storageBreakdown = b
+		out.MediaBytes += b.AudioBytes
 		if err := readStorageJSON(s.db, "storage_quota/"+out.Accounts[i].ID, &out.Accounts[i].StorageQuota); err != nil {
 			return out, err
 		}

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 )
@@ -24,57 +23,16 @@ type accountStoragePage struct {
 	Limit  int                  `json:"limit"`
 }
 
-// Project only the uploader and path needed for physical usage. Do not decode
-// full song payloads or probe every disk just to display a page of accounts.
+// Account-scoped derived references include audio and deduplicated attachments.
+// No filesystem walks or full song payloads are needed on request paths.
 func (s *Store) accountUsageForIDs(reader sqlReader, ids []string) (map[string]int64, error) {
 	used := map[string]int64{}
-	if len(ids) == 0 {
-		return used, nil
-	}
-	args := make([]any, len(ids))
-	for i, id := range ids {
-		args[i] = id
-	}
-	rows, err := reader.Query("SELECT uploaded_by,path FROM tracks WHERE uploaded_by IN ("+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+") ORDER BY path,uploaded_by", args...)
-	if err != nil {
-		return nil, err
-	}
-	type file struct{ owner, path string }
-	files := []file{}
-	for rows.Next() {
-		var f file
-		if err := rows.Scan(&f.owner, &f.path); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		files = append(files, f)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return nil, err
-	}
-	root, err := os.OpenRoot(s.mediaRoot)
-	if err != nil {
-		return nil, err
-	}
-	defer root.Close()
-	seen := map[string]bool{}
-	for _, f := range files {
-		if seen[f.path] {
-			continue
-		}
-		seen[f.path] = true
-		info, err := root.Stat(f.path)
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
+	for _, id := range ids {
+		breakdown, err := accountStorageBreakdown(reader, id)
 		if err != nil {
 			return nil, err
 		}
-		if info.Mode().IsRegular() {
-			used[f.owner] += info.Size()
-		}
+		used[id] = breakdown.total()
 	}
 	return used, nil
 }
@@ -113,6 +71,14 @@ func (s *Store) accountStorageRows(reader sqlReader, where string, args []any, o
 	rows.Close()
 	if err != nil {
 		return page, err
+	}
+	for i := range page.Items {
+		b, err := accountStorageBreakdown(reader, page.Items[i].ID)
+		if err != nil {
+			return page, err
+		}
+		page.Items[i].storageBreakdown = b
+		page.Items[i].UsedBytes = b.total()
 	}
 	return page, nil
 }
@@ -194,19 +160,6 @@ func (a *API) accountStorage(w http.ResponseWriter, r *http.Request) {
 		page, err = a.store.accountStorageRows(tx, where, args, offset, limit)
 		return err
 	})
-	if err == nil {
-		ids := make([]string, len(page.Items))
-		for i, item := range page.Items {
-			ids[i] = item.ID
-		}
-		var used map[string]int64
-		used, err = a.store.accountUsageForIDs(a.store.db, ids)
-		if err == nil {
-			for i := range page.Items {
-				page.Items[i].UsedBytes = used[page.Items[i].ID]
-			}
-		}
-	}
 	// Revocation during slow media-disk I/O must still prevent disclosure.
 	if err == nil {
 		err = a.store.readSnapshot(r.Context(), validate)

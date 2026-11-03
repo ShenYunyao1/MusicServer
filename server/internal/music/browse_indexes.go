@@ -7,10 +7,10 @@ import (
 	"log"
 )
 
-const browseIndexVersion = "3"
+const browseIndexVersion = "4"
 
 func browseIndexDigest(reader sqlReader) (string, error) {
-	rows, err := reader.Query(`SELECT name,sql FROM sqlite_master WHERE (name GLOB 'browse_*' AND type IN ('table','trigger')) OR name IN ('tracks_cover_lookup','playlists_cover_lookup','audit_public_contributions','tags_scope_capacity') ORDER BY name`)
+	rows, err := reader.Query(`SELECT name,sql FROM sqlite_master WHERE (name GLOB 'browse_*' AND type IN ('table','trigger','index')) OR name IN ('tracks_cover_lookup','playlists_cover_lookup','audit_public_contributions','tags_scope_capacity') ORDER BY name`)
 	if err != nil {
 		return "", err
 	}
@@ -138,6 +138,9 @@ func initializeBrowseIndexes(db *sql.DB) error {
  INSERT INTO meta(key,value) VALUES('browse/account/'||NEW.id,'1') ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1;
  INSERT INTO meta(key,value) SELECT DISTINCT 'browse/account/'||s.user_id,'1' FROM subscriptions s JOIN playlists p ON p.id=s.playlist_id WHERE p.owner_id=NEW.id ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1;
  END;`); err != nil {
+		return err
+	}
+	if err := initializeStorageProjection(tx); err != nil {
 		return err
 	}
 	digest, err = browseIndexDigest(tx)

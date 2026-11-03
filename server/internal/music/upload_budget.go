@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -42,17 +43,29 @@ func temporaryPendingBytes(reader sqlReader, owner string) (int64, error) {
 	err := reader.QueryRow(`SELECT COALESCE(sum(size),0) FROM (SELECT id,MAX(size) size FROM (
  SELECT id,size FROM upload_staging WHERE user_id=?
  UNION ALL SELECT substr(key,15),CASE WHEN json_extract(value,'$.state')='uploading' THEN COALESCE(json_extract(value,'$.size'),0) ELSE COALESCE(json_extract(value,'$.offset'),0) END FROM meta WHERE key LIKE 'upload_resume/%' AND json_valid(value) AND json_extract(value,'$.owner')=? AND json_extract(value,'$.state') NOT IN ('ready','canceled')) GROUP BY id)`, owner, owner).Scan(&total)
-	return total, err
+	if err != nil {
+		return 0, err
+	}
+	if storageProjectionReady(reader) {
+		attachments, e := pendingAttachmentBytes(reader, owner)
+		return total + attachments, e
+	}
+	return total, nil
 }
 
 // Admission uses a separate lock, never the database write lock. Existing files
 // (including failed cleanup), full pending resume sizes and in-flight writes all
 // count. No byte budget is released merely by marking a checkpoint canceled.
-func (s *Store) reserveTemporaryUpload(owner, id string, size int64) (func(), error) {
-	s.tempMu.Lock()
-	defer s.tempMu.Unlock()
-	limits := s.temporaryLimits()
-	global, err := directoryBytes(filepath.Join(s.mediaRoot, ".staging"))
+type temporaryUsageSnapshot struct {
+	global, own, committed int64
+	quota                  StorageQuota
+	charges                map[string]int64
+	identities             map[string]string
+	physical               map[string]int64
+}
+
+func (s *Store) temporaryUploadSnapshot(owner string) (*temporaryUsageSnapshot, error) {
+	global, physicalFiles, err := stagingPhysicalSnapshot(filepath.Join(s.mediaRoot, ".staging"))
 	if errors.Is(err, os.ErrNotExist) {
 		global, err = 0, nil
 	}
@@ -88,6 +101,7 @@ func (s *Store) reserveTemporaryUpload(owner, id string, size int64) (func(), er
 			return nil, err
 		}
 		identities[key] = user
+		bytes = max(bytes, physicalFiles[key])
 		charges[key] = bytes
 		if user == owner {
 			own += bytes
@@ -146,25 +160,48 @@ func (s *Store) reserveTemporaryUpload(owner, id string, size int64) (func(), er
 	if err != nil {
 		return nil, err
 	}
-	committed := int64(0)
-	if quota.LimitBytes > 0 {
-		used, e := s.accountUsageForIDs(tx, []string{owner})
-		if e != nil {
-			return nil, e
-		}
-		committed = used[owner]
+	used, e := s.accountUsageForIDs(tx, []string{owner})
+	if e != nil {
+		return nil, e
 	}
+	committed := used[owner]
+	attachments, e := pendingAttachmentBytes(tx, owner)
+	if e != nil {
+		return nil, e
+	}
+	own += attachments
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	for reservation := range s.tempReservations {
-		global += reservation.size
-		if reservation.owner == owner {
-			own += reservation.size
+	return &temporaryUsageSnapshot{global: global, own: own, committed: committed, quota: quota, charges: charges, identities: identities, physical: physicalFiles}, nil
+}
+
+func (s *Store) reserveTemporaryUpload(owner, id string, size int64) (func(), error) {
+	for attempt := 0; attempt < 8; attempt++ {
+		epoch := s.tempEpoch.Load()
+		snapshot, err := s.temporaryUploadSnapshot(owner)
+		if err != nil {
+			return nil, err
 		}
-		identities[reservation.id] = reservation.owner
-		charges[reservation.id] += reservation.size
+		s.tempMu.Lock()
+		if epoch != s.tempEpoch.Load() {
+			s.tempMu.Unlock()
+			continue
+		}
+		release, err := s.reserveTemporarySnapshot(owner, id, size, snapshot)
+		s.tempMu.Unlock()
+		return release, err
 	}
+	return nil, errUploadTemporaryLimit
+}
+
+// The lock protects only in-memory admission decisions. Disk walks and SQLite
+// snapshots happen first; a changed publication/reservation epoch forces retry.
+func (s *Store) reserveTemporarySnapshot(owner, id string, size int64, snapshot *temporaryUsageSnapshot) (func(), error) {
+	s.mergeTemporaryReservations(owner, snapshot)
+	global, own, committed := snapshot.global, snapshot.own, snapshot.committed
+	quota, charges, identities := snapshot.quota, snapshot.charges, snapshot.identities
+	limits := s.temporaryLimits()
 	if prior, ok := identities[id]; ok && prior != owner {
 		return nil, errResourceHidden
 	}
@@ -192,10 +229,87 @@ func (s *Store) reserveTemporaryUpload(owner, id string, size int64) (func(), er
 		s.tempReservations = map[*temporaryUploadReservation]bool{}
 	}
 	s.tempReservations[reservation] = true
+	s.tempEpoch.Add(1)
 	var once sync.Once
 	return func() {
-		once.Do(func() { s.tempMu.Lock(); delete(s.tempReservations, reservation); s.tempMu.Unlock() })
+		once.Do(func() {
+			s.tempMu.Lock()
+			delete(s.tempReservations, reservation)
+			s.tempEpoch.Add(1)
+			s.tempMu.Unlock()
+		})
 	}, nil
+}
+
+func (s *Store) mergeTemporaryReservations(owner string, snapshot *temporaryUsageSnapshot) {
+	for reservation := range s.tempReservations {
+		charge := max(reservation.size, snapshot.physical[reservation.id])
+		snapshot.global += max(int64(0), reservation.size-max(snapshot.physical[reservation.id], snapshot.charges[reservation.id]))
+		if reservation.owner == owner {
+			snapshot.own += max(int64(0), charge-snapshot.charges[reservation.id])
+		}
+		snapshot.identities[reservation.id] = reservation.owner
+		snapshot.charges[reservation.id] = max(snapshot.charges[reservation.id], charge)
+	}
+}
+func (s *Store) currentUploadUsage(owner string) (*temporaryUsageSnapshot, error) {
+	for attempt := 0; attempt < 8; attempt++ {
+		epoch := s.tempEpoch.Load()
+		snapshot, err := s.temporaryUploadSnapshot(owner)
+		if err != nil {
+			return nil, err
+		}
+		s.tempMu.Lock()
+		if epoch != s.tempEpoch.Load() {
+			s.tempMu.Unlock()
+			continue
+		}
+		s.mergeTemporaryReservations(owner, snapshot)
+		s.tempMu.Unlock()
+		return snapshot, nil
+	}
+	return nil, errUploadTemporaryLimit
+}
+
+// Promotion can temporarily publish .part and staged names for the same inode.
+// Compare identity only within equal-size buckets; actual copies remain charged.
+func stagingPhysicalBytes(path string) (int64, error) {
+	total, _, err := stagingPhysicalSnapshot(path)
+	return total, err
+}
+func stagingPhysicalSnapshot(path string) (int64, map[string]int64, error) {
+	var total int64
+	physical := map[string]int64{}
+	seen := map[int64][]os.FileInfo{}
+	err := filepath.WalkDir(path, func(name string, entry os.DirEntry, err error) error {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if !entry.Type().IsRegular() {
+			return nil
+		}
+		info, err := entry.Info()
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		key := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
+		physical[key] = max(physical[key], info.Size())
+		for _, other := range seen[info.Size()] {
+			if os.SameFile(other, info) {
+				return nil
+			}
+		}
+		seen[info.Size()] = append(seen[info.Size()], info)
+		total += info.Size()
+		return nil
+	})
+	return total, physical, err
 }
 
 // A seekable multipart/file reader gives an exact bound before writing. A
@@ -236,9 +350,14 @@ func checkTemporaryMetadata(reader sqlReader, owner, stageID, resumeID string, b
 		return nil
 	}
 	var total, own int64
-	err := reader.QueryRow(`SELECT COALESCE(sum(bytes),0),COALESCE(sum(CASE WHEN owner=? THEN bytes ELSE 0 END),0) FROM (
+	var err error
+	if storageProjectionReady(reader) {
+		err = reader.QueryRow("SELECT COALESCE((SELECT bytes FROM browse_temp_metadata WHERE owner='*'),0)-?,COALESCE((SELECT bytes FROM browse_temp_metadata WHERE owner=?),0)-?", old, owner, old).Scan(&total, &own)
+	} else {
+		err = reader.QueryRow(`SELECT COALESCE(sum(bytes),0),COALESCE(sum(CASE WHEN owner=? THEN bytes ELSE 0 END),0) FROM (
  SELECT length(CAST(track_json AS BLOB)) bytes,user_id owner FROM upload_staging WHERE id!=?
  UNION ALL SELECT length(CAST(value AS BLOB)),CASE WHEN json_valid(value) THEN json_extract(value,'$.owner') ELSE '' END FROM meta WHERE key LIKE 'upload_resume/%' AND key!=?)`, owner, stageID, resumableMetaPrefix+resumeID).Scan(&total, &own)
+	}
 	if err != nil {
 		return err
 	}

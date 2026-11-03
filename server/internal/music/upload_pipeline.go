@@ -45,22 +45,16 @@ func (a *API) uploadPreflight(w http.ResponseWriter, r *http.Request) bool {
 		methodNotAllowed(w, r)
 		return true
 	}
-	used, err := a.store.accountUsageForIDs(a.store.db, []string{auth.userID})
+	usage, err := a.store.currentUploadUsage(auth.userID)
 	if err != nil {
 		writeResumeError(w, err)
 		return true
 	}
-	var quota StorageQuota
-	if err := readStorageJSON(a.store.db, "storage_quota/"+auth.userID, &quota); err != nil {
+	if err := resumeActor(a.store.readDatabase(), auth); err != nil {
 		writeResumeError(w, err)
 		return true
 	}
-	pending, err := temporaryPendingBytes(a.store.readDatabase(), auth.userID)
-	if err != nil {
-		writeResumeError(w, err)
-		return true
-	}
-	writeJSON(w, 200, map[string]any{"max_upload_bytes": a.store.Settings().MaxUploadBytes, "used_bytes": used[auth.userID], "pending_bytes": pending, "limit_bytes": quota.LimitBytes, "upload_allowed": checkUploadEmailPolicy(a.store.db, auth.userID) == nil})
+	writeJSON(w, 200, map[string]any{"max_upload_bytes": a.store.Settings().MaxUploadBytes, "used_bytes": usage.committed, "pending_bytes": usage.own, "limit_bytes": usage.quota.LimitBytes, "upload_allowed": checkUploadEmailPolicy(a.store.readDatabase(), auth.userID) == nil})
 	return true
 }
 

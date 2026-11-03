@@ -292,7 +292,10 @@ func (s *Store) stageAudioWithAssetsContext(ctx context.Context, name string, re
 			return err
 		}
 		_, err := tx.Exec(`INSERT INTO upload_staging (id,original_name,size,content_hash,temp_path,track_json,created_at,expires_at,user_id) VALUES (?,?,?,?,?,?,?,?,?)`, id, filepath.Base(name), count, record.Track.ContentHash, relative, string(encoded), persistedTime(created), persistedTime(expires), owner)
-		return err
+		if err != nil {
+			return err
+		}
+		return writeStageStorage(tx, id, owner, record, true)
 	}); err != nil {
 		_ = root.Remove(relative)
 		return UploadPreview{}, err
@@ -585,9 +588,6 @@ func (s *Store) commitUploadStageWithTags(id string, fields map[string]string, e
 		}
 		if removed > 0 {
 			return errors.New("this audio was removed; contact an administrator to restore it")
-		}
-		if err := s.checkAccountQuota(tx, stageOwner, track.Size); err != nil {
-			return err
 		}
 		if err := checkStageUploadActor(tx, stageOwner, options); err != nil {
 			return err
