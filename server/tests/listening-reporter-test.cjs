@@ -18,3 +18,11 @@ test('only played wall time counts, seek/pause are excluded and repeat reports s
  now=7000;audio.currentTime=92;events.timeupdate();await new Promise(setImmediate);assert.equal(requests.length,2);assert.equal(requests[1].played_ms,3000);now=8000;audio.currentTime=93;events.timeupdate();assert.equal(requests.length,2);
  c.state.user={id:'b'};c.resumeWorkspaceEpoch++;c.clearListeningReporter();events.timeupdate();assert.equal(requests.length,2);
 });
+
+test('evicted unconfirmed guard restarts from zero instead of disabling reporting',async()=>{
+ let now=0;const events={},requests=[],audio={currentTime:0,paused:false,ended:false,seeking:false,playbackRate:1,addEventListener:(n,f)=>events[n]=f};
+ const c={document:{documentElement:{dataset:{listeningEnabled:'true'}}},setTimeout,clearTimeout,performance:{now:()=>now},state:{user:{id:'a'},csrf:'csrf'},browserUUID:()=> 'sid',memberPlayer:audio,AbortController,onlinePlayback:{track:{id:'track'}},fetch:async(_,o)=>{const body=JSON.parse(o.body);requests.push(body);if(requests.length===2)return {ok:false,status:409,json:async()=>({error:{code:'LISTENING_START_REQUIRED'}})};return {ok:true,json:async()=>({minimum_ms:1000,counted:false})}}};
+ vm.createContext(c);vm.runInContext(fs.readFileSync('internal/music/listening-reporter.js','utf8'),c);c.initializeListeningReporter(audio);c.newListeningSession({id:'track'});events.playing();await new Promise(setImmediate);
+ now=1100;audio.currentTime=1.1;events.timeupdate();await new Promise(setImmediate);assert.equal(requests.length,2);
+ now=2200;audio.currentTime=2.2;events.timeupdate();await new Promise(setImmediate);assert.equal(requests.length,3);assert.equal(requests[2].played_ms,0);
+});

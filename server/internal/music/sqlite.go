@@ -76,9 +76,13 @@ func (s *Store) Close() error {
 		s.changeSignal = nil
 	}
 	s.changeMu.Unlock()
-	return s.db.Close()
+	return s.closeDatabases()
 }
 func openSQLite(path string) (*sql.DB, error) {
+	return openSQLiteMode(path, false)
+}
+
+func openSQLiteMode(path string, readonly bool) (*sql.DB, error) {
 	absolute, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err
@@ -88,6 +92,10 @@ func openSQLite(path string) (*sql.DB, error) {
 		uri = "/" + uri
 	}
 	query := url.Values{"_pragma": {"foreign_keys(1)", "busy_timeout(5000)"}}
+	if readonly {
+		query.Set("mode", "ro")
+		query.Add("_pragma", "query_only(1)")
+	}
 	db, err := sql.Open("sqlite", (&url.URL{Scheme: "file", Path: uri, RawQuery: query.Encode()}).String())
 	if err != nil {
 		return nil, err

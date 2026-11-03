@@ -1,6 +1,7 @@
 package music
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"time"
@@ -137,7 +138,7 @@ func (s *Store) CreateInvitation(id, username string, options MutationOptions) (
 
 func (s *Store) ReceivedInvitation(id, userID string) (PlaylistInvitation, error) {
 	var result PlaylistInvitation
-	err := s.transaction(func(tx *sql.Tx) error {
+	err := s.readSnapshot(context.Background(), func(tx *sql.Tx) error {
 		if err := subscriberIdentity(tx, MutationOptions{UserID: userID}); err != nil {
 			return err
 		}
@@ -242,7 +243,7 @@ func (s *Store) Invitations(userID, playlistID string, offset, limit int) (Invit
 	if offset < 0 || limit < 1 || limit > 100 {
 		return page, errors.New("invalid invitation page")
 	}
-	err := s.transaction(func(tx *sql.Tx) error {
+	err := s.readSnapshot(context.Background(), func(tx *sql.Tx) error {
 		if err := subscriberIdentity(tx, MutationOptions{UserID: userID}); err != nil {
 			return err
 		}

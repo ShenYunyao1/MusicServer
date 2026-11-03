@@ -59,7 +59,7 @@ func (s *Store) reserveTemporaryUpload(owner, id string, size int64) (func(), er
 	var own int64
 	charges := map[string]int64{}
 	identities := map[string]string{}
-	tx, err := s.db.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
+	tx, err := s.readDatabase().BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, err
 	}

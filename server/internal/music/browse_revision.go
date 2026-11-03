@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 )
 
-// A JSON-safe numeric fingerprint of data visible to this account. Stream
-// metadata columns only; private changes by unrelated accounts are excluded.
+// A JSON-safe fingerprint of incrementally maintained, account-bound stamps.
+// Read a constant number of counters, never the catalogue's individual rows.
 func browseAccountRevision(reader sqlReader, auth authContext) (int64, error) {
 	return browseAccountRevisionData(reader, auth, true)
 }

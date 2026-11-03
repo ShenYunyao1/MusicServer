@@ -64,6 +64,7 @@ type Store struct {
 	dataPath         string
 	mediaRoot        string
 	db               *sql.DB
+	readDB           *sql.DB
 	schema           int
 	writeMu          sync.Mutex
 	stageMu          sync.Mutex
@@ -107,27 +108,31 @@ func openStoreForSchema(dataPath, mediaRoot string, schema int, runtimeInitializ
 	if !runtimeInitialization {
 		return store, nil
 	}
+	if err := store.initializeReadPool(); err != nil {
+		_ = store.closeDatabases()
+		return nil, err
+	}
 	if err := store.CleanupBackupTemporary(); err != nil {
 		log.Printf("backup temporary cleanup deferred: %v", err)
 	}
 	if err := store.recoverPurgedMedia(); err != nil {
-		_ = store.db.Close()
+		_ = store.closeDatabases()
 		return nil, err
 	}
 	if err := store.recoverUploadPublications(); err != nil {
-		_ = store.db.Close()
+		_ = store.closeDatabases()
 		return nil, err
 	}
 	if err := store.InitializeResumableUploads(); err != nil {
-		_ = store.db.Close()
+		_ = store.closeDatabases()
 		return nil, err
 	}
 	if err := store.InitializeEmailPolicy(); err != nil {
-		_ = store.db.Close()
+		_ = store.closeDatabases()
 		return nil, err
 	}
 	if err := store.InitMail(); err != nil {
-		_ = store.db.Close()
+		_ = store.closeDatabases()
 		return nil, err
 	}
 	return store, nil

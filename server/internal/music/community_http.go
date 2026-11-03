@@ -1,6 +1,7 @@
 package music
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -40,7 +41,7 @@ func (s *Store) publicCatalog(query string, offset, limit int, conditional strin
 	page := PublicCatalog{Items: []PublicPlaylistSummary{}, Offset: offset, Limit: limit}
 	etag := ""
 	unchanged := false
-	err := s.transaction(func(tx *sql.Tx) error {
+	err := s.readSnapshot(context.Background(), func(tx *sql.Tx) error {
 		if err := tx.QueryRow("SELECT value FROM meta WHERE key='public_revision'").Scan(&page.Revision); err != nil {
 			return err
 		}

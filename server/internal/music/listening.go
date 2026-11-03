@@ -196,8 +196,24 @@ func (s *Store) reportListening(auth authContext, sid, trackID string, played in
 			if err = tx.QueryRow("SELECT count(*),COALESCE(sum(started_at>=?),0) FROM listening_sessions WHERE user_id=?", stamp-60000, auth.userID).Scan(&total, &recent); err != nil {
 				return err
 			}
-			if total >= 3000 || recent >= 120 {
+			if recent >= 120 {
 				return listenError(429, "LISTENING_LIMIT", "listening session limit reached")
+			}
+			if total >= 3000 {
+				// Unconfirmed guards have never counted a play. Reclaim an
+				// idle one rather than letting abandoned starts lock the whole
+				// account for 24 hours; counted replay guards stay intact.
+				result, err := tx.Exec(`DELETE FROM listening_sessions WHERE user_id=? AND session_id IN (SELECT session_id FROM listening_sessions WHERE user_id=? AND counted=0 AND last_seen_at<? ORDER BY last_seen_at,session_id LIMIT ?)`, auth.userID, auth.userID, now.Add(-time.Minute).UnixMilli(), total-2999)
+				if err != nil {
+					return err
+				}
+				removed, err := result.RowsAffected()
+				if err != nil {
+					return err
+				}
+				if removed < int64(total-2999) {
+					return listenError(429, "LISTENING_LIMIT", "active listening session limit reached; retry after current sessions finish")
+				}
 			}
 			minimum = 30000
 			if duration > 0 {
@@ -280,7 +296,9 @@ func parseListeningQuery(r *http.Request) (listeningQuery, error) {
 }
 func (s *Store) listListening(auth authContext, q listeningQuery, now time.Time) (map[string]any, error) {
 	result := map[string]any{"items": []map[string]any{}, "total": 0, "offset": q.offset, "limit": q.limit}
-	tx, err := s.db.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	tx, err := s.readDatabase().BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return result, err
 	}
@@ -305,17 +323,17 @@ func (s *Store) listListening(auth authContext, q listeningQuery, now time.Time)
 			source = "SELECT track_id,sum(play_count) AS play_count,max(last_played_at) AS last_played_at FROM listening_daily WHERE user_id=? AND day>=? GROUP BY track_id"
 			args = append(args, now.AddDate(0, 0, -days+1).Format("2006-01-02"))
 		}
-		from := " FROM (" + source + ") l JOIN tracks t ON t.id=l.track_id WHERE t.removed=0 AND t.missing=0"
+		from := " FROM (" + source + ") l JOIN tracks t ON t.id=l.track_id JOIN browse_track_search search ON search.track_id=t.id WHERE t.removed=0 AND t.missing=0"
 		if q.search != "" {
-			from += " AND " + browseTrackSearch
+			from += " AND instr(search.search_text,lower(?))>0"
 			args = append(args, q.search)
 		}
 		var total int
-		if err = tx.QueryRow("SELECT count(*)"+from, args...).Scan(&total); err != nil {
+		if err = tx.QueryRowContext(ctx, "SELECT count(*)"+from, args...).Scan(&total); err != nil {
 			return err
 		}
 		result["total"] = total
-		rows, err := tx.Query("SELECT t.id,t.title,json_extract(t.payload,'$.artist','$.album','$.duration_ms','$.cover_id'),l.play_count,l.last_played_at"+from+" ORDER BY l.play_count DESC,l.last_played_at DESC,t.id LIMIT ? OFFSET ?", append(args, q.limit, q.offset)...)
+		rows, err := tx.QueryContext(ctx, "SELECT t.id,t.title,json_extract(t.payload,'$.artist','$.album','$.duration_ms','$.cover_id'),l.play_count,l.last_played_at"+from+" ORDER BY l.play_count DESC,l.last_played_at DESC,t.id LIMIT ? OFFSET ?", append(args, q.limit, q.offset)...)
 		if err != nil {
 			return err
 		}

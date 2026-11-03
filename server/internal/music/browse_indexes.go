@@ -14,6 +14,27 @@ func initializeBrowseIndexes(db *sql.DB) error {
 		return err
 	}
 	defer tx.Rollback()
+	searchText := func(alias string) string {
+		return "lower(COALESCE(json_extract(" + alias + ".payload,'$.title'),'')||' '||COALESCE(json_extract(" + alias + ".payload,'$.artist'),'')||' '||COALESCE(json_extract(" + alias + ".payload,'$.album'),'')||' '||COALESCE(json_extract(" + alias + ".payload,'$.genre'),''))"
+	}
+	if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS browse_track_search(track_id TEXT PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,search_text TEXT NOT NULL);`); err != nil {
+		return err
+	}
+	var searchVersion string
+	err = tx.QueryRow("SELECT value FROM meta WHERE key='browse/search_version'").Scan(&searchVersion)
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	if searchVersion != "1" {
+		if _, err = tx.Exec("DELETE FROM browse_track_search;INSERT INTO browse_track_search SELECT t.id," + searchText("t") + " FROM tracks t;INSERT OR REPLACE INTO meta(key,value) VALUES('browse/search_version','1')"); err != nil {
+			return err
+		}
+	}
+	for _, event := range []string{"INSERT", "UPDATE"} {
+		if _, err = tx.Exec(fmt.Sprintf("CREATE TRIGGER IF NOT EXISTS browse_search_%s AFTER %s ON tracks BEGIN INSERT INTO browse_track_search(track_id,search_text) VALUES(NEW.id,%s) ON CONFLICT(track_id) DO UPDATE SET search_text=excluded.search_text; END", event, event, searchText("NEW"))); err != nil {
+			return err
+		}
+	}
 	if _, err = tx.Exec(`CREATE INDEX IF NOT EXISTS tracks_cover_lookup ON tracks(json_extract(payload,'$.cover_id'));
  CREATE INDEX IF NOT EXISTS playlists_cover_lookup ON playlists(json_extract(payload,'$.cover_id'));
 	CREATE INDEX IF NOT EXISTS audit_public_contributions ON audit(user_id,created_at DESC) WHERE action='tag.create' AND json_extract(changes,'$.after.scope')='public';
