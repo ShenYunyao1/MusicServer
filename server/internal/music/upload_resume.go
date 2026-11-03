@@ -670,6 +670,10 @@ func (s *Store) removeResumeStage(task resumableUpload) error {
 }
 
 func writeResumeError(w http.ResponseWriter, err error) {
+	if uploadInterrupted(err) {
+		writeError(w, 408, "UPLOAD_INTERRUPTED", "upload interrupted; query the confirmed offset before retrying")
+		return
+	}
 	if writeStorageError(w, err) {
 		return
 	}

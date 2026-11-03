@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -52,6 +53,10 @@ func writeUserError(response http.ResponseWriter, err error) {
 }
 func (a *API) adminUsers(response http.ResponseWriter, request *http.Request) {
 	if !a.requireAdmin(response, request) {
+		return
+	}
+	if allow := routeMethods(request.URL.Path); allow != "" && !slices.Contains(strings.Split(allow, ", "), request.Method) {
+		methodNotAllowed(response, request)
 		return
 	}
 	path := strings.Trim(strings.TrimPrefix(request.URL.Path, "/api/v2/admin/users"), "/")

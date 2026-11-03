@@ -1,14 +1,21 @@
 package music
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+func uploadInterrupted(err error) bool {
+	var network net.Error
+	return errors.Is(err, os.ErrDeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || errors.As(err, &network) && network.Timeout()
+}
 
 func writeStorageError(w http.ResponseWriter, err error) bool {
 	if errors.Is(err, errUploadSession) {
@@ -36,6 +43,10 @@ func writeStorageError(w http.ResponseWriter, err error) bool {
 }
 
 func writeUploadBodyError(w http.ResponseWriter, err error, code, message string) {
+	if uploadInterrupted(err) {
+		writeError(w, 408, "UPLOAD_INTERRUPTED", "upload interrupted; resume from the confirmed offset")
+		return
+	}
 	if writeStorageError(w, err) {
 		return
 	}
@@ -148,6 +159,10 @@ func (a *API) storage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, errResourceHidden) {
+			writeError(w, 404, "NOT_FOUND", "account not found")
+			return
+		}
 		status := 400
 		if errors.Is(err, errVersionConflict) {
 			status = 409

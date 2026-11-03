@@ -930,7 +930,7 @@ func (a *API) playlist(response http.ResponseWriter, request *http.Request) {
 	}
 	playlist, ok := a.store.Playlist(id)
 	if !ok {
-		writeError(response, http.StatusNotFound, "playlist not found")
+		writeError(response, http.StatusNotFound, "NOT_FOUND", "playlist not found")
 		return
 	}
 	if !canReadPlaylist(authFromRequest(request), a.store, playlist) {
@@ -1797,7 +1797,11 @@ func (a *API) maintenance(response http.ResponseWriter, request *http.Request) {
 	case strings.HasPrefix(path, "/api/v2/admin/removed/") && request.Method == http.MethodPost:
 		id := strings.TrimPrefix(path, "/api/v2/admin/removed/")
 		if err := a.store.RestoreTrack(id, mutationOptions(request)); err != nil {
-			writeError(response, 400, err.Error())
+			if errors.Is(err, sql.ErrNoRows) {
+				writeError(response, 404, "NOT_FOUND", "track not found")
+			} else {
+				writePlaylistMutationError(response, err)
+			}
 			return
 		}
 		track, _ := a.store.Track(id)

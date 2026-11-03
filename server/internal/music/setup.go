@@ -76,7 +76,7 @@ func (a *API) webSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodPost {
-		writeError(w, 405, "method not allowed")
+		methodNotAllowed(w, r)
 		return
 	}
 	if !a.validOrigin(r) {
