@@ -63,6 +63,8 @@ type Store struct {
 	changeClosed      bool
 	realtimeFlightsMu sync.Mutex
 	realtimeFlights   map[string]*realtimeFlight
+	realtimeClosed    bool
+	realtimeWorkers   sync.WaitGroup
 	activity          *activity.Journal
 	stageSlots        chan struct{}
 	activeStages      map[string]bool

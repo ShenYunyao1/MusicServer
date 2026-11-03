@@ -66,6 +66,15 @@ func (s *Store) Close() error {
 		s.scanCancel()
 	}
 	s.scanMu.Unlock()
+	s.realtimeFlightsMu.Lock()
+	s.realtimeClosed = true
+	for _, flight := range s.realtimeFlights {
+		if flight.cancel != nil {
+			flight.cancel()
+		}
+	}
+	s.realtimeFlightsMu.Unlock()
+	s.realtimeWorkers.Wait()
 	s.CloseMail()
 	s.CancelBackup()
 	s.workers.Wait()

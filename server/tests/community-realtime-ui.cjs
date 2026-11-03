@@ -84,6 +84,13 @@ module.exports=async function({page,browser,base,directory}){
     await reader.page.evaluate(()=>{communityLive.source?.close();communityLive.source=null;communityLive.connected=false;communityLive.lastCheck=Date.now();Object.defineProperty(window,'EventSource',{configurable:true,value:undefined})});
     await visibility(first.id,'public');await reader.page.evaluate(()=>{communityLive.lastCheck-=60001;return communityCheck()});
     await reader.page.locator('#publicDetail .playlist-track').waitFor({timeout:5000});
+    const backoff=await reader.page.evaluate(async()=>{
+      const original=api;let calls=0;stopCommunityRealtime();communityLive.retryAt=0;
+      api=async()=>{calls++;throw Object.assign(new Error('busy'),{status:503,retryAfter:5})};
+      try{await syncCommunityRealtime(true);await syncCommunityRealtime(true);return {calls,remaining:communityLive.retryAt-Date.now()}}
+      finally{api=original;communityLive.retryAt=0;stopCommunityRealtime()}
+    });
+    assert.equal(backoff.calls,1,'forced notifications must respect server backoff');assert.ok(backoff.remaining>4000);
     await reader.page.screenshot({path:path.join(directory,'community-realtime.png'),fullPage:true});
     await reader.page.locator('#accountMenu summary').click();await reader.page.click('#logout');await reader.page.locator('#loginScreen').waitFor({state:'visible'});
     assert.equal(await reader.page.evaluate(()=>communityLive.source===null&&communityLive.views.size===0),true);

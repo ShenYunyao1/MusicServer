@@ -14,6 +14,17 @@ const realtimeCursorTTL = 5 * time.Minute
 const realtimeCursorLimit = 64
 const realtimeRecordLimit = 5000
 
+var errRealtimeCapacity = errors.New("realtime view capacity reached")
+
+func writeRealtimeError(w http.ResponseWriter, err error) {
+	if errors.Is(err, errRealtimeCapacity) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || errors.Is(err, sql.ErrConnDone) {
+		w.Header().Set("Retry-After", "5")
+		writeError(w, 503, "REALTIME_BUSY", "realtime view temporarily unavailable; retry shortly")
+		return
+	}
+	writeError(w, 500, "REALTIME_FAILED", "unable to read current view")
+}
+
 type realtimeView struct {
 	Catalog            bool   `json:"catalog"`
 	Query              string `json:"query"`
@@ -126,41 +137,64 @@ func indexRealtime(snapshot realtimeSnapshot) (map[string]realtimeIndex, string)
 func (s *Store) realtimeSnapshot(auth authContext, view realtimeView) (realtimeSnapshot, error) {
 	ctx, cancel := context.WithTimeout(readContext([]context.Context{auth.requestContext}), 5*time.Second)
 	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	raw, _ := json.Marshal([]any{auth.userID, auth.keyID, auth.role, auth.authVersion, view, s.tempEpoch.Load()})
 	key := string(raw)
 	s.realtimeFlightsMu.Lock()
-	if flight := s.realtimeFlights[key]; flight != nil {
+	if s.realtimeClosed {
 		s.realtimeFlightsMu.Unlock()
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-flight.done:
-			return flight.snapshot, flight.err
+		return nil, sql.ErrConnDone
+	}
+	flight := s.realtimeFlights[key]
+	if flight == nil {
+		if len(s.realtimeFlights) >= 64 {
+			s.realtimeFlightsMu.Unlock()
+			return nil, errRealtimeCapacity
 		}
+		shared, stop := context.WithTimeout(context.Background(), 5*time.Second)
+		flight = &realtimeFlight{done: make(chan struct{}), cancel: stop}
+		if s.realtimeFlights == nil {
+			s.realtimeFlights = map[string]*realtimeFlight{}
+		}
+		s.realtimeFlights[key] = flight
+		s.realtimeWorkers.Add(1)
+		go func() {
+			defer s.realtimeWorkers.Done()
+			defer stop()
+			auth.requestContext = shared
+			flight.snapshot, flight.err = s.computeRealtimeSnapshot(auth, view)
+			s.realtimeFlightsMu.Lock()
+			delete(s.realtimeFlights, key)
+			close(flight.done)
+			s.realtimeFlightsMu.Unlock()
+		}()
 	}
-	if len(s.realtimeFlights) >= 64 {
-		s.realtimeFlightsMu.Unlock()
-		return nil, errors.New("realtime view capacity reached")
-	}
-	flight := &realtimeFlight{done: make(chan struct{})}
-	if s.realtimeFlights == nil {
-		s.realtimeFlights = map[string]*realtimeFlight{}
-	}
-	s.realtimeFlights[key] = flight
+	flight.waiters++
 	s.realtimeFlightsMu.Unlock()
-	auth.requestContext = ctx
-	flight.snapshot, flight.err = s.computeRealtimeSnapshot(auth, view)
-	s.realtimeFlightsMu.Lock()
-	delete(s.realtimeFlights, key)
-	close(flight.done)
-	s.realtimeFlightsMu.Unlock()
-	return flight.snapshot, flight.err
+	defer func() {
+		s.realtimeFlightsMu.Lock()
+		defer s.realtimeFlightsMu.Unlock()
+		flight.waiters--
+		if flight.waiters == 0 {
+			flight.cancel()
+		}
+	}()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-flight.done:
+		return flight.snapshot, flight.err
+	}
 }
 
 type realtimeFlight struct {
 	done     chan struct{}
 	snapshot realtimeSnapshot
 	err      error
+	cancel   context.CancelFunc
+	waiters  int
 }
 
 func (s *Store) computeRealtimeSnapshot(auth authContext, view realtimeView) (realtimeSnapshot, error) {
@@ -327,7 +361,7 @@ func (a *API) realtimeSync(response http.ResponseWriter, request *http.Request) 
 	auth := authFromRequest(request)
 	snapshot, err := a.store.realtimeSnapshot(auth, input.View)
 	if err != nil {
-		writeError(response, 500, "REALTIME_FAILED", "unable to read current view")
+		writeRealtimeError(response, err)
 		return
 	}
 	indexes, digest := indexRealtime(snapshot)

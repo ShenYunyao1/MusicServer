@@ -135,7 +135,7 @@ func (a *API) storage(w http.ResponseWriter, r *http.Request) {
 	}
 	path := strings.TrimPrefix(r.URL.Path, "/api/v2/admin/storage")
 	if path == "" && r.Method == "GET" {
-		result, err := a.store.StorageOverview()
+		result, err := a.store.StorageOverview(r.Context())
 		if err != nil {
 			writeError(w, 500, "STORAGE_READ_FAILED", "无法读取容量信息")
 			return

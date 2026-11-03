@@ -93,7 +93,7 @@ func (a *API) communityEvents(response http.ResponseWriter, request *http.Reques
 	signal := a.store.communitySignal()
 	snapshot, err := a.store.realtimeSnapshot(auth, view)
 	if err != nil {
-		writeError(response, 500, "REALTIME_FAILED", "unable to observe view")
+		writeRealtimeError(response, err)
 		return
 	}
 	_, digest := indexRealtime(snapshot)

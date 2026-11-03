@@ -1,6 +1,7 @@
 package music
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 
 	"musicserver/internal/diskspace"
 )
@@ -32,15 +34,16 @@ type AccountStorage struct {
 	StorageQuota
 }
 type StorageSummary struct {
-	Policy        StoragePolicy    `json:"policy"`
-	DataDisk      diskspace.Space  `json:"data_disk"`
-	MediaDisk     diskspace.Space  `json:"media_disk"`
-	DatabaseBytes int64            `json:"database_bytes"`
-	MediaBytes    int64            `json:"media_bytes"`
-	StagingBytes  int64            `json:"staging_bytes"`
-	BackupBytes   int64            `json:"backup_bytes"`
-	UpdateBytes   int64            `json:"update_bytes"`
-	Accounts      []AccountStorage `json:"accounts"`
+	Policy           StoragePolicy    `json:"policy"`
+	DataDisk         diskspace.Space  `json:"data_disk"`
+	MediaDisk        diskspace.Space  `json:"media_disk"`
+	DatabaseBytes    int64            `json:"database_bytes"`
+	MediaBytes       int64            `json:"media_bytes"`
+	StagingBytes     int64            `json:"staging_bytes"`
+	BackupBytes      int64            `json:"backup_bytes"`
+	UpdateBytes      int64            `json:"update_bytes"`
+	Accounts         []AccountStorage `json:"accounts"`
+	UsageRefreshedAt string           `json:"usage_refreshed_at,omitempty"`
 }
 
 func readStorageJSON(reader sqlReader, key string, target any) error {
@@ -184,23 +187,6 @@ func (s *Store) accountUsage(reader sqlReader) (map[string]int64, error) {
 	}
 	return s.accountUsageForIDs(reader, ids)
 }
-func (s *Store) checkAccountQuota(tx *sql.Tx, id string, additional int64) error {
-	var quota StorageQuota
-	if err := readStorageJSON(tx, "storage_quota/"+id, &quota); err != nil {
-		return err
-	}
-	if quota.LimitBytes == 0 {
-		return nil
-	}
-	used, err := s.accountUsageForIDs(tx, []string{id})
-	if err != nil {
-		return err
-	}
-	if additional > quota.LimitBytes || used[id] > quota.LimitBytes-additional {
-		return errStorageQuota
-	}
-	return nil
-}
 func directoryBytes(path string) (int64, error) {
 	return directoryBytesWithWalker(path, filepath.WalkDir)
 }
@@ -227,15 +213,9 @@ func directoryBytesWithWalker(path string, walk func(string, fs.WalkDirFunc) err
 	})
 	return total, err
 }
-func (s *Store) StorageOverview() (StorageSummary, error) {
+func (s *Store) StorageOverview(contexts ...context.Context) (StorageSummary, error) {
 	var out StorageSummary
 	var err error
-	if err := s.reconcileAudioStorage(); err != nil {
-		return out, err
-	}
-	if out.Policy, err = s.StoragePolicy(); err != nil {
-		return out, err
-	}
 	if out.DataDisk, err = s.probeSpace(filepath.Dir(s.dataPath)); err != nil {
 		return out, err
 	}
@@ -257,41 +237,53 @@ func (s *Store) StorageOverview() (StorageSummary, error) {
 			return out, err
 		}
 	}
-	used, err := s.accountUsage(s.db)
-	if err != nil {
-		return out, err
-	}
-	rows, err := s.db.Query("SELECT id,username,COALESCE((SELECT value FROM meta WHERE key='deleted_user/'||users.id),'') FROM users ORDER BY username,id")
-	if err != nil {
-		return out, err
-	}
-	out.Accounts = []AccountStorage{}
-	for rows.Next() {
-		var account AccountStorage
-		var deleted string
-		if err := rows.Scan(&account.ID, &account.Username, &deleted); err != nil {
-			rows.Close()
-			return out, err
+	ctx, cancel := context.WithTimeout(readContext(contexts), 5*time.Second)
+	defer cancel()
+	err = s.readQuery(ctx, func(reader sqlReader) error {
+		out.Policy = StoragePolicy{ReserveBytes: diskspace.DefaultReserve}
+		if err := readStorageJSON(reader, "storage_policy", &out.Policy); err != nil {
+			return err
 		}
-		account.Deleted = deleted != ""
-		account.UsedBytes = used[account.ID]
-		out.Accounts = append(out.Accounts, account)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return out, err
-	}
-	for i := range out.Accounts {
-		b, err := accountStorageBreakdown(s.readDatabase(), out.Accounts[i].ID)
+		if err := reader.QueryRow("SELECT value FROM settings WHERE key='storage_refreshed_at'").Scan(&out.UsageRefreshedAt); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		used, err := s.accountUsage(reader)
 		if err != nil {
-			return out, err
+			return err
 		}
-		out.Accounts[i].storageBreakdown = b
-		out.MediaBytes += b.AudioBytes
-		if err := readStorageJSON(s.db, "storage_quota/"+out.Accounts[i].ID, &out.Accounts[i].StorageQuota); err != nil {
-			return out, err
+		rows, err := reader.Query("SELECT id,username,COALESCE((SELECT value FROM meta WHERE key='deleted_user/'||users.id),'') FROM users ORDER BY username,id")
+		if err != nil {
+			return err
 		}
-	}
-	return out, nil
+		out.Accounts = []AccountStorage{}
+		for rows.Next() {
+			var account AccountStorage
+			var deleted string
+			if err := rows.Scan(&account.ID, &account.Username, &deleted); err != nil {
+				rows.Close()
+				return err
+			}
+			account.Deleted = deleted != ""
+			account.UsedBytes = used[account.ID]
+			out.Accounts = append(out.Accounts, account)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		for i := range out.Accounts {
+			b, err := accountStorageBreakdown(reader, out.Accounts[i].ID)
+			if err != nil {
+				return err
+			}
+			out.Accounts[i].storageBreakdown = b
+			out.MediaBytes += b.AudioBytes
+			if err := readStorageJSON(reader, "storage_quota/"+out.Accounts[i].ID, &out.Accounts[i].StorageQuota); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return out, err
 }

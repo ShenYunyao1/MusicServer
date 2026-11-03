@@ -92,6 +92,9 @@ func routeMethods(path string) string {
 		}
 		if len(a) == 4 && valid(3) {
 			if a[2] == "tracks" {
+				if a[3] == "order" {
+					return "PUT"
+				}
 				return "PATCH, DELETE"
 			}
 			if a[2] == "invitations" {

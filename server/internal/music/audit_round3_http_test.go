@@ -15,6 +15,7 @@ func TestRound3MethodAndSlashMatrix(t *testing.T) {
 		{"PUT", "/api/v2/tag-groups/", "GET, POST"},
 		{"DELETE", "/api/v2/saved-track-filters/", "GET, POST"},
 		{"GET", "/api/v2/playlists/unknown/editor/", "PUT"},
+		{"DELETE", "/api/v2/playlists/unknown/tracks/order/", "PUT"},
 	} {
 		w := mailRequest(a, token, item.method, item.path, "not-json", 0)
 		if w.Code != 405 || w.Header().Get("Allow") != item.allow {

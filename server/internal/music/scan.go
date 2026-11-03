@@ -469,6 +469,11 @@ func (s *Store) runScanWithWalker(ctx context.Context, full bool, options []Muta
 				}
 				changed++
 			}
+			// Reconcile the derived usage from this scan's observed size even if
+			// metadata is unchanged (e.g. an older projection was corrected to 0).
+			if err := writeTrackStorage(tx, track); err != nil {
+				return err
+			}
 			if _, err := tx.Exec("INSERT INTO scan_stamps VALUES(?,?) ON CONFLICT(track_id) DO UPDATE SET stamp=excluded.stamp", track.ID, candidate.stamp); err != nil {
 				return err
 			}
@@ -509,7 +514,11 @@ func (s *Store) runScanWithWalker(ctx context.Context, full bool, options []Muta
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		return refreshLibrary(tx)
+		if err := refreshLibrary(tx); err != nil {
+			return err
+		}
+		_, err := tx.Exec("INSERT INTO settings(key,value) VALUES('storage_refreshed_at',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", persistedTime(time.Now().UTC()))
+		return err
 	})
 	if err != nil {
 		return 0, err

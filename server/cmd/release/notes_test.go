@@ -38,3 +38,27 @@ func TestFormalNotesRejectLooseHeadingAndAdditionalDraftMarkers(t *testing.T) {
 		}
 	}
 }
+
+func TestFormalNotesRejectExplicitPreviewStatusButAllowFeaturePreview(t *testing.T) {
+	base := "# MusicServer v0.21.15\n<!-- musicserver-release: {\"version\":\"0.21.15\",\"schema\":9,\"status\":\"stable\"} -->\nschema 9\n"
+	for _, status := range []string{"发行状态：预览版", "**发布状态：预发布**", "## 预发布版本", "当前版本为预览版", "Release status: pre-release", "This release is a prerelease"} {
+		if err := validateReleaseNotes([]byte(base+status), "0.21.15", 9); err == nil {
+			t.Errorf("explicit preview declaration accepted: %s", status)
+		}
+	}
+	if err := validateReleaseNotes([]byte(base+"支持歌词预览、封面预览与正式版本的预发布检查功能。"), "0.21.15", 9); err != nil {
+		t.Fatal("feature prose mistaken for release status", err)
+	}
+}
+
+func TestFormalNotesRejectAmbiguousMetadata(t *testing.T) {
+	for _, record := range []string{
+		`{"version":"0.21.15","schema":9,"status":"preview"}`,
+		`{"version":"0.21.15","schema":9,"status":"preview","status":"stable"}`,
+		`{"version":"0.21.15","schema":9,"schema":9,"status":"stable"}`,
+	} {
+		if err := validateReleaseNotes([]byte("# MusicServer v0.21.15\n<!-- musicserver-release: "+record+" -->\nschema 9"), "0.21.15", 9); err == nil {
+			t.Fatal("ambiguous/nonstable metadata accepted", record)
+		}
+	}
+}

@@ -1,7 +1,7 @@
 'use strict';
 
 const COMMUNITY_FALLBACK_MS=60000;
-const communityLive={source:null,connected:false,userID:null,key:'',view:null,generation:0,views:new Map(),timer:null,debounce:null,renderTimer:null,busy:false,job:null,pending:false,lastCheck:0,deferred:false};
+const communityLive={source:null,connected:false,userID:null,key:'',view:null,generation:0,views:new Map(),timer:null,debounce:null,renderTimer:null,busy:false,job:null,pending:false,lastCheck:0,retryAt:0,deferred:false};
 const invitationBadge=document.createElement('span');invitationBadge.id='invitationBadge';invitationBadge.className='badge';invitationBadge.hidden=true;invitationBadge.setAttribute('aria-label','待处理邀请');invitationTab.append(' ',invitationBadge);
 
 function communityLiveView(){
@@ -20,7 +20,7 @@ function stopCommunityRealtime(clear=false){
   ++communityLive.generation;communityLive.source?.close();communityLive.source=null;communityLive.connected=false;
   clearTimeout(communityLive.timer);clearTimeout(communityLive.debounce);clearTimeout(communityLive.renderTimer);
   communityLive.timer=communityLive.debounce=communityLive.renderTimer=null;communityLive.job=null;communityLive.busy=false;communityLive.pending=false;
-  if(clear){communityLive.views.clear();communityLive.userID=null;communityLive.key='';communityLive.view=null;communityLive.lastCheck=0;communityLive.deferred=false;state.liveSubscriptionTracks=null;state.liveSubscriptionTracksID=null;invitationBadge.textContent='';invitationBadge.hidden=true}
+  if(clear){communityLive.views.clear();communityLive.userID=null;communityLive.key='';communityLive.view=null;communityLive.lastCheck=0;communityLive.retryAt=0;communityLive.deferred=false;state.liveSubscriptionTracks=null;state.liveSubscriptionTracksID=null;invitationBadge.textContent='';invitationBadge.hidden=true}
 }
 function liveCommunityMessage(){return communityLive.connected?'实时更新已连接':'实时连接中断，每分钟补查'}
 function scheduleCommunityRealtime(force=false){
@@ -44,10 +44,11 @@ function scheduleCommunityRealtime(force=false){
 function scheduleCommunityFallback(){
   clearTimeout(communityLive.timer);
   if(!state.user||document.hidden)return;
-  communityLive.timer=setTimeout(()=>{scheduleCommunityRealtime();syncCommunityRealtime()},Math.max(1000,COMMUNITY_FALLBACK_MS-(Date.now()-communityLive.lastCheck)));
+  communityLive.timer=setTimeout(()=>{scheduleCommunityRealtime();syncCommunityRealtime()},Math.max(1000,communityLive.retryAt>Date.now()?communityLive.retryAt-Date.now():COMMUNITY_FALLBACK_MS-(Date.now()-communityLive.lastCheck)));
 }
 async function syncCommunityRealtime(force=false){
   if(!state.user||state.user.must_change_password||document.hidden)return;
+  if(Date.now()<communityLive.retryAt){scheduleCommunityFallback();return}
   if(!force&&Date.now()-communityLive.lastCheck<COMMUNITY_FALLBACK_MS){scheduleCommunityFallback();return}
   if(communityLive.busy){communityLive.pending=true;return}
   const generation=communityLive.generation,userID=state.user.id,key=communityLive.key,view=communityLive.view||communityLiveView();
@@ -67,9 +68,9 @@ async function syncCommunityRealtime(force=false){
       section.order=delta.order;section.meta=delta.meta;entry.sections.set(name,section);
     }
     applyCommunityRealtime(entry,new Set(Object.keys(reply.sections)),reply.sections);
-    communityLive.lastCheck=Date.now();updateCommunityLiveStatus();
+    communityLive.lastCheck=Date.now();communityLive.retryAt=0;updateCommunityLiveStatus();
   }catch(error){
-    if(generation===communityLive.generation&&state.user?.id===userID){communityLive.connected=false;communityLive.lastCheck=Date.now();updateCommunityLiveStatus()}
+    if(generation===communityLive.generation&&state.user?.id===userID){communityLive.connected=false;communityLive.lastCheck=Date.now();if(error.status===503||error.status===429)communityLive.retryAt=Date.now()+Math.min(300000,Math.max(5000,(error.retryAfter||5)*1000));updateCommunityLiveStatus()}
   }finally{
     if(communityLive.job===job){communityLive.job=null;communityLive.busy=false;const pending=communityLive.pending;communityLive.pending=false;if(pending)communityLive.debounce=setTimeout(()=>syncCommunityRealtime(true),100);scheduleCommunityFallback()}
   }

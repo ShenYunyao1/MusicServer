@@ -65,6 +65,8 @@ function renderStorageVolumes(){
   if(disk.available<data.policy.reserve_bytes)card.classList.add('storage-low');card.append(title,number,description,bar);box.append(card);
  }
  $('storageResult').textContent=Math.min(data.data_disk.available,data.media_disk.available)<data.policy.reserve_bytes?'可用空间低于预留值，新增上传和备份将被暂停。':'空间检查正常';
+ $('storageResult').textContent+=data.usage_refreshed_at?' · 最近媒体扫描校正：'+new Date(data.usage_refreshed_at).toLocaleString():' · 尚无媒体扫描校正记录';
+ $('storageResult').textContent+='。上传和删除自动更新用量；外部文件变更请执行媒体扫描。';
  const list=$('storageBreakdown');list.replaceChildren();
  for(const[label,value]of [['数据库（含 WAL）',data.database_bytes],['已入库音频',data.media_bytes],['上传暂存',data.staging_bytes],['备份目录',data.backup_bytes],['更新缓存',data.update_bytes]]){
   const item=document.createElement('div'),name=document.createElement('span'),number=document.createElement('strong');name.textContent=label;number.textContent=storageBytes(value);item.append(name,number);list.append(item);

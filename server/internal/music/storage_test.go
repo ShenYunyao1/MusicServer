@@ -182,6 +182,9 @@ func TestStorageQuotaDedupTransferAndVersionBoundary(t *testing.T) {
 	if err := os.Remove(filepath.Join(api.store.mediaRoot, track.Path)); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := api.store.Scan(); err != nil {
+		t.Fatal(err)
+	}
 	overview, err = api.store.StorageOverview()
 	if err != nil {
 		t.Fatal(err)

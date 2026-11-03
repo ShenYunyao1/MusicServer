@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"os"
 )
 
 // Quotas describe logical account assets. Scanner-maintained sizes avoid disk
@@ -118,65 +117,6 @@ func writePlaylistStorage(tx *sql.Tx, p Playlist) error {
 		return err
 	}
 	return replaceStorageRefs(tx, "playlist", p.ID, p.OwnerID, refs, true)
-}
-
-// Explicit administrator disk refresh reconciles external file changes outside
-// the write lock. Publication paths rely on scanner-known sizes instead.
-func (s *Store) reconcileAudioStorage() error {
-	if !storageProjectionReady(s.readDatabase()) {
-		return nil
-	}
-	type entry struct {
-		id, asset, path string
-		before, after   int64
-	}
-	rows, err := s.readDatabase().Query(`SELECT r.resource_id,r.asset,t.path,r.bytes FROM browse_storage_refs r JOIN tracks t ON t.id=r.resource_id WHERE r.resource_type='track' AND r.kind='audio'`)
-	if err != nil {
-		return err
-	}
-	var files []entry
-	for rows.Next() {
-		var f entry
-		if err := rows.Scan(&f.id, &f.asset, &f.path, &f.before); err != nil {
-			rows.Close()
-			return err
-		}
-		files = append(files, f)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return err
-	}
-	root, err := os.OpenRoot(s.mediaRoot)
-	if err != nil {
-		return err
-	}
-	defer root.Close()
-	var changed []entry
-	for _, f := range files {
-		info, err := root.Stat(f.path)
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		if err == nil && info.Mode().IsRegular() {
-			f.after = info.Size()
-		}
-		if f.after != f.before {
-			changed = append(changed, f)
-		}
-	}
-	if len(changed) == 0 {
-		return nil
-	}
-	return s.transaction(func(tx *sql.Tx) error {
-		for _, f := range changed {
-			if _, err := tx.Exec(`UPDATE browse_storage_refs SET bytes=? WHERE resource_type='track' AND resource_id=? AND asset=? AND bytes=?`, f.after, f.id, f.asset, f.before); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
 }
 
 func stageStorageRefs(record stagedRecord) []storageReference {
