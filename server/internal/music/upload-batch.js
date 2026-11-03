@@ -10,11 +10,12 @@ const uploadDestination=document.createElement('section');uploadDestination.clas
 const uploadTargetSearch=document.createElement('input');uploadTargetSearch.id='uploadTargetSearch';uploadTargetSearch.placeholder='搜索自己的歌单';uploadTargetSearch.setAttribute('aria-label','搜索目标歌单');uploadDestination.append(uploadTargetSearch);
 const uploadTargetPages=document.createElement('div');uploadTargetPages.className='actions';uploadTargetPages.id='uploadTargetPages';uploadDestination.append(uploadTargetPages);
 function uploadTargetMutable(u){return !u.inFlight&&(u.targetNeedsSelection||!u.targetLocked&&!u.resumeId&&!u.stageId&&!u.commitResult&&uploadFlowPending(u))}
-function setUploadTarget(target,items=state.uploads.filter(uploadTargetMutable)){uploadTargetCatalog.selected=target;uploadTargetCatalog.hasSelection=true;for(const u of items){u.targetPlaylistID=target;u.targetNeedsSelection=false;if(u.commitResult){u.playlistAssigned=!target;u.assignmentError=target?'加入目标歌单尚未完成':'';u.error=u.assignmentError}}void persistResumeQueue();renderUploads()}
+function setUploadTarget(target,items=state.uploads.filter(uploadTargetMutable),updateDefault=true){if(target==='__mixed__')throw new Error('请明确选择目标歌单或“仅加入曲库”');if(updateDefault){uploadTargetCatalog.selected=target;uploadTargetCatalog.hasSelection=true}for(const u of items){u.targetPlaylistID=target;u.targetNeedsSelection=false;if(u.commitResult){u.playlistAssigned=!target;u.assignmentError=target?'加入目标歌单尚未完成':'';u.error=u.assignmentError}}void persistResumeQueue();renderUploads()}
+function confirmUploadTarget(upload,target){if(target==='__mixed__')throw new Error('请明确选择目标歌单或“仅加入曲库”');setUploadTarget(target,[upload],false)}
 async function retryUploadAssignment(upload,target){
  if(!target||target==='__mixed__')throw new Error('请选择要加入的目标歌单；仅加入曲库请使用目标选择确认。');
  if(!state.uploads.includes(upload)||upload.inFlight||!upload.commitResult?.track?.id)return;
- setUploadTarget(target,[upload]);upload.targetLocked=true;upload.playlistAssigned=false;await assignUploadResults([upload]);
+ setUploadTarget(target,[upload],false);upload.targetLocked=true;upload.playlistAssigned=false;await assignUploadResults([upload]);
 }
 async function createUploadTarget(name){
  const owner=state.user?.id,epoch=resumeWorkspaceEpoch;name=name.trim();if(!name||name.length>200)throw new Error('请输入1–200字的歌单名称');
@@ -39,7 +40,7 @@ async function loadUploadTargets(offset=0){
 uploadTargetSearch.oninput=()=>{void loadUploadTargets().catch(error=>setStatus('目标歌单读取失败：'+error.message,'error'))};
 function renderUploadTargets(select){
  if(uploadTargetCatalog.owner!==state.user?.id){uploadTargetCatalog.owner=state.user?.id;uploadTargetCatalog.generation++;uploadTargetCatalog.loaded=false;uploadTargetCatalog.items=[];uploadTargetCatalog.names.clear();uploadTargetCatalog.selected='';uploadTargetCatalog.hasSelection=false;uploadTargetSearch.value='';uploadCreateDialog?.close()}
- const chosen=uploadTargetCatalog.hasSelection?uploadTargetCatalog.selected:select.value||uploadTargetCatalog.selected,targets=[...new Set(state.uploads.filter(uploadFlowPending).map(u=>u.targetPlaylistID||''))];
+ const chosen=uploadTargetCatalog.hasSelection?uploadTargetCatalog.selected:select.value==='__mixed__'?'':select.value||uploadTargetCatalog.selected,targets=[...new Set(state.uploads.filter(uploadFlowPending).map(u=>u.targetPlaylistID||''))];
  select.replaceChildren(new Option('仅加入曲库',''));
  const choices=new Map();for(const p of [...state.playlists,...uploadTargetCatalog.items])if(!p.system&&!p.read_only&&p.owner_id===state.user?.id){choices.set(p.id,p);uploadTargetCatalog.names.set(p.id,p.name)}
  for(const p of choices.values())select.add(new Option(p.name,p.id));
@@ -116,7 +117,7 @@ renderUploads=function(){
  const target=(select.value==='__mixed__'?'':select.value)||state.uploads.find(u=>u.targetPlaylistID&&u.playlistAssigned)?.targetPlaylistID,link=$('openUploadPlaylist');link.hidden=!target;if(target)link.href='#/playlists/'+encodeURIComponent(target);
  for(const u of visibleUploadItems()){if(!u.assignmentError)continue;const row=document.querySelector('[data-upload-id="'+u.id+'"] .upload-meta');if(row){const note=document.createElement('p');note.className='status error';note.textContent='音频已入库，仅歌单添加待重试。';row.append(note)}}
  for(const u of visibleUploadItems()){if(u.targetPlaylistID===undefined&&uploadTargetMutable(u))u.targetPlaylistID=select.value==='__mixed__'?'':select.value;const row=document.querySelector('[data-upload-id="'+u.id+'"] .upload-meta');if(!row)continue;const note=document.createElement('p');note.className='status upload-task-target';note.textContent='上传到：'+(u.targetPlaylistID?uploadTargetCatalog.names.get(u.targetPlaylistID)||'已选歌单':'仅加入曲库')+(uploadTargetMutable(u)?'':' · 目标已固定');row.append(note);if(u.assignmentError){const change=document.createElement('button');change.type='button';change.className='btn small';change.textContent='改为当前目标并重试';change.disabled=busy;change.onclick=()=>run(()=>retryUploadAssignment(u,select.value));row.append(change)}}
- for(const u of visibleUploadItems().filter(u=>u.targetNeedsSelection)){const row=document.querySelector('[data-upload-id="'+u.id+'"] .upload-meta');if(!row)continue;const note=row.querySelector('.upload-task-target');if(note)note.textContent='旧任务未保存原目标，请选择并确认上传位置。';const confirm=makeButton('确认使用当前目标',()=>setUploadTarget(select.value==='__mixed__'?'':select.value),'btn small');confirm.disabled=busy;row.append(confirm)}
+ for(const u of visibleUploadItems().filter(u=>u.targetNeedsSelection)){const row=document.querySelector('[data-upload-id="'+u.id+'"] .upload-meta');if(!row)continue;const note=row.querySelector('.upload-task-target');if(note)note.textContent='旧任务未保存原目标，请选择并确认上传位置。';const confirm=makeButton('确认使用当前目标',()=>confirmUploadTarget(u,select.value),'btn small');confirm.disabled=busy||select.value==='__mixed__';row.append(confirm)}
  renderUploadPager();
 };
 renderUploads();

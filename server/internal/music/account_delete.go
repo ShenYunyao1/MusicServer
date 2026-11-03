@@ -8,7 +8,7 @@ import (
 
 var errAccountDeleteSelf = errors.New("cannot delete the current administrator")
 var errAccountNotDisabled = errors.New("disable the account before deleting it")
-var errAccountHasResources = errors.New("transfer all managed tracks and playlists before deleting the account")
+var errAccountHasResources = errors.New("请先移交或删除账户曲目和歌单，并等待正在处理的上传结束，再删除账户")
 
 // Retain the user row for uploader foreign keys; a durable tombstone prevents
 // all account management paths from resurrecting the identity without a schema change.

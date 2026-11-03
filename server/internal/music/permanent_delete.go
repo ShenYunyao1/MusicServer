@@ -233,6 +233,9 @@ func (s *Store) PurgeUser(id string, options MutationOptions) error {
 	if err := s.CleanupResumableUploads(); err != nil {
 		log.Printf("account purge upload cleanup deferred: %v", err)
 	}
+	if err := s.discardAccountTemporary(id, options); err != nil {
+		return err
+	}
 	return s.transaction(func(tx *sql.Tx) error {
 		if err := requireAdminActor(tx, []MutationOptions{options}); err != nil {
 			return err
@@ -291,6 +294,9 @@ func (s *Store) PurgeUser(id string, options MutationOptions) error {
 			}
 		}
 		if _, err := tx.Exec("UPDATE meta SET value=? WHERE key='scan_owner_id' AND value=?", options.UserID, id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("DELETE FROM meta WHERE key='browse/account/'||?", id); err != nil {
 			return err
 		}
 		return auditMutation(tx, "account.purge", id, user, nil, []MutationOptions{options})

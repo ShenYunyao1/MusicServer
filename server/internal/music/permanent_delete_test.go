@@ -220,14 +220,11 @@ func TestPermanentAccountAssetGuards(t *testing.T) {
 		t.Fatal("playlist not guarded", err)
 	}
 	a.store.db.Exec("DELETE FROM playlists WHERE id='guard-purge'")
-	// An active chunk task blocks deletion; a canceled checkpoint is not an asset.
+	// Invalid checkpoint names cannot be operated through the upload API and
+	// must not permanently trap a disabled account without permanent assets.
 	a.store.db.Exec("INSERT INTO meta(key,value) VALUES('upload_resume/fixture',json_object('owner',?,'state','uploading'))", u.ID)
-	if err := a.store.PurgeUser(u.ID, opt); err != errAccountHasResources {
-		t.Fatal("resume not guarded", err)
-	}
-	a.store.db.Exec("UPDATE meta SET value=json_set(value,'$.state','canceled') WHERE key='upload_resume/fixture'")
 	if err := a.store.PurgeUser(u.ID, opt); err != nil {
-		t.Fatal("canceled checkpoint blocked deletion", err)
+		t.Fatal("invalid checkpoint blocked deletion", err)
 	}
 
 	v, _ := readyMember(t, a, "purge-stage")
@@ -236,8 +233,8 @@ func TestPermanentAccountAssetGuards(t *testing.T) {
 	}
 	a.store.SetUserEnabled(v.ID, false, v.Version)
 	v, _ = readUser(a.store.db, v.ID)
-	if err := a.store.PurgeUser(v.ID, MutationOptions{UserID: admin.ID, ExpectedVersion: v.Version}); err != errAccountHasResources {
-		t.Fatal("staged upload not guarded", err)
+	if err := a.store.PurgeUser(v.ID, MutationOptions{UserID: admin.ID, ExpectedVersion: v.Version}); err != nil {
+		t.Fatal("disabled unconfirmed preview blocked deletion", err)
 	}
 }
 
