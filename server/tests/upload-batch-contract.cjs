@@ -83,5 +83,14 @@ async function mixedConfirmationCannotChangeOtherRowsOrDefault(){
  const before=vm.runInContext('uploadTargetCatalog.selected',f.c);assert.throws(()=>f.c.confirmUploadTarget(a,'__mixed__'),/明确选择/);assert.equal(a.targetNeedsSelection,true);
  f.c.confirmUploadTarget(a,'a-new');assert.equal(a.targetPlaylistID,'a-new');assert.equal(a.targetNeedsSelection,false);assert.equal(b.targetNeedsSelection,true);assert.equal(b.targetPlaylistID,'b-old');assert.equal(vm.runInContext('uploadTargetCatalog.selected',f.c),before);
 }
-async function main(){const failures=[];for(const test of [restoreCommitted,retryAccountBoundary,parsingInvalidation,assignmentDoesNotRetransmit,pagingAndParserLimit,targetCatalogSurvivesViewCache,startedTargetsStayFixed,quickCreateGuardsOwner,freshAndPausedTargetsPersist,quickCreateSelectsWithoutChangingStarted,retryUnknownCommittedTarget,expiredReadyPreviewUnlocksTarget,mixedConfirmationCannotChangeOtherRowsOrDefault]){try{await test();console.log('PASS '+test.name)}catch(error){failures.push(test.name+': '+error.message);console.error('FAIL '+test.name+': '+error.message)}}assert.deepEqual(failures,[],'batch contracts failed')}
+async function mixedTargetsNeverResolveFreshRowsImplicitly(){
+ const a={...upload('a'),targetPlaylistID:'a-target'},b={...upload('b'),targetPlaylistID:'b-target'},fresh=upload('fresh'),f=fixture([a,b,fresh]);f.load();
+ assert.equal(f.get('uploadTargetPlaylist').value,'__mixed__');assert.equal(fresh.targetPlaylistID,undefined,'render must preserve unresolved destination');
+ await assert.rejects(()=>f.c.startUploadFlow([fresh]),/明确选择/);assert.equal(f.calls.filter(c=>c[0]==='start').length,0);
+ await assert.rejects(()=>f.c.resumeStageUpload(fresh),/明确选择/);assert.notEqual(fresh.targetLocked,true);assert.equal(fresh.targetPlaylistID,undefined);
+ await f.c.startUploadFlow([a]);assert.equal(a.targetPlaylistID,'a-target','explicit row remains usable in mixed queue');
+ a.targetLocked=true;b.targetLocked=true;f.get('uploadTargetPlaylist').value='';f.get('uploadTargetPlaylist').onchange();await f.c.startUploadFlow([fresh]);
+ assert.equal(fresh.targetPlaylistID,'');assert.equal(a.targetPlaylistID,'a-target');assert.equal(b.targetPlaylistID,'b-target');
+}
+async function main(){const failures=[];for(const test of [restoreCommitted,retryAccountBoundary,parsingInvalidation,assignmentDoesNotRetransmit,pagingAndParserLimit,targetCatalogSurvivesViewCache,startedTargetsStayFixed,quickCreateGuardsOwner,freshAndPausedTargetsPersist,quickCreateSelectsWithoutChangingStarted,retryUnknownCommittedTarget,expiredReadyPreviewUnlocksTarget,mixedConfirmationCannotChangeOtherRowsOrDefault,mixedTargetsNeverResolveFreshRowsImplicitly]){try{await test();console.log('PASS '+test.name)}catch(error){failures.push(test.name+': '+error.message);console.error('FAIL '+test.name+': '+error.message)}}assert.deepEqual(failures,[],'batch contracts failed')}
 main().catch(error=>{console.error(error);process.exitCode=1});

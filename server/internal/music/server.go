@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -86,6 +87,14 @@ func (a *API) SetUpdater(manager *update.Manager) { a.updater = manager }
 func (a *API) SetMaintenance(check func() bool)   { a.updating = check }
 
 func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
+	// Normalize only registered endpoints, once, before body limits and routing.
+	// Never clean arbitrary paths: doubled separators and unknown suffixes stay invalid.
+	if strings.HasSuffix(request.URL.Path, "/") && routeMethods(request.URL.Path) != "" {
+		copy := request.Clone(request.Context())
+		copy.URL.Path = strings.TrimSuffix(copy.URL.Path, "/")
+		copy.URL.RawPath = ""
+		request = copy
+	}
 	controller := http.NewResponseController(response)
 	if request.Method != "GET" && request.Method != "HEAD" {
 		deadline := 30 * time.Second
@@ -325,6 +334,13 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 				return
 			}
 		}
+	}
+	if allow := routeMethods(request.URL.Path); allow != "" && !slices.Contains(strings.Split(allow, ", "), request.Method) {
+		if strings.HasPrefix(request.URL.Path, "/api/v2/admin/") && !a.requireAdmin(response, request) {
+			return
+		}
+		methodNotAllowed(response, request)
+		return
 	}
 	if request.URL.Path == "/api/v2/admin/registration" {
 		a.registration(response, request)

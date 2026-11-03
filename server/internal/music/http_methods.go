@@ -23,9 +23,7 @@ func routeMethods(path string) string {
 	if p == path || strings.Contains(p, "//") {
 		return ""
 	}
-	if p == "auth/keys/" || p == "admin/backups/" || p == "admin/users/" {
-		p = strings.TrimSuffix(p, "/")
-	}
+	p = strings.TrimSuffix(p, "/")
 	exact := map[string]string{
 		"setup": "GET, POST", "health": "GET", "tracks": "GET", "playlists": "GET, POST", "playlists/editor": "POST", "playlists/order": "PUT",
 		"auth/keys": "GET, POST, DELETE", "auth/keys/stats": "GET", "auth/avatar": "GET, PUT", "auth/avatar/content": "GET", "auth/profile": "PUT", "auth/storage": "GET", "auth/email": "GET", "auth/email/challenge": "POST", "auth/email/verify": "POST",
@@ -38,6 +36,8 @@ func routeMethods(path string) string {
 		"listening/sessions": "POST", "listening/tracks": "GET", "sync": "GET", "sync/tracks": "POST",
 		"uploads": "POST", "uploads/stage": "POST", "uploads/preflight": "GET", "uploads/resumable": "GET, POST",
 		"browse/summary": "GET", "browse/tracks": "GET", "browse/playlists": "GET", "browse/playlists/move": "POST",
+		"tags": "GET, POST", "tag-groups": "GET, POST", "tag-sync": "GET", "tag-batches": "GET, POST",
+		"track-query": "POST", "track-facets": "POST", "saved-track-filters": "GET, POST",
 	}
 	if allow := exact[p]; allow != "" {
 		return allow
@@ -50,6 +50,20 @@ func routeMethods(path string) string {
 	a := strings.Split(p, "/")
 	valid := func(i int) bool { return i < len(a) && validID.MatchString(a[i]) }
 	switch {
+	case len(a) == 2 && a[0] == "tag-groups" && tagGroupID(a[1]):
+		return "PATCH, DELETE"
+	case len(a) == 2 && (a[0] == "tags" || a[0] == "saved-track-filters") && tagUUID(a[1]):
+		return "GET, PATCH, DELETE"
+	case len(a) == 3 && a[0] == "tags" && tagUUID(a[1]) && a[2] == "merge":
+		return "POST"
+	case len(a) == 2 && a[0] == "tag-batches" && tagUUID(a[1]):
+		return "GET, PATCH"
+	case len(a) == 3 && a[0] == "tag-batches" && tagUUID(a[1]) && (a[2] == "start" || a[2] == "cancel" || a[2] == "retry"):
+		return "POST"
+	case len(a) == 3 && a[0] == "tracks" && tagUUID(a[1]) && a[2] == "tags":
+		return "GET, PATCH"
+	case len(a) == 3 && a[0] == "tracks" && tagUUID(a[1]) && a[2] == "tag-import-source":
+		return "GET"
 	case len(a) == 4 && a[0] == "auth" && a[1] == "keys" && valid(2) && a[3] == "rotate":
 		return "POST"
 	case len(a) == 3 && a[0] == "auth" && a[1] == "keys" && valid(2):
