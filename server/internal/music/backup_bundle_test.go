@@ -239,12 +239,22 @@ func TestBackupBundleRejectsChangedMediaAndOccupiedRestoreTarget(t *testing.T) {
 	}
 	data[len(data)-1] ^= 1
 	os.WriteFile(filepath.Join(root, track.Path), data, 0600)
-	if _, err := api.store.CreateBackupBundle(context.Background(), true, nil); err == nil {
-		t.Fatal("backup accepted bytes inconsistent with the database hash")
+	changed, err := api.store.CreateBackupBundle(context.Background(), true, nil)
+	if err != nil || changed.MissingCount != 1 {
+		t.Fatal("changed media should be excluded with a warning", changed, err)
+	}
+	manifest, err := RestoreBackup(context.Background(), filepath.Join(api.store.backupDirectory(), changed.Name), filepath.Join(t.TempDir(), "changed-restore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, input := range manifest.Files {
+		if input.Path == "media/"+filepath.ToSlash(track.Path) {
+			t.Fatal("backup included bytes inconsistent with database hash")
+		}
 	}
 	items, err := api.store.BackupArchives()
-	if err != nil || len(items) != 1 || items[0].ID != archive.ID {
-		t.Fatal("failed backup damaged or added a completed archive")
+	if err != nil || len(items) != 2 {
+		t.Fatal("backup damaged an existing archive", err)
 	}
 }
 

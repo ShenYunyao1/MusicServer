@@ -1772,7 +1772,10 @@ func (a *API) maintenance(response http.ResponseWriter, request *http.Request) {
 			switch {
 			case errors.Is(err, errBackupBusy):
 				response.Header().Set("Retry-After", "5")
-				writeError(response, 409, "BACKUP_BUSY", "备份或媒体清理正在进行，请完成后重试")
+				writeError(response, 409, "BACKUP_BUSY", "备份正在进行，请完成后重试")
+			case errors.Is(err, errMediaCleanupBusy):
+				response.Header().Set("Retry-After", "1")
+				writeError(response, 409, "MEDIA_CLEANUP_BUSY", err.Error())
 			case errors.Is(err, errTrackNotRemoved):
 				writeError(response, 409, "TRACK_NOT_REMOVED", err.Error())
 			case errors.Is(err, sql.ErrNoRows):

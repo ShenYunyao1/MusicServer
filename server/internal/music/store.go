@@ -48,6 +48,7 @@ type Store struct {
 	storageWriteMu   sync.Mutex
 	spaceProbe       func(string) (diskspace.Space, error)
 	backupBundleMu   sync.Mutex
+	purgeMu          sync.Mutex
 	backupMu         sync.Mutex
 	backupJob        BackupJob
 	backupCancel     context.CancelFunc

@@ -57,7 +57,8 @@ type BackupArchive struct {
 }
 type backupInput struct {
 	BackupFile
-	Local string
+	Local  string
+	Frozen bool
 }
 
 func backupArchiveName(id string) (string, error) {
@@ -256,7 +257,11 @@ func (s *Store) createBackupBundleForTarget(ctx context.Context, includeMedia bo
 			metadata, _ := readAudioMetadata(file)
 			file.Close()
 			if err != nil || !info.Mode().IsRegular() || info.Size() != track.Size || track.ContentHash == "" {
-				return BackupArchive{}, fmt.Errorf("media changed since snapshot: %s", name)
+				if err != nil {
+					return BackupArchive{}, err
+				}
+				manifest.MissingMedia = append(manifest.MissingMedia, name)
+				continue
 			}
 			inputs = append(inputs, backupInput{BackupFile: BackupFile{Path: "media/" + name, Size: track.Size, SHA256: track.ContentHash}, Local: track.Path})
 			media[name] = track.ContentHash
@@ -299,12 +304,31 @@ func (s *Store) createBackupBundleForTarget(ctx context.Context, includeMedia bo
 		}
 	}
 	report("checking", 0, 0)
+	// Mutable external files must be verified before the manifest is written.
+	// Freeze each one into private storage so changes during compression cannot
+	// invalidate an otherwise recoverable database backup.
+	frozenDirectory, err := os.MkdirTemp(s.backupDirectory(), ".backup-media-*")
+	if err != nil {
+		return BackupArchive{}, err
+	}
+	defer os.RemoveAll(frozenDirectory)
 	sort.Slice(inputs, func(i, j int) bool { return inputs[i].Path < inputs[j].Path })
 	selected := inputs[:0]
 	var total int64
 	for _, input := range inputs {
 		if !validBackupPath(input.Path) {
 			return BackupArchive{}, errors.New("unsupported backup path")
+		}
+		if strings.HasPrefix(input.Path, "media/") {
+			frozen, changed, e := s.freezeBackupMedia(ctx, root, input, filepath.Join(frozenDirectory, fmt.Sprintf("%06d", len(selected))))
+			if e != nil {
+				return BackupArchive{}, e
+			}
+			if changed {
+				manifest.MissingMedia = append(manifest.MissingMedia, strings.TrimPrefix(input.Path, "media/"))
+				continue
+			}
+			input = frozen
 		}
 		if input.SHA256 == "" {
 			var file *os.File
@@ -368,7 +392,7 @@ func (s *Store) createBackupBundleForTarget(ctx context.Context, includeMedia bo
 	report("packing", 0, total)
 	for _, input := range inputs {
 		var file *os.File
-		if strings.HasPrefix(input.Path, "media/") {
+		if strings.HasPrefix(input.Path, "media/") && !input.Frozen {
 			file, err = root.Open(input.Local)
 		} else {
 			file, err = os.Open(input.Local)

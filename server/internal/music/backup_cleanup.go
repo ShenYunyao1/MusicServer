@@ -51,6 +51,23 @@ func (s *Store) cleanupBackupTemporaryLocked() error {
 	}
 	var failures []error
 	for _, entry := range entries {
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), ".backup-media-") {
+			if _, err := strconv.ParseUint(strings.TrimPrefix(entry.Name(), ".backup-media-"), 10, 32); err == nil {
+				// Exact managed prefix, numeric random suffix, and a resolved
+				// backup directory; never follow a symlink entry.
+				root, e := os.OpenRoot(s.backupDirectory())
+				if e != nil {
+					failures = append(failures, e)
+					continue
+				}
+				e = root.RemoveAll(entry.Name())
+				root.Close()
+				if e != nil {
+					failures = append(failures, e)
+				}
+			}
+			continue
+		}
 		// Never follow symlinks or recursively remove arbitrary directories.
 		if !entry.Type().IsRegular() || !backupTemporaryName(entry.Name()) {
 			continue

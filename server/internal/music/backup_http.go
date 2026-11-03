@@ -87,6 +87,8 @@ func (a *API) backups(w http.ResponseWriter, r *http.Request) {
 		if err := a.store.CancelBackupJob(parts[1], mutationOptions(r)); err != nil {
 			if errors.Is(err, errBackupJobNotFound) {
 				writeError(w, 404, "BACKUP_JOB_NOT_FOUND", "backup task not found")
+			} else if errors.Is(err, errBackupJobFinished) {
+				writeError(w, 409, "BACKUP_JOB_FINISHED", "backup task is no longer running")
 			} else if errors.Is(err, errResourceHidden) {
 				writeError(w, 403, "ADMIN_REQUIRED", "administrator identity required")
 			} else {

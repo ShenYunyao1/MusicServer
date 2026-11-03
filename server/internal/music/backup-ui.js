@@ -32,9 +32,9 @@ function renderBackupJob(job){
  const active=['running','cancelling'].includes(job.state),progress=$('backupProgress');
  $('createBackup').disabled=$('createDatabaseBackup').disabled=active;$('cancelBackup').hidden=!active;$('cancelBackup').disabled=job.state==='cancelling';
  progress.hidden=!active;
- const phases={snapshot:'创建数据库快照',checking:'检查备份清单',packing:'归档与校验',completed:'完成'};
+ const phases={snapshot:'创建数据库快照',checking:'检查并暂存媒体副本',packing:'归档与校验',completed:'完成'};
  if(active){if(job.total>0)progress.value=Math.min(100,Math.floor(job.bytes*100/job.total));else progress.removeAttribute('value');$('backupResult').textContent=(job.state==='cancelling'?'正在取消任务…':phases[job.phase]||'正在备份')+(job.total>0?' · '+formatBytes(job.bytes)+' / '+formatBytes(job.total):'')}
- else if(job.state==='completed')$('backupResult').textContent='备份已创建并验证：'+job.archive.name+(job.archive.missing_count?' · 原库有 '+job.archive.missing_count+' 个缺失音频，请查看清单。':' · 可从列表下载。')+(job.error?' · '+job.error:'');
+ else if(job.state==='completed')$('backupResult').textContent='备份已创建并验证：'+job.archive.name+(job.archive.missing_count?' · '+job.archive.missing_count+' 个媒体文件缺失或已变化，未纳入备份，请查看清单。':' · 可从列表下载。')+(job.error?' · '+job.error:'');
  else if(job.state==='failed'||job.state==='cancelled')$('backupResult').textContent=(job.state==='cancelled'?'备份已取消：':'备份失败：')+(job.error||'请查看系统日志');
  else $('backupResult').textContent='尚无本次运行的备份任务。已有备份保留在下方列表。';
 }

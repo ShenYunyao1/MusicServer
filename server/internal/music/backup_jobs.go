@@ -17,6 +17,7 @@ import (
 var errBackupBusy = errors.New("another backup task is running")
 var errBackupInUse = errors.New("backup is being downloaded")
 var errBackupJobNotFound = errors.New("backup task not found")
+var errBackupJobFinished = errors.New("backup task is no longer running")
 
 type BackupPolicy struct {
 	Enabled       bool `json:"enabled"`
@@ -156,18 +157,24 @@ func (s *Store) CancelBackup() {
 	}
 }
 func (s *Store) CancelBackupJob(id string, options MutationOptions) error {
+	s.backupMu.Lock()
+	defer s.backupMu.Unlock()
 	if err := s.transaction(func(tx *sql.Tx) error {
 		if err := requireAdminActor(tx, []MutationOptions{options}); err != nil {
 			return err
 		}
+		if s.backupJob.ID != id {
+			return errBackupJobNotFound
+		}
+		if s.backupCancel == nil || s.backupJob.State != "running" && s.backupJob.State != "cancelling" {
+			return errBackupJobFinished
+		}
+		if s.backupJob.State == "cancelling" {
+			return nil
+		}
 		return auditMutation(tx, "backup.cancel_requested", id, nil, nil, []MutationOptions{options})
 	}); err != nil {
 		return err
-	}
-	s.backupMu.Lock()
-	defer s.backupMu.Unlock()
-	if s.backupJob.ID != id {
-		return errBackupJobNotFound
 	}
 	if s.backupCancel != nil {
 		s.backupJob.State = "cancelling"
