@@ -44,6 +44,6 @@ func coverReadable(reader sqlReader, auth authContext, id string) (bool, error) 
 		trackAccess = "EXISTS(SELECT 1 FROM playlist_tracks m JOIN playlists p ON p.id=m.playlist_id LEFT JOIN users u ON u.id=p.owner_id WHERE m.track_id=t.id AND " + predicate + ")"
 	}
 	var allowed bool
-	err := reader.QueryRow("SELECT EXISTS(SELECT 1 FROM tracks t WHERE t.removed=0 AND json_extract(t.payload,'$.cover_id')=@cover AND "+trackAccess+") OR EXISTS(SELECT 1 FROM playlists p LEFT JOIN users u ON u.id=p.owner_id WHERE json_extract(p.payload,'$.cover_id')=@cover AND "+predicate+")", args...).Scan(&allowed)
+	err := reader.QueryRow("SELECT EXISTS(SELECT 1 FROM tracks t WHERE t.removed=0 AND json_valid(t.payload) AND json_extract(t.payload,'$.cover_id')=@cover AND "+trackAccess+") OR EXISTS(SELECT 1 FROM playlists p LEFT JOIN users u ON u.id=p.owner_id WHERE json_valid(p.payload) AND json_extract(p.payload,'$.cover_id')=@cover AND "+predicate+")", args...).Scan(&allowed)
 	return allowed, err
 }

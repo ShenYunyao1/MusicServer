@@ -108,6 +108,12 @@ func openStoreForSchema(dataPath, mediaRoot string, schema int, runtimeInitializ
 	if !runtimeInitialization {
 		return store, nil
 	}
+	if schema >= 8 {
+		if err := initializeBrowseIndexes(store.db); err != nil {
+			_ = store.closeDatabases()
+			return nil, err
+		}
+	}
 	if err := store.initializeReadPool(); err != nil {
 		_ = store.closeDatabases()
 		return nil, err

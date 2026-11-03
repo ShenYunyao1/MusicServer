@@ -8,6 +8,13 @@ spec.loader.exec_module(upgrade)
 
 
 class MigrationHistoryTest(unittest.TestCase):
+    def test_only_registered_derived_metadata_additions_are_allowed(self):
+        before={'meta':[('sync_secret','must retain'),('revision','5')]}
+        additions=[('browse/schema_version','2'),('browse/schema_digest','digest'),('browse/epoch','epoch'),('browse/library','0'),('browse/admin','0'),('browse/search_version','1'),('browse/account/00000000-0000-4000-8000-000000000001','1')]
+        upgrade.assert_preserved_rows(before,{'meta':before['meta']+additions},8,8)
+        for rows in ([('sync_secret','changed'),('revision','5')]+additions,before['meta']+[('unrecognized','addition')],before['meta'][1:]+additions):
+            with self.assertRaises(AssertionError):upgrade.assert_preserved_rows(before,{'meta':rows},8,8)
+
     def test_preserves_exact_old_history_and_one_new_edge(self):
         before = {'schema_migrations': [(7, 8, 'original timestamp')], 'users': [('retained',)]}
         after = {**before, 'schema_migrations': before['schema_migrations'] + [(8, 9, 'new timestamp')]}

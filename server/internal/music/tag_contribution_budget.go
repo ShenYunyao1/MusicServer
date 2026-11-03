@@ -20,7 +20,7 @@ func checkPublicContributionBudget(tx *sql.Tx, actor User) error {
 		return nil
 	}
 	now := time.Now().UTC()
-	rows, err := tx.Query("SELECT created_at FROM audit WHERE user_id=? AND action='tag.create' AND json_extract(changes,'$.after.scope')='public' AND created_at>=? ORDER BY created_at DESC LIMIT 100", actor.ID, persistedTime(now.Add(-24*time.Hour)))
+	rows, err := tx.Query("SELECT created_at FROM audit WHERE user_id=? AND action='tag.create' AND json_valid(changes) AND json_extract(changes,'$.after.scope')='public' AND created_at>=? ORDER BY created_at DESC LIMIT 100", actor.ID, persistedTime(now.Add(-24*time.Hour)))
 	if err != nil {
 		return err
 	}

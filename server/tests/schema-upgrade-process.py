@@ -63,6 +63,17 @@ def snapshot(database):
 
 def assert_preserved_rows(before, after, source, target):
     for table, rows in before.items():
+        if table == 'meta':
+            previous, current = dict(rows), dict(after[table])
+            assert all(current.get(key) == value for key, value in previous.items()), 'old rows changed in meta'
+            def derived(key):
+                if key in {'browse/epoch','browse/library','browse/admin','browse/search_version','browse/schema_version','browse/schema_digest'}: return True
+                if key.startswith('browse/account/'):
+                    try: return str(uuid.UUID(key[len('browse/account/'):])) == key[len('browse/account/'):]
+                    except ValueError: return False
+                return False
+            assert all(derived(key) for key in current.keys() - previous.keys()), 'unrecognized metadata additions'
+            continue
         if table != 'schema_migrations':
             assert after[table] == rows, 'old rows changed in ' + table
             continue

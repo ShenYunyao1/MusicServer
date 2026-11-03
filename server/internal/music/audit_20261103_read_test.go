@@ -101,7 +101,7 @@ func TestAuditBrowseReadDoesNotAcquireWriteMutex(t *testing.T) {
 func TestAuditCoverLookupUsesExpressionIndexes(t *testing.T) {
 	a, _ := testAPI(t)
 	for _, table := range []string{"tracks", "playlists"} {
-		rows, err := a.store.db.Query("EXPLAIN QUERY PLAN SELECT id FROM "+table+" WHERE json_extract(payload,'$.cover_id')=?", "example")
+		rows, err := a.store.db.Query("EXPLAIN QUERY PLAN SELECT id FROM "+table+" WHERE json_valid(payload) AND json_extract(payload,'$.cover_id')=?", "example")
 		if err != nil {
 			t.Fatal(err)
 		}
