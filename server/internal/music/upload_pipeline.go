@@ -42,7 +42,7 @@ func (a *API) uploadPreflight(w http.ResponseWriter, r *http.Request) bool {
 	w.Header().Set("Cache-Control", "no-store")
 	if r.Method != "GET" {
 		w.Header().Set("Allow", "GET")
-		writeError(w, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+		methodNotAllowed(w, r)
 		return true
 	}
 	used, err := a.store.accountUsageForIDs(a.store.db, []string{auth.userID})

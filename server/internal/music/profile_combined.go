@@ -79,7 +79,7 @@ func (s *Store) saveCombinedProfile(auth authContext, name string, data []byte, 
 
 func (a *API) combinedProfileHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "PUT" {
-		writeError(w, 405, "METHOD_NOT_ALLOWED", "PUT required")
+		methodNotAllowed(w, r)
 		return
 	}
 	fail := func(code int, message string) { writeError(w, code, "INVALID_PROFILE", message) }

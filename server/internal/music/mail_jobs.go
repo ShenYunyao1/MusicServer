@@ -13,11 +13,12 @@ import (
 )
 
 type mailRuntime struct {
-	secretReadHook func() // Private regression seam; never configured by HTTP.
-	mu             sync.Mutex
-	cancel         context.CancelFunc
-	wake           chan struct{}
-	started        bool
+	secretReadHook  func() // Private regression seam; never configured by HTTP.
+	secretWriteHook func()
+	mu              sync.Mutex
+	cancel          context.CancelFunc
+	wake            chan struct{}
+	started         bool
 	// Test injection stays private and is never exposed through configuration.
 	sendHook func(context.Context, MailSettings, mailSecret, mailEnvelope, string) error
 	roots    *x509.CertPool

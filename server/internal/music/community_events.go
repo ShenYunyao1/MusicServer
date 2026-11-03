@@ -49,7 +49,7 @@ func (s *Store) communitySignal() <-chan struct{} {
 func (a *API) communityEvents(response http.ResponseWriter, request *http.Request) {
 	response.Header().Set("Cache-Control", "no-store")
 	if request.Method != "GET" {
-		writeError(response, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+		methodNotAllowed(response, request)
 		return
 	}
 	var view realtimeView

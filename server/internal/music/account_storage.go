@@ -123,7 +123,7 @@ func (a *API) accountStorage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != "GET" {
-		writeError(w, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+		methodNotAllowed(w, r)
 		return
 	}
 	auth := authFromRequest(r)

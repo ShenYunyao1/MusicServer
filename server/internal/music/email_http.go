@@ -151,5 +151,5 @@ func (a *API) emailHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(204)
 		return
 	}
-	writeError(w, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+	methodNotAllowed(w, r)
 }

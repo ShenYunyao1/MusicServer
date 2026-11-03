@@ -779,7 +779,7 @@ func (a *API) resumableUploads(w http.ResponseWriter, r *http.Request) bool {
 			writeJSON(w, 200, map[string]any{"items": items})
 		default:
 			w.Header().Set("Allow", "GET, POST")
-			writeError(w, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+			methodNotAllowed(w, r)
 		}
 		return true
 	}
@@ -787,7 +787,7 @@ func (a *API) resumableUploads(w http.ResponseWriter, r *http.Request) bool {
 	if len(parts) == 2 && validResumeID(parts[0]) && parts[1] == "status" {
 		if r.Method != "GET" {
 			w.Header().Set("Allow", "GET")
-			writeError(w, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+			methodNotAllowed(w, r)
 			return true
 		}
 		task, err := a.store.resumeOwned(parts[0], auth)
@@ -831,7 +831,7 @@ func (a *API) resumableUploads(w http.ResponseWriter, r *http.Request) bool {
 	if len(parts) == 2 {
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", "POST")
-			writeError(w, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+			methodNotAllowed(w, r)
 			return true
 		}
 		var input resumableFinish
@@ -887,7 +887,7 @@ func (a *API) resumableUploads(w http.ResponseWriter, r *http.Request) bool {
 		}
 	default:
 		w.Header().Set("Allow", "GET, PATCH, DELETE")
-		writeError(w, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+		methodNotAllowed(w, r)
 	}
 	return true
 }

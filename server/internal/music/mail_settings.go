@@ -1,6 +1,7 @@
 package music
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hmac"
@@ -140,6 +141,9 @@ func (s *Store) readMailSecret(name string) ([]byte, error) {
 // Callers serialize secret creation/configuration with mail.mu. Immutable
 // credential files are referenced by the same committed settings version.
 func (s *Store) writeNewMailSecret(name string, raw []byte) error {
+	if s.mail.secretWriteHook != nil {
+		s.mail.secretWriteHook()
+	}
 	directory := s.mailSecretsDirectory()
 	if err := ensureMailSecretDirectory(directory); err != nil {
 		return errMailUnavailable
@@ -321,7 +325,7 @@ func (s *Store) UpdateMailSettings(input MailSettingsInput, options MutationOpti
 	var result MailSettings
 	var createdPath string
 	var retiredSecret string
-	err = s.transaction(func(tx *sql.Tx) error {
+	validateActor := func(tx *sql.Tx) error {
 		if err := requireAdminActor(tx, []MutationOptions{options}); err != nil {
 			return err
 		}
@@ -334,30 +338,61 @@ func (s *Store) UpdateMailSettings(input MailSettingsInput, options MutationOpti
 				return err
 			}
 		}
+		return nil
+	}
+	var prepared mailSettingsRecord
+	err = s.readSnapshot(context.Background(), func(tx *sql.Tx) error {
+		if err := validateActor(tx); err != nil {
+			return err
+		}
+		var err error
+		prepared, err = readMailSettings(tx)
+		if err != nil {
+			return err
+		}
+		if prepared.Version != input.Version {
+			return errVersionConflict
+		}
+		return nil
+	})
+	if err != nil {
+		return MailSettings{}, err
+	}
+	secretID := prepared.SecretID
+	if input.Password != "" {
+		retiredSecret = prepared.SecretID
+		secretID, err = randomToken(16)
+		if err != nil {
+			return MailSettings{}, err
+		}
+		raw, _ := json.Marshal(mailSecret{input.Password})
+		if err = s.writeNewMailSecret(secretID+".json", raw); err != nil {
+			return MailSettings{}, err
+		}
+		createdPath = filepath.Join(s.mailSecretsDirectory(), secretID+".json")
+	} else if _, err = s.mailCredential(prepared); err != nil {
+		return MailSettings{}, errMailUnavailable
+	}
+	// Remove only this attempt's uncommitted credential on any later failure.
+	committed := false
+	defer func() {
+		if !committed && createdPath != "" {
+			_ = os.Remove(createdPath)
+		}
+	}()
+	if _, err = s.mailMasterKey(true); err != nil {
+		return MailSettings{}, err
+	}
+	err = s.transaction(func(tx *sql.Tx) error {
+		if err := validateActor(tx); err != nil {
+			return err
+		}
 		current, err := readMailSettings(tx)
 		if err != nil {
 			return err
 		}
-		if current.Version != input.Version {
+		if current.Version != input.Version || current.SecretID != prepared.SecretID {
 			return errVersionConflict
-		}
-		secretID := current.SecretID
-		if input.Password != "" {
-			retiredSecret = current.SecretID
-			secretID, err = randomToken(16)
-			if err != nil {
-				return err
-			}
-			raw, _ := json.Marshal(mailSecret{input.Password})
-			if err = s.writeNewMailSecret(secretID+".json", raw); err != nil {
-				return err
-			}
-			createdPath = filepath.Join(s.mailSecretsDirectory(), secretID+".json")
-		} else if _, err = s.mailCredential(current); err != nil {
-			return errMailUnavailable
-		}
-		if _, err = s.mailMasterKey(true); err != nil {
-			return err
 		}
 		result = MailSettings{Host: host, Port: input.Port, TLSMode: input.TLSMode, FromAddress: from, Username: strings.TrimSpace(input.Username), Version: current.Version + 1, Configured: true, Tested: false}
 		next := mailSettingsRecord{MailSettings: result, SecretID: secretID}
@@ -367,9 +402,7 @@ func (s *Store) UpdateMailSettings(input MailSettingsInput, options MutationOpti
 		}
 		return auditMutation(tx, "mail.settings", "mail", map[string]any{"version": current.Version}, map[string]any{"version": result.Version, "configured": true}, []MutationOptions{options})
 	})
-	if err != nil && createdPath != "" {
-		_ = os.Remove(createdPath)
-	}
+	committed = err == nil
 	if err == nil && retiredSecret != "" && validResumeID(retiredSecret) {
 		root, openErr := os.OpenRoot(s.mailSecretsDirectory())
 		if openErr == nil {

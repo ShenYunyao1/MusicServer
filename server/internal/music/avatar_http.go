@@ -21,7 +21,7 @@ func writeAvatarError(w http.ResponseWriter, err error) {
 func (a *API) avatarHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/api/v2/auth/avatar/content" {
 		if r.Method != "GET" {
-			writeError(w, 405, "METHOD_NOT_ALLOWED", "GET required")
+			methodNotAllowed(w, r)
 			return
 		}
 		for key := range r.URL.Query() {
@@ -65,7 +65,7 @@ func (a *API) avatarHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != "PUT" {
-		writeError(w, 405, "METHOD_NOT_ALLOWED", "GET or PUT required")
+		methodNotAllowed(w, r)
 		return
 	}
 	expected, ok := tagExpectedVersion(w, r)

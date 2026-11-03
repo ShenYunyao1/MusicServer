@@ -96,7 +96,7 @@ func (a *API) listening(w http.ResponseWriter, r *http.Request) {
 	case "sessions":
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", "POST")
-			writeError(w, 405, "METHOD_NOT_ALLOWED", "POST required")
+			methodNotAllowed(w, r)
 			return
 		}
 		var body struct {
@@ -115,7 +115,7 @@ func (a *API) listening(w http.ResponseWriter, r *http.Request) {
 	case "tracks":
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", "GET")
-			writeError(w, 405, "METHOD_NOT_ALLOWED", "GET required")
+			methodNotAllowed(w, r)
 			return
 		}
 		query, e := parseListeningQuery(r)

@@ -77,7 +77,7 @@ func (a *API) community(response http.ResponseWriter, request *http.Request) {
 	path := strings.TrimPrefix(request.URL.Path, "/api/v2/")
 	if path == "public/playlists" {
 		if request.Method != "GET" {
-			writeError(response, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+			methodNotAllowed(response, request)
 			return
 		}
 		offset, limit := 0, 30
@@ -118,7 +118,7 @@ func (a *API) community(response http.ResponseWriter, request *http.Request) {
 	}
 	if strings.HasPrefix(path, "public/playlists/") {
 		if request.Method != "GET" {
-			writeError(response, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+			methodNotAllowed(response, request)
 			return
 		}
 		id := strings.TrimPrefix(path, "public/playlists/")
@@ -146,7 +146,7 @@ func (a *API) community(response http.ResponseWriter, request *http.Request) {
 	}
 	if path == "subscriptions" {
 		if request.Method != "GET" {
-			writeError(response, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+			methodNotAllowed(response, request)
 			return
 		}
 		views, err := a.store.Subscriptions(authFromRequest(request).userID)
@@ -179,7 +179,7 @@ func (a *API) community(response http.ResponseWriter, request *http.Request) {
 			}
 			response.WriteHeader(204)
 		default:
-			writeError(response, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+			methodNotAllowed(response, request)
 		}
 		return
 	}

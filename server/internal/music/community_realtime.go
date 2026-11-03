@@ -270,7 +270,7 @@ func (s *Store) realtimeSnapshot(auth authContext, view realtimeView) (realtimeS
 func (a *API) realtimeSync(response http.ResponseWriter, request *http.Request) {
 	response.Header().Set("Cache-Control", "no-store")
 	if request.Method != "POST" {
-		writeError(response, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+		methodNotAllowed(response, request)
 		return
 	}
 	var input struct {

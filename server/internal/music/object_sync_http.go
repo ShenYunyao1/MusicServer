@@ -18,7 +18,7 @@ func writeObjectSyncError(w http.ResponseWriter, err error) bool {
 }
 func (a *API) objectSyncTracks(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
-		writeError(w, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+		methodNotAllowed(w, r)
 		return
 	}
 	var input struct {

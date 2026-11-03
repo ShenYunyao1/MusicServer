@@ -105,7 +105,7 @@ func (a *API) sharing(response http.ResponseWriter, request *http.Request) {
 		}
 	}
 	if !create && action == "" {
-		writeError(response, 405, "METHOD_NOT_ALLOWED", "unsupported invitation endpoint or method")
+		methodNotAllowed(response, request)
 		return
 	}
 	options := mutationOptions(request)

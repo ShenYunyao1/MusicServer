@@ -36,6 +36,15 @@ func run() error {
 		fmt.Println(version.Version)
 		return nil
 	}
+	if *formal {
+		data, err := os.ReadFile("deploy/release-notes.md")
+		if err != nil {
+			return err
+		}
+		if err := validateReleaseNotes(data, version.Version, version.Schema); err != nil {
+			return err
+		}
+	}
 	commit, modified := version.Source()
 	if commit == "unknown" || modified {
 		return fmt.Errorf("release packaging requires a clean, committed checkout")

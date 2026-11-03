@@ -81,7 +81,7 @@ func (a *API) adminUsers(response http.ResponseWriter, request *http.Request) {
 			}
 			writeJSON(response, 201, created)
 		default:
-			writeError(response, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+			methodNotAllowed(response, request)
 		}
 		return
 	}

@@ -9,6 +9,37 @@ func methodNotAllowed(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Path
 	allow := "GET"
 	switch {
+	case p == "/api/v2/listening/sessions" || p == "/api/v2/community/sync" || p == "/api/v2/sync/tracks" || p == "/api/v2/auth/email/challenge" || p == "/api/v2/auth/email/verify" || p == "/api/v2/admin/mail/test":
+		allow = "POST"
+	case p == "/api/v2/auth/avatar":
+		allow = "GET, PUT"
+	case p == "/api/v2/auth/profile":
+		allow = "PUT"
+	case p == "/api/v2/admin/mail":
+		allow = "GET, PUT"
+	case p == "/api/v2/admin/users":
+		allow = "GET, POST"
+	case strings.HasPrefix(p, "/api/v2/subscriptions/"):
+		allow = "PUT, DELETE"
+		if strings.Contains(strings.TrimPrefix(p, "/api/v2/subscriptions/"), "/tracks/") {
+			allow = "PATCH"
+		}
+	case strings.HasPrefix(p, "/api/v2/browse/"):
+		if strings.HasSuffix(p, "/move") {
+			allow = "POST"
+		}
+	case strings.HasPrefix(p, "/api/v2/invitations"):
+		if strings.HasSuffix(p, "/accept") || strings.HasSuffix(p, "/decline") {
+			allow = "POST"
+		}
+	case strings.Contains(p, "/invitations") && strings.HasPrefix(p, "/api/v2/playlists/"):
+		allow = "DELETE"
+		if strings.HasSuffix(p, "/invitations") {
+			allow = "GET, POST"
+		}
+		if strings.HasSuffix(p, "/resend") {
+			allow = "POST"
+		}
 	case p == "/api/v2/auth/keys":
 		allow = "GET, POST, DELETE"
 	case accountAuthAllow(strings.TrimPrefix(p, "/api/v2/auth/")) != "" && strings.HasPrefix(p, "/api/v2/auth/"):
@@ -85,7 +116,9 @@ func methodNotAllowed(w http.ResponseWriter, r *http.Request) {
 	case strings.HasSuffix(p, "/cancel"):
 		allow = "POST"
 	}
-	w.Header().Set("Allow", allow)
+	if w.Header().Get("Allow") == "" {
+		w.Header().Set("Allow", allow)
+	}
 	writeError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
 }
 

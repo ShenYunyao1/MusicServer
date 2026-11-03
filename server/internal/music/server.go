@@ -980,7 +980,7 @@ func (a *API) playlist(response http.ResponseWriter, request *http.Request) {
 			return
 		}
 		if err := a.store.DeletePlaylist(id, mutationOptions(request)); err != nil {
-			writeError(response, 400, err.Error())
+			writePlaylistMutationError(response, err)
 			return
 		}
 		response.WriteHeader(http.StatusNoContent)
@@ -1016,6 +1016,10 @@ func (a *API) playlist(response http.ResponseWriter, request *http.Request) {
 }
 
 func writePlaylistMutationError(response http.ResponseWriter, err error) {
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(response, 404, "NOT_FOUND", "playlist or member not found")
+		return
+	}
 	status := http.StatusBadRequest
 	switch {
 	case errors.Is(err, errPlaylistNotFound), errors.Is(err, errMemberNotFound):

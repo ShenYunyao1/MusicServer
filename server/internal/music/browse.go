@@ -84,7 +84,7 @@ func (a *API) browse(response http.ResponseWriter, request *http.Request) {
 	cardMove := path == "playlists/move"
 	move := cardMove || len(parts) == 4 && parts[0] == "playlists" && parts[2] == "tracks" && parts[3] == "move"
 	if !move && request.Method != http.MethodGet || move && request.Method != http.MethodPost {
-		writeError(response, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+		methodNotAllowed(response, request)
 		return
 	}
 	q, err := parseBrowseQuery(request)

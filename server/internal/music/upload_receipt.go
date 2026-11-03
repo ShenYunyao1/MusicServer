@@ -44,7 +44,7 @@ func (a *API) uploadReceipt(w http.ResponseWriter, r *http.Request) bool {
 	}
 	if r.Method != "GET" {
 		w.Header().Set("Allow", "GET")
-		writeError(w, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+		methodNotAllowed(w, r)
 		return true
 	}
 	id := strings.TrimPrefix(r.URL.Path, prefix)
