@@ -160,7 +160,7 @@ func TestTrackFilterHTTPFacetsPrivateIsolationAndRedirects(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := mailRequest(a, memberToken, "POST", "/api/v2/track-query", fmt.Sprintf(`{"filter":{"version":1,"tags":[{"scope":"personal","group_id":"genre","include_ids":[%q]}]}}`, personal.ID), 0)
-	if w.Code != 404 || strings.Contains(w.Body.String(), personal.Name) {
+	if w.Code != 409 || !strings.Contains(w.Body.String(),"FILTER_REFERENCE_INVALID") || strings.Contains(w.Body.String(), personal.Name) {
 		t.Fatal(w.Code, w.Body)
 	}
 	w = mailRequest(a, adminToken, "POST", "/api/v2/track-facets", `{"filter":{"version":1},"scope":"personal","group_id":"genre"}`, 0)

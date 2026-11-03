@@ -106,12 +106,15 @@ func resolveFilterTag(reader sqlReader, actor User, id, scopeID, groupID string)
 		seen[id] = true
 		tag, err := readTag(reader, id)
 		if err != nil {
-			if errors.Is(err, errResourceHidden) && hop > 0 {
+			if errors.Is(err, errResourceHidden) {
 				return "", errFilterReference
 			}
 			return "", err
 		}
 		if err := authorizeTag(actor, tag, false); err != nil {
+			if errors.Is(err, errResourceHidden) {
+				return "", errFilterReference
+			}
 			return "", err
 		}
 		if tag.scopeID != scopeID || tag.GroupID != groupID {

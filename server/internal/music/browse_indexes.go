@@ -16,6 +16,7 @@ func initializeBrowseIndexes(db *sql.DB) error {
 	defer tx.Rollback()
 	if _, err = tx.Exec(`CREATE INDEX IF NOT EXISTS tracks_cover_lookup ON tracks(json_extract(payload,'$.cover_id'));
  CREATE INDEX IF NOT EXISTS playlists_cover_lookup ON playlists(json_extract(payload,'$.cover_id'));
+	CREATE INDEX IF NOT EXISTS audit_public_contributions ON audit(user_id,created_at DESC) WHERE action='tag.create' AND json_extract(changes,'$.after.scope')='public';
  INSERT OR IGNORE INTO meta(key,value) VALUES('browse/epoch',lower(hex(randomblob(16)))),('browse/library','0'),('browse/admin','0');`); err != nil {
 		return err
 	}

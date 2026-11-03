@@ -129,7 +129,7 @@ func TestTrackFilterPrivateScopeBaselineAndStablePages(t *testing.T) {
 	u, session, _ := s.sessionIdentity(token)
 	other := authContext{session: true, userID: u.ID, keyID: session.ID, authVersion: u.AuthVersion, role: u.Role}
 	private := TrackFilter{Version: 1, Tags: []TrackTagClause{{Scope: "personal", GroupID: "scene", IncludeIDs: []string{tags["night"].ID}}}}
-	if _, err := s.QueryTrackFilter(other, TrackFilterQuery{Filter: private}); !errors.Is(err, errResourceHidden) {
+	if _, err := s.QueryTrackFilter(other, TrackFilterQuery{Filter: private}); !errors.Is(err, errFilterReference) {
 		t.Fatal("private tag leaked", err)
 	}
 	if _, err := s.QueryTrackFilter(other, TrackFilterQuery{Filter: f, Baseline: &p1.Baseline}); !errors.Is(err, errFilterSnapshot) {
@@ -365,11 +365,11 @@ func TestTrackFilterMergedContradictionAndInvalidPrivateReferences(t *testing.T)
 		t.Fatal(err)
 	}
 	f.Tags[0].IncludeIDs = []string{uuid.NewString()}
-	if _, err := s.QueryTrackFilter(auth, TrackFilterQuery{Filter: f}); !errors.Is(err, errResourceHidden) {
+	if _, err := s.QueryTrackFilter(auth, TrackFilterQuery{Filter: f}); !errors.Is(err, errFilterReference) {
 		t.Fatal(err)
 	}
 	f.Tags[0].Scope = "public"
-	if _, err := s.QueryTrackFilter(auth, TrackFilterQuery{Filter: f}); !errors.Is(err, errResourceHidden) {
+	if _, err := s.QueryTrackFilter(auth, TrackFilterQuery{Filter: f}); !errors.Is(err, errFilterReference) {
 		t.Fatal("nonexistent public UUID reveals private existence", err)
 	}
 	encoded, _ := json.Marshal(page)

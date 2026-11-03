@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -64,7 +65,12 @@ func tagGroupID(id string) bool {
 
 func writeTagError(w http.ResponseWriter, err error) {
 	if errors.Is(err, errTagContributionBudget) {
-		w.Header().Set("Retry-After", "3600")
+		seconds := 3600
+		var retry *tagContributionRetry
+		if errors.As(err, &retry) {
+			seconds = max(1, int((time.Until(retry.until)+time.Second-1)/time.Second))
+		}
+		w.Header().Set("Retry-After", strconv.Itoa(seconds))
 		writeError(w, 429, "TAG_CONTRIBUTION_LIMIT", err.Error())
 		return
 	}

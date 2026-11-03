@@ -97,7 +97,7 @@ func main() {
 		if backgroundBlocked() {
 			return nil
 		}
-		return errors.Join(store.CleanupUploadStages(), store.CleanupListeningStatistics())
+		return errors.Join(store.CleanupUploadStages(), store.CleanupListeningStatistics(), store.CleanupTagDictionary())
 	}(); err != nil {
 		log.Printf("clean expired uploads: %v", err)
 		_ = journal.Emit("server.cleanup_failed", activity.Fields{})
@@ -121,6 +121,10 @@ func main() {
 				}
 				if err := store.CleanupListeningStatistics(); err != nil {
 					log.Printf("clean expired listening statistics: %v", err)
+					_ = journal.Emit("server.cleanup_failed", activity.Fields{})
+				}
+				if err := store.CleanupTagDictionary(); err != nil {
+					log.Printf("clean tag dictionary tombstones: %v", err)
 					_ = journal.Emit("server.cleanup_failed", activity.Fields{})
 				}
 			case <-stopCleanup:
