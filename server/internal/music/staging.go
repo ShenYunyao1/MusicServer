@@ -675,11 +675,24 @@ func (s *Store) deleteUploadStageLocked(id string) error {
 		return err
 	}
 	defer root.Close()
+	if s.activeStages[path] {
+		return errResumeBusy
+	}
+	if info, e := root.Lstat(path); e != nil && !errors.Is(e, os.ErrNotExist) {
+		return e
+	} else if e == nil && !info.Mode().IsRegular() {
+		return errors.New("staging path is not a regular file")
+	}
+	if err := s.transaction(func(tx *sql.Tx) error {
+		_, err := tx.Exec("DELETE FROM upload_staging WHERE id=? AND temp_path=?", id, path)
+		return err
+	}); err != nil {
+		return err
+	}
 	if err := root.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	_, err = s.db.Exec(`DELETE FROM upload_staging WHERE id = ?`, id)
-	return err
+	return nil
 }
 
 func (s *Store) CleanupUploadStages() error {

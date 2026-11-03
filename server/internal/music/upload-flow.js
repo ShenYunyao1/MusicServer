@@ -29,6 +29,7 @@ async function startUploadFlow(items=state.uploads.filter(uploadFlowPending)){
   const policy=await api('uploads/preflight');if(!uploadFlowCurrent(owner,epoch))return;
   if(!policy.upload_allowed)throw new Error('请先完成邮箱验证，再上传');
   $('uploadPreflightNotice').textContent=policy.limit_bytes&&queue.reduce((n,u)=>n+(u.stageId||u.resumeId?0:u.file.size),0)>policy.limit_bytes-policy.used_bytes-(policy.pending_bytes||0)?'剩余额度可能不足（包含待处理上传预留），请先完成或取消现有任务，或联系管理员调整额度。重复文件接收前也需要临时额度。':'';
+  if(policy.metadata_budget){const budget=policy.metadata_budget;$('uploadPreflightNotice').textContent+=($('uploadPreflightNotice').textContent?' ':'')+'上传任务记录 '+formatBytes(budget.used_bytes)+' / '+formatBytes(budget.limit_bytes)+'（恢复信息 '+formatBytes(budget.retained_bytes)+'）。'+(budget.used_bytes>=budget.limit_bytes?'请先完成或取消未确认任务。':'')}
   let active=0;const waiters=[],jobs=new Set();
   const acquire=async()=>{if(active>=concurrency)await new Promise(resolve=>waiters.push(resolve));active++;let released=false;return()=>{if(released)return;released=true;active--;waiters.shift()?.()}};
   const process=async(upload,release)=>{upload.flowReleaseTransfer=release;try{

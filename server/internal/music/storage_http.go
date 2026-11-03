@@ -18,6 +18,11 @@ func uploadInterrupted(err error) bool {
 }
 
 func writeStorageError(w http.ResponseWriter, err error) bool {
+	if errors.Is(err, errUploadMetadataLimit) {
+		w.Header().Set("Retry-After", "60")
+		writeError(w, 429, "UPLOAD_METADATA_LIMIT", err.Error())
+		return true
+	}
 	if errors.Is(err, errUploadSession) {
 		writeError(w, 401, "AUTH_INVALID", "current login is no longer valid")
 		return true

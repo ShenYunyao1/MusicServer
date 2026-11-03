@@ -12,7 +12,8 @@ import (
 func (s *Store) discardAccountTemporary(id string, options MutationOptions) error {
 	s.stageMu.Lock()
 	defer s.stageMu.Unlock()
-	return s.transaction(func(tx *sql.Tx) error {
+	var discarded []string
+	err := s.transaction(func(tx *sql.Tx) error {
 		if err := requireAdminActor(tx, []MutationOptions{options}); err != nil {
 			return err
 		}
@@ -60,18 +61,11 @@ func (s *Store) discardAccountTemporary(id string, options MutationOptions) erro
 				return errAccountHasResources
 			}
 		}
-		root, err := os.OpenRoot(s.mediaRoot)
-		if err != nil {
-			return err
-		}
-		defer root.Close()
 		for _, stage := range stages {
-			if err := root.Remove(stage.path); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
 			if _, err := tx.Exec("DELETE FROM upload_staging WHERE id=? AND user_id=?", stage.id, id); err != nil {
 				return err
 			}
+			discarded = append(discarded, stage.path)
 		}
 		rows, err = tx.Query("SELECT key FROM meta WHERE key LIKE 'upload_resume/%' AND CASE WHEN json_valid(value) THEN json_extract(value,'$.owner') END=?", id)
 		if err != nil {
@@ -103,4 +97,21 @@ func (s *Store) discardAccountTemporary(id string, options MutationOptions) erro
 		}
 		return nil
 	})
+	if err != nil || len(discarded) == 0 {
+		return err
+	}
+	root, err := os.OpenRoot(s.mediaRoot)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	var failures []error
+	for _, path := range discarded {
+		if err := root.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			failures = append(failures, err)
+		}
+	}
+	// The ordinary stage sweep recognizes generated orphan names and retries a
+	// post-commit filesystem failure; a SQL rollback never removes live bytes.
+	return errors.Join(failures...)
 }

@@ -54,7 +54,7 @@ func (a *API) uploadPreflight(w http.ResponseWriter, r *http.Request) bool {
 		writeResumeError(w, err)
 		return true
 	}
-	writeJSON(w, 200, map[string]any{"max_upload_bytes": a.store.Settings().MaxUploadBytes, "used_bytes": usage.committed, "pending_bytes": usage.own, "limit_bytes": usage.quota.LimitBytes, "upload_allowed": checkUploadEmailPolicy(a.store.readDatabase(), auth.userID) == nil})
+	writeJSON(w, 200, map[string]any{"max_upload_bytes": a.store.Settings().MaxUploadBytes, "used_bytes": usage.committed, "pending_bytes": usage.own, "limit_bytes": usage.quota.LimitBytes, "metadata_budget": usage.metadata, "upload_allowed": checkUploadEmailPolicy(a.store.readDatabase(), auth.userID) == nil})
 	return true
 }
 

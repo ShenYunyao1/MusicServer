@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -173,6 +174,7 @@ func readResume(reader sqlReader, id string) (resumableUpload, error) {
 }
 
 func saveResume(tx *sql.Tx, task resumableUpload, limits ...temporaryUploadLimits) error {
+	task = compactTerminalResume(task)
 	encoded, err := json.Marshal(resumableCheckpoint{task, task.OwnerID, task.Preview})
 	if err != nil {
 		return err
@@ -186,6 +188,19 @@ func saveResume(tx *sql.Tx, task resumableUpload, limits ...temporaryUploadLimit
 	}
 	_, err = tx.Exec("INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", resumableMetaPrefix+task.ID, string(encoded))
 	return err
+}
+
+func compactTerminalResume(task resumableUpload) resumableUpload {
+	if task.State == "ready" || task.State == "canceled" {
+		task.Chunks = []resumableChunk{}
+		task.Fields = nil
+		task.Attachments = nil
+		// The staged row remains authoritative for editable preview metadata.
+		if task.Preview != nil {
+			task.Preview = &UploadPreview{ID: task.Preview.ID, ExpiresAt: task.Preview.ExpiresAt}
+		}
+	}
+	return task
 }
 
 func (s *Store) resumeIDs() ([]string, error) {
@@ -928,12 +943,29 @@ func (s *Store) InitializeResumableUploads() error {
 // CleanupResumableUploads skips a task while a chunk/finish/cancel owns its lock.
 // The resume subdirectory is deliberately excluded from normal stage sweeping.
 func (s *Store) CleanupResumableUploads() error {
-	if err := s.cleanupUploadReceipts(); err != nil {
-		return err
+	return s.cleanupResumableUploads("")
+}
+func (s *Store) cleanupResumableUploads(owner string) error {
+	if owner == "" {
+		if err := s.cleanupUploadReceipts(); err != nil {
+			return err
+		}
 	}
 	ids, err := s.resumeIDs()
 	if err != nil {
 		return err
+	}
+	if owner != "" {
+		var owned []string
+		for _, id := range ids {
+			var user string
+			if e := s.readDatabase().QueryRow("SELECT COALESCE(CASE WHEN json_valid(value) THEN json_extract(value,'$.owner') END,'') FROM meta WHERE key=?", resumableMetaPrefix+id).Scan(&user); e == nil && user == owner {
+				owned = append(owned, id)
+			} else if e != nil && !errors.Is(e, sql.ErrNoRows) {
+				return e
+			}
+		}
+		ids = owned
 	}
 	retained := map[string]bool{}
 	var cleanupErrors []error
@@ -952,6 +984,9 @@ func (s *Store) CleanupResumableUploads() error {
 		retained[id+".part"] = true
 		lock := resumableLock(id)
 		if !lock.TryLock() {
+			if owner != "" {
+				cleanupErrors = append(cleanupErrors, errAccountHasResources)
+			}
 			continue
 		}
 		task, e := readResume(s.db, id)
@@ -969,13 +1004,15 @@ func (s *Store) CleanupResumableUploads() error {
 				cleanupErrors = append(cleanupErrors, e)
 				continue
 			}
-			_, e = s.db.Exec("DELETE FROM meta WHERE key=?", resumableMetaPrefix+id)
+			e = root.Remove(resumeFilePath(id))
+			if errors.Is(e, os.ErrNotExist) {
+				e = nil
+			}
 			if e == nil {
-				e = root.Remove(resumeFilePath(id))
-				if errors.Is(e, os.ErrNotExist) {
-					e = nil
+				_, e = s.db.Exec("DELETE FROM meta WHERE key=?", resumableMetaPrefix+id)
+				if e == nil {
+					delete(retained, id+".part")
 				}
-				delete(retained, id+".part")
 			}
 		} else if task.State == "ready" || task.State == "canceled" {
 			e = root.Remove(resumeFilePath(id))
@@ -985,11 +1022,17 @@ func (s *Store) CleanupResumableUploads() error {
 			if e == nil && task.State == "canceled" {
 				e = s.removeResumeStage(task)
 			}
+			if e == nil && !reflect.DeepEqual(task, compactTerminalResume(task)) {
+				e = s.transaction(func(tx *sql.Tx) error { return saveResume(tx, task, s.temporaryLimits()) })
+			}
 		}
 		lock.Unlock()
 		if e != nil {
 			cleanupErrors = append(cleanupErrors, e)
 		}
+	}
+	if owner != "" {
+		return errors.Join(cleanupErrors...)
 	}
 	directory, err := root.Open(".staging/resume")
 	if errors.Is(err, os.ErrNotExist) {

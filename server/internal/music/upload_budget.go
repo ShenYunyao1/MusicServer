@@ -16,6 +16,38 @@ import (
 
 var errUploadTemporaryLimit = errors.New("上传临时空间已达上限，请完成或取消待处理任务后重试")
 
+type temporaryMetadataLimitError struct{}
+
+func (temporaryMetadataLimitError) Error() string {
+	return "上传任务记录空间已达上限，请完成或取消未确认任务后重试"
+}
+func (temporaryMetadataLimitError) Unwrap() error { return errUploadTemporaryLimit }
+
+var errUploadMetadataLimit = temporaryMetadataLimitError{}
+
+type temporaryMetadataBudget struct {
+	Used     int64 `json:"used_bytes"`
+	Active   int64 `json:"active_bytes"`
+	Retained int64 `json:"retained_bytes"`
+	Limit    int64 `json:"limit_bytes"`
+}
+
+func readTemporaryMetadataBudget(reader sqlReader, owner string, limit int64) (temporaryMetadataBudget, error) {
+	b := temporaryMetadataBudget{Limit: limit}
+	var err error
+	if storageProjectionReady(reader) {
+		err = reader.QueryRow("SELECT COALESCE((SELECT bytes FROM browse_temp_metadata WHERE owner=?),0)", owner).Scan(&b.Used)
+	} else {
+		err = reader.QueryRow(`SELECT COALESCE(sum(bytes),0) FROM(SELECT length(CAST(track_json AS BLOB)) bytes FROM upload_staging WHERE user_id=? UNION ALL SELECT length(CAST(value AS BLOB)) FROM meta WHERE key LIKE 'upload_resume/%' AND CASE WHEN json_valid(value) THEN json_extract(value,'$.owner') END=?)`, owner, owner).Scan(&b.Used)
+	}
+	if err != nil {
+		return b, err
+	}
+	err = reader.QueryRow(`SELECT COALESCE(sum(length(CAST(value AS BLOB))),0) FROM meta WHERE key LIKE 'upload_resume/%' AND CASE WHEN json_valid(value) THEN json_extract(value,'$.owner') END=? AND CASE WHEN json_valid(value) THEN json_extract(value,'$.state') END IN('ready','canceled')`, owner).Scan(&b.Retained)
+	b.Active = max(int64(0), b.Used-b.Retained)
+	return b, err
+}
+
 type temporaryUploadLimits struct {
 	OwnerBytes, GlobalBytes       int64
 	OwnerMetadata, GlobalMetadata int64
@@ -62,6 +94,7 @@ type temporaryUsageSnapshot struct {
 	charges                map[string]int64
 	identities             map[string]string
 	physical               map[string]int64
+	metadata               temporaryMetadataBudget
 }
 
 func (s *Store) temporaryUploadSnapshot(owner string) (*temporaryUsageSnapshot, error) {
@@ -172,10 +205,14 @@ func (s *Store) temporaryUploadSnapshot(owner string) (*temporaryUsageSnapshot, 
 		return nil, e
 	}
 	own += attachments
+	metadata, e := readTemporaryMetadataBudget(tx, owner, s.temporaryLimits().OwnerMetadata)
+	if e != nil {
+		return nil, e
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return &temporaryUsageSnapshot{global: global, own: own, committed: committed, quota: quota, charges: charges, identities: identities, physical: physicalFiles}, nil
+	return &temporaryUsageSnapshot{global: global, own: own, committed: committed, quota: quota, charges: charges, identities: identities, physical: physicalFiles, metadata: metadata}, nil
 }
 
 func (s *Store) reserveTemporaryUpload(owner, id string, size int64) (func(), error) {
@@ -364,7 +401,7 @@ func checkTemporaryMetadata(reader sqlReader, owner, stageID, resumeID string, b
 		return err
 	}
 	if bytes < 0 || bytes > 32<<20 || bytes > limits.GlobalMetadata || total > limits.GlobalMetadata-bytes || bytes > limits.OwnerMetadata || own > limits.OwnerMetadata-bytes {
-		return errUploadTemporaryLimit
+		return errUploadMetadataLimit
 	}
 	return nil
 }

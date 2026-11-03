@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"log"
 	"os"
 	"path/filepath"
 	"slices"
@@ -230,8 +229,8 @@ func (s *Store) PurgeUser(id string, options MutationOptions) error {
 	}); err != nil {
 		return err
 	}
-	if err := s.CleanupResumableUploads(); err != nil {
-		log.Printf("account purge upload cleanup deferred: %v", err)
+	if err := s.cleanupResumableUploads(id); err != nil {
+		return err
 	}
 	if err := s.discardAccountTemporary(id, options); err != nil {
 		return err

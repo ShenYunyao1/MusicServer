@@ -291,7 +291,7 @@ async function resumeFinishRequest(upload, task, input, owner, epoch) {
     try { return await resumeJSON('/' + task.id + '/finish', 'POST', body, owner, epoch); }
     catch (error) {
       resumeGuard(owner, epoch, upload);
-      if(['UPLOAD_TEMPORARY_LIMIT','STORAGE_QUOTA','STORAGE_LOW','UPLOAD_VERIFY_RETRY'].includes(error.code))throw error;
+      if(['UPLOAD_TEMPORARY_LIMIT','UPLOAD_METADATA_LIMIT','STORAGE_QUOTA','STORAGE_LOW','UPLOAD_VERIFY_RETRY'].includes(error.code))throw error;
       if (retries >= 3 || error.status && ![408, 429, 500, 502, 503, 504].includes(error.status)) throw error;
       upload.status = '恢复服务器校验结果'; renderUploads(); await resumeWait(300 * 2 ** retries, upload);
       resumeGuard(owner, epoch, upload);
