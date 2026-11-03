@@ -2,10 +2,10 @@
 
 ## 当前 schema 8→9 阶段
 
-schema 8 桥接候选为 **0.21.16**，参见 [schema 9 升级与数据保留](schema9-upgrade.md)。仅在正式 Release 已通过签名和摘要核验后使用：先安装 0.21.16 主程序，再由维护者从已验签的同版本 Linux 包执行以下命令，核对能力后才能安装 schema 9。`schema9-bridge.json` 的锁定提交用于后续 schema 9 发行，不可拿测试程序代替正式资产。
+schema 8 桥接候选为 **0.21.17**，参见 [schema 9 升级与数据保留](schema9-upgrade.md)。仅在正式 Release 已通过签名和摘要核验后使用：先安装 0.21.17 主程序，再由维护者从已验签的同版本 Linux 包执行以下命令，核对能力后才能安装 schema 9。`schema9-bridge.json` 的锁定提交用于后续 schema 9 发行，不可拿测试程序代替正式资产。
 
 ```sh
-sudo ./musicserver-updater -config /etc/musicserver/updater.json -refresh-worker 0.21.16
+sudo ./musicserver-updater -config /etc/musicserver/updater.json -refresh-worker 0.21.17
 ```
 
 执行前保留备份，确认没有活动安装／回退或未知维护标记；包需固定公钥验签并核对大小／SHA-256，解包目录需 root 拥有且组／其他用户不可写。完成后检查 `/var/lib/musicserver-update/capabilities.json` 的版本、正式提交以及 8→9 能力。网页只替换主程序，不替换独立 worker；这些步骤由维护者执行。

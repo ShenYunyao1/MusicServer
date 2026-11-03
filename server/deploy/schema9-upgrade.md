@@ -1,6 +1,6 @@
 # schema 8 → 9 升级与数据保留
 
-本文件随发行包提供。schema 8 桥接候选为 **v0.21.16**；其正式签名资产通过验收后，再锁定 `schema9-bridge.json` 的真实 tag／commit 并发行 schema 9。字段留空时 schema 9 标签发行门禁必须失败。开发构建和分支产物不代表正式可安装版本。
+本文件随发行包提供。schema 8 桥接候选为 **v0.21.17**；其正式签名资产通过验收后，再锁定 `schema9-bridge.json` 的真实 tag／commit 并发行 schema 9。字段留空时 schema 9 标签发行门禁必须失败。开发构建和分支产物不代表正式可安装版本。
 
 ## 已有 schema 8 安装
 

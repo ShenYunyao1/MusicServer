@@ -86,7 +86,7 @@ func testSystemdRealApplicationAndRollback(t *testing.T, baselineSchema int) {
 	if baselineSchema == 8 {
 		targetSchema = version.Schema
 	}
-	next := Manifest{Version: newVersion, Commit: strings.Repeat("2", 40), Schema: targetSchema, MigrateFrom: []int{baselineSchema}}
+	next := Manifest{Version: newVersion, Commit: strings.Repeat("2", 40), Schema: targetSchema, MigrateFrom: version.MigrationSources(targetSchema)}
 	prepared := map[string]string{}
 	prepare := func(_ context.Context, v string) (Manifest, string, error) {
 		m, binary := next, newBinary

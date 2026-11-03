@@ -1,5 +1,5 @@
-# MusicServer v0.21.16
-<!-- musicserver-release: {"version":"0.21.16","schema":8,"status":"stable"} -->
+# MusicServer v0.21.17
+<!-- musicserver-release: {"version":"0.21.17","schema":8,"status":"stable"} -->
 
 本版为 schema 8 桥接版本，包含累计审查修复，并为后续 schema 9 升级提供主程序和独立更新器能力。保留现有账号、密码、Key、曲目 UUID、歌单、标签和媒体，不需要重新导入。首次安装仍创建 schema 8；本版尚不启用“我常听的”统计，统计接口明确返回 501 LISTENING_DISABLED。已经使用 schema 9 的数据目录不可安装或回退到本版。
 
@@ -13,12 +13,12 @@
 
 ## schema 8→9 升级顺序
 
-1. 先备份数据库、媒体、配置和受限邮件凭据，在网页安装 **0.21.16 主程序**，确认健康页版本和 schema 8。
+1. 先备份数据库、媒体、配置和受限邮件凭据，在网页安装 **0.21.17 主程序**，确认健康页版本和 schema 8。
 2. 网页更新不会更换独立 root 更新器。维护者下载本 Release 的四个固定资产，以既有可信公钥验清单签名，并核对 Linux 包大小和 SHA-256；解包到 root 拥有且组／其他用户不可写的目录。
 3. 确认没有活动安装、回退或维护任务。未知中断状态应保留标记并诊断，不删除标记强行升级。在已验证的解包目录执行：
 
 ```sh
-sudo ./musicserver-updater -config /etc/musicserver/updater.json -refresh-worker 0.21.16
+sudo ./musicserver-updater -config /etc/musicserver/updater.json -refresh-worker 0.21.17
 ```
 
 4. 核对 `/var/lib/musicserver-update/capabilities.json` 的版本／提交与本 Release 一致，包含 schema 8、9 及 8→9 迁移能力；确认恢复 timer／path 正常。之后才检查并安装更高版本的 schema 9 正式发行。
