@@ -24,7 +24,7 @@ func TestSchemaPolicyBridgeIsFiniteAndDirected(t *testing.T) {
 	if MigrationSources(8)[0] != 7 {
 		t.Fatal("caller mutated the schema policy")
 	}
-	if Schema != 9 {
-		t.Fatal("listening release must activate schema 9")
+	if Schema != 8 && Schema != 9 {
+		t.Fatal("current release must be schema-8 bridge or schema-9 listening release")
 	}
 }

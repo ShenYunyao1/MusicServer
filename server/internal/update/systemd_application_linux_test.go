@@ -18,6 +18,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"musicserver/internal/version"
 )
 
 // Exercise the actual application's startup migration under a restricted,
@@ -82,7 +84,7 @@ func testSystemdRealApplicationAndRollback(t *testing.T, baselineSchema int) {
 	old := Manifest{Version: oldVersion, Commit: strings.Repeat("1", 40), Schema: baselineSchema}
 	targetSchema := 8
 	if baselineSchema == 8 {
-		targetSchema = 9
+		targetSchema = version.Schema
 	}
 	next := Manifest{Version: newVersion, Commit: strings.Repeat("2", 40), Schema: targetSchema, MigrateFrom: []int{baselineSchema}}
 	prepared := map[string]string{}

@@ -150,7 +150,7 @@ func TestListeningSessionAdmissionAndRetention(t *testing.T) {
 
 func listeningFixture(t *testing.T) (*API, User, authContext, string) {
 	t.Helper()
-	a, _ := testAPI(t)
+	a, _ := testAPIForSchema(t, 9)
 	u, _ := readyMember(t, a, "listening-alice")
 	var exists int
 	if err := a.store.db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name='listening_sessions'").Scan(&exists); err != nil {

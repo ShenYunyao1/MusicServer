@@ -75,6 +75,7 @@ jobs:
         run: |
           go test -race ./internal/update -count=1 -timeout 120s
           go test -race ./internal/music -run '^TestListening|^TestTemporaryUpload' -count=1 -timeout 90s
+          go test -race ./internal/music -run '^TestRound[23]' -count=1 -timeout 180s
           go test -race ./internal/music -run '^TestScan|^TestAssetDirectory|^TestExactArtwork|^TestDirectoryBytes|^TestRestore|^TestLegacySQLite|^TestPermanent' -count=1 -timeout 90s
           go test -race ./internal/music -run '^TestAudit(KnownEndpointMethods|JSONPlaylistConflicts|RevokedSessionCannot|BackupCancellation|AdminPlayback|RevokedDuringMultipart|MultipartBodyLimit)|^TestSystemLogs' -count=1 -timeout 90s
           go test -race ./internal/music -run '^TestPlayback|^TestRealtime|^TestAccountDeletion|^TestKeyDeletion|^TestStorage|^TestManagedBackup|^TestBackup|^TestResumable|^TestBrowse|^TestObjectSync|^TestMail|^TestEmail|^TestRegistration|^TestAccountStorage|^TestUploadEmailPolicy|^TestSchemaMigration|^TestTag|^TestTrackTag|^TestTrackFilter|^TestSavedTrackFilter' -count=1 -timeout 240s
@@ -190,8 +191,14 @@ jobs:
             python tests/test-admin-terminal.py
             python tests/test-schema-upgrade-history.py
             python tests/test-schema-preview.py
-            python tests/build-schema-preview.py
-            python tests/schema-upgrade-process.py --old-server build/schema-preview/released/musicserver --bridge-server build/schema-preview/musicserver --new-server build/musicserver --from-schema 8 --to-schema 9
+            SCHEMA=$(sed -nE 's/^[[:space:]]*Schema[[:space:]]*=[[:space:]]*([0-9]+).*$/\1/p' internal/version/version.go)
+            if [ "$SCHEMA" = 9 ]; then
+              python tests/build-schema-preview.py
+              python tests/schema-upgrade-process.py --old-server build/schema-preview/released/musicserver --bridge-server build/schema-preview/musicserver --new-server build/musicserver --from-schema 8 --to-schema 9
+            else
+              test "$SCHEMA" = 8
+              python tests/schema-upgrade-process.py --old-server build/schema-preview/released/musicserver --new-server build/musicserver --from-schema 8 --to-schema 8
+            fi
             MUSIC_SERVER_TEST_TAG_BACKUP_ONLY=1 node tests/management-ui.cjs
             node tests/tag-editor-ui.cjs
             node tests/tagger-ui.cjs
@@ -239,7 +246,6 @@ jobs:
       fail-fast: false
       matrix:
         player: [33da837016e01419db3200bb0adcc58aae179c56, f36c07dbe7f3890080b0290dd4ad32bb7729711d]
-        schema: [9]
     defaults:
       run:
         shell: pwsh
@@ -292,11 +298,14 @@ jobs:
           $candidateVersion = go run ./cmd/release -version
           if ($LASTEXITCODE -ne 0) { throw 'Cannot read candidate identity' }
           $candidateBinary = '../server-source/server/build/musicserver.exe'
+          $candidateSchema = [regex]::Match((Get-Content -Raw internal/version/version.go), '(?m)^\s*Schema\s*=\s*([89])\s*$').Groups[1].Value
+          if (!$candidateSchema) { throw 'Candidate must declare schema 8 or 9' }
           "version=$candidateVersion" >> $env:GITHUB_OUTPUT
+          "schema=$candidateSchema" >> $env:GITHUB_OUTPUT
           "binary=$candidateBinary" >> $env:GITHUB_OUTPUT
           "server=$(git rev-parse HEAD)" >> $env:GITHUB_STEP_SUMMARY
           "player=${{ matrix.player }}" >> $env:GITHUB_STEP_SUMMARY
-          "schema=${{ matrix.schema }} (current candidate without overlay)" >> $env:GITHUB_STEP_SUMMARY
+          "schema=$candidateSchema (current candidate without overlay)" >> $env:GITHUB_STEP_SUMMARY
         env:
           CGO_ENABLED: '0'
       - name: Real WinHTTP TLS, cache and two-ended integration
@@ -306,7 +315,7 @@ jobs:
             -ServerBinary '${{ steps.candidate.outputs.binary }}' `
             -ServerSource '../server-source/server' `
             -ExpectedServerVersion '${{ steps.candidate.outputs.version }}' `
-            -ExpectedServerSchema ${{ matrix.schema }}
+            -ExpectedServerSchema ${{ steps.candidate.outputs.schema }}
 
   package:
     timeout-minutes: 15

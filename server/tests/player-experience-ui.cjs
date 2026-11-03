@@ -15,6 +15,12 @@ module.exports=async({page,tracks,directory})=>{
  await page.locator('#onlineLyricsToggle').click();await page.locator('#onlineLyricsExpand').click();assert.equal(await page.locator('.online-lyric-line').count(),3,'Changing track restores its actual lyrics');const panel=await page.locator('#onlineLyricsPanel').boundingBox(),bar=await page.locator('#previewBar').boundingBox();assert.ok(panel.y>=45&&panel.y+panel.height<bar.y);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
  if(directory)await page.screenshot({path:path.join(directory,'player-expanded-low-volume-mobile.png')});
  await page.evaluate(async()=>{setOnlineLyricsExpanded(false);await setOnlineVolume(.4);memberPlayer.pause();showOnlineLyrics(false)});await page.setViewportSize({width:1440,height:1100});
+ const listeningEnabled=await page.evaluate(()=>document.documentElement.dataset.listeningEnabled==='true');
+ if(!listeningEnabled){
+  const status=await page.evaluate(async()=>{const r=await fetch('/api/v2/listening/tracks');return {status:r.status,code:(await r.json()).error.code}});
+  assert.deepEqual(status,{status:501,code:'LISTENING_DISABLED'});assert.equal(await page.locator('[href="#/listening"]').count(),0);
+  console.log('Schema-8 bridge player experience PASS: lyrics/gain retained; statistics navigation absent and endpoint explicitly disabled');return;
+ }
  await page.evaluate(track=>playTrack({...track,detail_loaded:true}),tracks.song);await page.waitForFunction(()=>currentListening?.counted,{},{timeout:18000});await page.evaluate(()=>memberPlayer.pause());
  await page.goto(new URL('/#/listening',page.url()).href);await page.locator('#listeningRows .track-title').first().waitFor();assert.match(await page.locator('#listeningRows').textContent(),/次/);await page.locator('#listeningRange').selectOption('7d');await page.waitForFunction(()=>location.hash.includes('range=7d')&&document.querySelector('#listeningRows .track-title'));await page.locator('#listeningPageSize').selectOption('30');await page.waitForFunction(()=>location.hash.includes('limit=30'));await page.locator('#listeningPagerTop nav').waitFor();assert.equal(await page.locator('#listeningPagerTop nav').count(),1);assert.equal(await page.locator('#listeningPagerBottom nav').count(),1);
  console.log('Player experience PASS: expanded bilingual browsing, drag/seek separation, click-to-play, compact restore and real gain attenuation/persistence/mobile controls');

@@ -133,7 +133,7 @@ func TestListeningBackupRestoreFrom8To9(t *testing.T) {
 }
 
 func TestListeningBackupRestoreNineRetainsPrivateCounts(t *testing.T) {
-	api, _ := testAPI(t)
+	api, _ := testAPIForSchema(t, 9)
 	user, _ := readyMember(t, api, "restore-listening")
 	ids := browseSeedTracks(t, api, user.ID, user.ID, 1)
 	for _, query := range []string{
