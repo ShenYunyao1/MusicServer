@@ -158,9 +158,22 @@ jobs:
             sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 install -y --no-install-recommends ffmpeg
           fi
       - name: Build isolated server
+        # A real output sink is required by Firefox MediaElementSource/WebAudio.
+        # Without one the runner reports OnMediaSinkAudioError and resume stalls.
+        # The null sink consumes real decoded audio; playback assertions stay intact.
         run: go build -trimpath -buildvcs=true -o build/musicserver ./cmd/musicserver
         env:
           CGO_ENABLED: '0'
+      - name: Start isolated browser audio output
+        if: matrix.suite == 'management'
+        timeout-minutes: 4
+        run: |
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 install -y --no-install-recommends pulseaudio pulseaudio-utils
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=musicserver_test rate=48000
+          pactl set-default-sink musicserver_test
+          pactl info
+          pactl list short sinks
       - name: Build the released schema-8 baseline
         if: matrix.suite == 'tags'
         working-directory: schema8-baseline/server
