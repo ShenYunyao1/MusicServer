@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"musicserver/internal/version"
 )
 
 func TestSchemaActivationNormalStartupMigratesOldDatabaseWithSnapshot(t *testing.T) {
@@ -16,6 +18,13 @@ func TestSchemaActivationNormalStartupMigratesOldDatabaseWithSnapshot(t *testing
 		t.Fatal(err)
 	}
 	defer closeStoreForTest(t, current)
+	if version.Schema == 8 {
+		assertMigrationSchema(t, current.db, 8)
+		if len(listeningMigrationBackupFiles(t, current)) != 0 || !reflect.DeepEqual(before, migrationSnapshot(t, current.db)) {
+			t.Fatal("bridge startup migrated or changed legacy business rows")
+		}
+		return
+	}
 	assertMigrationSchema(t, current.db, 9)
 	snapshots := listeningMigrationBackupFiles(t, current)
 	if len(snapshots) != 1 {
@@ -41,13 +50,13 @@ func TestSchemaActivationNewDatabaseUsesCurrentSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer closeStoreForTest(t, s)
-	assertMigrationSchema(t, s.db, 9)
+	assertMigrationSchema(t, s.db, version.Schema)
 	if len(listeningMigrationBackupFiles(t, s)) != 0 {
 		t.Fatal("new database created a migration backup")
 	}
 }
 
-func TestSchemaActivationNormalStartupFailureLeavesLegacyUsable(t *testing.T) {
+func TestSchemaActivationExplicitNineFailureLeavesLegacyUsable(t *testing.T) {
 	s, path, _ := seedStoreForSchema(t, 8)
 	media := s.mediaRoot
 	before := migrationSnapshot(t, s.db)
@@ -55,7 +64,7 @@ func TestSchemaActivationNormalStartupFailureLeavesLegacyUsable(t *testing.T) {
 		t.Fatal(err)
 	}
 	closeStoreForTest(t, s)
-	if current, err := NewStore(path, media); err == nil {
+	if current, err := newStoreForSchema(path, media, 9); err == nil {
 		current.Close()
 		t.Fatal("fault-injected normal startup succeeded")
 	}
@@ -74,7 +83,7 @@ func TestSchemaActivationNormalStartupFailureLeavesLegacyUsable(t *testing.T) {
 	if _, err := db.Exec("DROP TRIGGER reject_schema_nine"); err != nil {
 		t.Fatal(err)
 	}
-	current, err := NewStore(path, media)
+	current, err := newStoreForSchema(path, media, 9)
 	if err != nil {
 		t.Fatal(err)
 	}

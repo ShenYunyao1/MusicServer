@@ -153,6 +153,9 @@ func manifestArchive(t *testing.T, manifest BackupManifest) []byte {
 func TestUnsupportedBackupSchemaIsDistinctFromCorruptManifest(t *testing.T) {
 	a, _ := testAPI(t)
 	manifest := BackupManifest{Format: 1, ID: "b0e3e30d-00be-4fdd-bc75-398e3a21f321", CreatedAt: time.Now(), Schema: 7, Files: []BackupFile{{Path: "database.sqlite", Size: 1, SHA256: strings.Repeat("a", 64)}, {Path: "config.json", Size: 1, SHA256: strings.Repeat("b", 64)}}}
+	if version.Schema == 8 {
+		manifest.Schema = 9
+	} // A future-format archive is not a corrupt archive either.
 	for _, corrupt := range []bool{false, true} {
 		if corrupt {
 			manifest.Files[0].Path = "../escape"
@@ -162,7 +165,7 @@ func TestUnsupportedBackupSchemaIsDistinctFromCorruptManifest(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, readErr := readBackupManifestForTarget(tar.NewReader(compressed), 9)
+		_, readErr := readBackupManifestForTarget(tar.NewReader(compressed), version.Schema)
 		compressed.Close()
 		var schemaErr *backupSchemaError
 		if readErr == nil || errors.As(readErr, &schemaErr) == corrupt {
@@ -177,7 +180,7 @@ func TestUnsupportedBackupSchemaIsDistinctFromCorruptManifest(t *testing.T) {
 				t.Fatal(err)
 			}
 			items, err := a.store.BackupArchives()
-			if err != nil || len(items) != 1 || !strings.Contains(items[0].Warning, "隔离") || items[0].Error != "" {
+			if err != nil || len(items) != 1 || items[0].Warning != readErr.Error() || items[0].Error != "" {
 				t.Fatal("list mislabels historical schema", items, err)
 			}
 		}
