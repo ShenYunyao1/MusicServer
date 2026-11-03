@@ -37,6 +37,14 @@ type temporaryUploadReservation struct {
 	size      int64
 }
 
+func temporaryPendingBytes(reader sqlReader, owner string) (int64, error) {
+	var total int64
+	err := reader.QueryRow(`SELECT COALESCE(sum(size),0) FROM (SELECT id,MAX(size) size FROM (
+ SELECT id,size FROM upload_staging WHERE user_id=?
+ UNION ALL SELECT substr(key,15),CASE WHEN json_extract(value,'$.state')='uploading' THEN COALESCE(json_extract(value,'$.size'),0) ELSE COALESCE(json_extract(value,'$.offset'),0) END FROM meta WHERE key LIKE 'upload_resume/%' AND json_valid(value) AND json_extract(value,'$.owner')=? AND json_extract(value,'$.state') NOT IN ('ready','canceled')) GROUP BY id)`, owner, owner).Scan(&total)
+	return total, err
+}
+
 // Admission uses a separate lock, never the database write lock. Existing files
 // (including failed cleanup), full pending resume sizes and in-flight writes all
 // count. No byte budget is released merely by marking a checkpoint canceled.

@@ -8,6 +8,9 @@ module.exports=async({page,base})=>{
  await page.goto(base+'/#/playlists?q=not-an-audit-target');await page.waitForFunction(()=>browseState.playlists?.items.length===0);
  await page.goto(base+'/#/uploads');await page.waitForFunction(id=>document.querySelector('#uploadTargetPlaylist').value===id,playlists[0].id);assert.equal(await page.evaluate(()=>state.uploads[0].targetPlaylistID),playlists[0].id,'A restored draft preserves its explicitly selected destination');
  await page.fill('#uploadTargetSearch','Audit target 52');await page.waitForFunction(()=>uploadTargetCatalog.total===1);await page.selectOption('#uploadTargetPlaylist',playlists[52].id);assert.equal(await page.evaluate(()=>state.uploads[0].targetPlaylistID),playlists[52].id);
+ const assignedTrack=await page.evaluate(()=>{const u=state.uploads[0],track=state.tracks[0];Object.assign(u,{status:'完成',commitResult:{track},targetPlaylistID:'',targetNeedsSelection:true,targetLocked:false,assignmentError:'旧任务目标未知',playlistAssigned:false});renderUploads();return track.id});
+ await page.getByRole('button',{name:'改为当前目标并重试',exact:true}).click();await page.waitForFunction(()=>state.uploads[0].playlistAssigned===true);
+ assert.equal(await page.evaluate(()=>state.uploads[0].targetNeedsSelection),false);assert.ok(await page.evaluate(async({playlist,track})=>(await api('playlists/'+playlist)).playlist.track_ids.includes(track),{playlist:playlists[52].id,track:assignedTrack}));
  await page.goto(base+'/#/playlists/'+playlists[0].id);await page.waitForFunction(()=>state.playlistDetailId!==null);await page.evaluate(()=>applyTrackFilter({version:1,q:'First',range:'all'}));await page.waitForFunction(()=>state.page==='tracks'&&location.hash.startsWith('#/library'));assert.equal(new URLSearchParams((await page.evaluate(()=>location.hash)).split('?')[1]).get('q'),'First');
  const member=await page.evaluate(()=>api('admin/users','POST',{username:'audit-resource-tabs',quota_bytes:0,email_verification_required:false}));
  await page.goto(base+'/#/admin/users/'+member.user.id+'?kind=keys');await page.waitForFunction(()=>state.userResourceKind==='keys');await page.locator('[data-resource-kind="owned"]').waitFor();
@@ -22,6 +25,8 @@ module.exports=async({page,base})=>{
    if($('trackDetails').querySelector('h3').textContent!=='Fast B')throw new Error('stale detail replaced newer full record');
    const second=openTrackDetails({...full,detail_loaded:false});await openPlaylistTrackDetails(p,{id:'unavailable'},true);release(full);await second;
    if($('trackDetails').querySelector('h3').textContent!=='不可用曲目')throw new Error('stale detail replaced unavailable record');
+   const third=openTrackDetails({...full,detail_loaded:false});playOnlineTrack({...state.tracks[0],detail_loaded:true});memberPlayer.pause();release({...full,title:'Detail independent of playback'});await third;
+   if($('trackDetails').querySelector('h3').textContent!=='Detail independent of playback')throw new Error('playback cancelled independent detail');closeOnlinePlayer();
   }finally{browseFullTrack=original;$('trackDetails').close()}
  },playlists[0]);
  await page.goto(base+'/#/admin/overview');await page.waitForFunction(()=>state.page==='overview');

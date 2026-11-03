@@ -21,6 +21,9 @@ func TestAuditTemporaryQuotaIncludesCommittedAndPendingBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if pending, err := temporaryPendingBytes(a.store.db, user.ID); err != nil || pending != int64(len(audio)) {
+		t.Fatal("pending upload quota not exposed", pending, err)
+	}
 	if _, err = a.store.StageAudio("next.wav", bytes.NewReader(audio), nil, MutationOptions{UserID: user.ID}); !errors.Is(err, errStorageQuota) {
 		t.Fatal("pending bytes escaped quota", err)
 	}
@@ -47,6 +50,9 @@ func TestAuditResumePromotionReusesItsReservation(t *testing.T) {
 	release()
 	if _, err = a.store.db.Exec("INSERT INTO meta(key,value) VALUES('upload_resume/invalid','broken json')"); err != nil {
 		t.Fatal(err)
+	}
+	if pending, err := temporaryPendingBytes(a.store.db, user.ID); err != nil || pending != 100 {
+		t.Fatal("preflight failed on unrelated bad checkpoint", pending, err)
 	}
 	release, err = a.store.reserveTemporaryUpload(user.ID, task.ID, 0)
 	if err != nil {

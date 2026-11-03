@@ -142,6 +142,7 @@ function renderPlaylists(){
 }
 function renderPlaylistDetail(p,config={}){
   const readonly=Boolean(p.read_only||config.publicView);
+  if(p.subscription_status&&config.page&&config.page.offset>0&&config.page.offset>=config.page.total){const offset=config.page.total?Math.floor((config.page.total-1)/50)*50:0;location.hash='#/subscriptions/'+encodeURIComponent(p.id)+'?'+new URLSearchParams({offset:String(offset),q:state.playlistTrackQuery||''});return}
   if(readonly&&config.page)p={...p,...(config.page.playlist||{}),browse_page:{...config.page,items:config.tracks||[]}};
   if(!readonly&&typeof browseMemberPlaylist==='function')p=browseMemberPlaylist(p);
   p={...p,playback_source:config.publicView?'public':p.subscription_status?'subscription':'own'};
