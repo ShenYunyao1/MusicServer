@@ -3,6 +3,7 @@ package music
 import (
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -35,10 +36,29 @@ func uploadBodyRequest(r *http.Request) bool {
 type progressBody struct {
 	io.ReadCloser
 	controller *http.ResponseController
+	started    time.Time
+	now        func() time.Time
 }
 
+const maxUploadRequestDuration = 30 * time.Minute
+
 func (b *progressBody) Read(data []byte) (int, error) {
-	_ = b.controller.SetReadDeadline(time.Now().Add(2 * time.Minute))
+	now := time.Now()
+	if b.now != nil {
+		now = b.now()
+	}
+	if b.started.IsZero() {
+		b.started = now
+	}
+	end := b.started.Add(maxUploadRequestDuration)
+	if !now.Before(end) {
+		return 0, os.ErrDeadlineExceeded
+	}
+	deadline := now.Add(2 * time.Minute)
+	if deadline.After(end) {
+		deadline = end
+	}
+	_ = b.controller.SetReadDeadline(deadline)
 	return b.ReadCloser.Read(data)
 }
 

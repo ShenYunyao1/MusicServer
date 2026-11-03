@@ -91,7 +91,7 @@ func (w *deadlineResponse) SetWriteDeadline(deadline time.Time) error { w.write 
 func TestMediaTransferProgressRenewsDeadlines(t *testing.T) {
 	w := &deadlineResponse{ResponseRecorder: httptest.NewRecorder()}
 	controller := http.NewResponseController(w)
-	body := &progressBody{io.NopCloser(strings.NewReader("chunk")), controller}
+	body := &progressBody{ReadCloser: io.NopCloser(strings.NewReader("chunk")), controller: controller}
 	data, err := io.ReadAll(body)
 	if err != nil || string(data) != "chunk" {
 		t.Fatal(string(data), err)
@@ -105,5 +105,22 @@ func TestMediaTransferProgressRenewsDeadlines(t *testing.T) {
 		if left < 119*time.Second || left > 121*time.Second {
 			t.Fatal("wrong idle deadline", left)
 		}
+	}
+}
+
+func TestUploadIdleDeadlineCannotExceedTotalDuration(t *testing.T) {
+	w := &deadlineResponse{ResponseRecorder: httptest.NewRecorder()}
+	start := time.Now()
+	now := start.Add(maxUploadRequestDuration - time.Second)
+	body := &progressBody{ReadCloser: io.NopCloser(strings.NewReader("xx")), controller: http.NewResponseController(w), started: start, now: func() time.Time { return now }}
+	if _, err := body.Read(make([]byte, 1)); err != nil {
+		t.Fatal(err)
+	}
+	if !w.read.Equal(start.Add(maxUploadRequestDuration)) {
+		t.Fatal("idle renewal exceeded hard deadline", w.read)
+	}
+	now = now.Add(2 * time.Second)
+	if _, err := body.Read(make([]byte, 1)); err == nil {
+		t.Fatal("drip body passed total deadline")
 	}
 }

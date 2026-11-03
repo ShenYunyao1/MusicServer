@@ -90,7 +90,7 @@ func (a *API) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 		deadline := 30 * time.Second
 		if uploadBodyRequest(request) {
 			deadline = 2 * time.Minute
-			request.Body = &progressBody{request.Body, controller}
+			request.Body = &progressBody{ReadCloser: request.Body, controller: controller, started: time.Now()}
 		}
 		_ = controller.SetReadDeadline(time.Now().Add(deadline))
 		defer controller.SetReadDeadline(time.Time{})

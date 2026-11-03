@@ -42,6 +42,7 @@ type Store struct {
 	tempMu           sync.Mutex
 	tempLimits       *temporaryUploadLimits
 	tempReservations map[*temporaryUploadReservation]bool
+	badResumeOnce    sync.Once
 	tagBatches       tagBatchRuntime
 	mail             mailRuntime
 	storageWriteMu   sync.Mutex

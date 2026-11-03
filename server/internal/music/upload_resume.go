@@ -393,11 +393,8 @@ func (s *Store) patchResume(ctx context.Context, auth authContext, task resumabl
 	if task.State != "uploading" {
 		return task, errResumeConflict
 	}
-	releaseBudget, err := s.reserveTemporaryUpload(auth.userID, task.ID, 0)
-	if err != nil {
-		return task, err
-	}
-	defer releaseBudget()
+	// Creation reserves the complete immutable Size. A block never grows that
+	// reservation, so it needs no full staging-directory/metadata budget scan.
 	if err := s.recoverResume(task, false); err != nil {
 		return task, err
 	}
@@ -903,6 +900,9 @@ func (s *Store) InitializeResumableUploads() error {
 		return err
 	}
 	for _, id := range ids {
+		if !validResumeID(id) {
+			continue
+		}
 		lock := resumableLock(id)
 		lock.Lock()
 		task, e := readResume(s.db, id)

@@ -1,9 +1,12 @@
 package music
 
 import (
+	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -41,19 +44,6 @@ func (s *Store) reserveTemporaryUpload(owner, id string, size int64) (func(), er
 	s.tempMu.Lock()
 	defer s.tempMu.Unlock()
 	limits := s.temporaryLimits()
-	if s.tempLimits == nil {
-		var quota StorageQuota
-		if err := readStorageJSON(s.db, "storage_quota/"+owner, &quota); err != nil {
-			return nil, err
-		}
-		// Allow two file names during resume->stage promotion and a full-size
-		// duplicate probe even when committed audio has used all account quota.
-		fileAllowance := 2 * s.Settings().MaxUploadBytes
-		if quota.LimitBytes > 0 {
-			limits.OwnerBytes = min(limits.OwnerBytes, max(fileAllowance, quota.LimitBytes))
-		}
-		limits.OwnerBytes = max(limits.OwnerBytes, fileAllowance)
-	}
 	global, err := directoryBytes(filepath.Join(s.mediaRoot, ".staging"))
 	if errors.Is(err, os.ErrNotExist) {
 		global, err = 0, nil
@@ -67,8 +57,18 @@ func (s *Store) reserveTemporaryUpload(owner, id string, size int64) (func(), er
 	}
 	defer root.Close()
 	var own int64
+	charges := map[string]int64{}
 	identities := map[string]string{}
-	rows, err := s.db.Query("SELECT id,user_id,size FROM upload_staging")
+	tx, err := s.db.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	var quota StorageQuota
+	if err := readStorageJSON(tx, "storage_quota/"+owner, &quota); err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query("SELECT id,user_id,size FROM upload_staging")
 	if err != nil {
 		return nil, err
 	}
@@ -80,6 +80,7 @@ func (s *Store) reserveTemporaryUpload(owner, id string, size int64) (func(), er
 			return nil, err
 		}
 		identities[key] = user
+		charges[key] = bytes
 		if user == owner {
 			own += bytes
 		}
@@ -89,35 +90,36 @@ func (s *Store) reserveTemporaryUpload(owner, id string, size int64) (func(), er
 	if err != nil {
 		return nil, err
 	}
-	rows, err = s.db.Query(`SELECT substr(key,15),json_extract(value,'$.owner'),json_extract(value,'$.size'),json_extract(value,'$.state'),json_extract(value,'$.expires_at') FROM meta WHERE key LIKE 'upload_resume/%'`)
+	rows, err = tx.Query(`SELECT substr(key,15),value FROM meta WHERE key LIKE 'upload_resume/%'`)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
-		var key, user, state, expires string
-		var bytes int64
-		if err = rows.Scan(&key, &user, &bytes, &state, &expires); err != nil {
+		var key, raw string
+		if err = rows.Scan(&key, &raw); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		if !validResumeID(key) || bytes < 0 {
-			rows.Close()
-			return nil, errResumeCorrupt
+		var checkpoint resumableCheckpoint
+		if !validResumeID(key) || json.Unmarshal([]byte(raw), &checkpoint) != nil || checkpoint.Owner == "" || checkpoint.Size <= 0 || checkpoint.Size > 1<<40 {
+			s.badResumeOnce.Do(func() {
+				log.Printf("upload checkpoint metadata ignored during admission; inspect upload_resume records (physical files remain charged)")
+			})
+			continue
 		}
+		user, state, bytes := checkpoint.Owner, checkpoint.State, checkpoint.Size
 		physical := int64(0)
 		info, e := root.Lstat(resumeFilePath(key))
 		if e == nil {
 			if !info.Mode().IsRegular() {
-				rows.Close()
-				return nil, errResumeCorrupt
+				continue
 			}
 			physical = info.Size()
 		} else if !errors.Is(e, os.ErrNotExist) {
 			rows.Close()
 			return nil, e
 		}
-		when, e := parsePersistedTime(expires)
-		pending := state == "uploading" && e == nil && time.Now().Before(when)
+		pending := state == "uploading" && time.Now().Before(checkpoint.ExpiresAt)
 		charge := physical
 		if pending {
 			charge = max(charge, bytes)
@@ -127,12 +129,24 @@ func (s *Store) reserveTemporaryUpload(owner, id string, size int64) (func(), er
 			identities[key] = user
 		}
 		if user == owner {
-			own += charge
+			own += max(int64(0), charge-charges[key])
 		}
+		charges[key] = max(charges[key], charge)
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
+		return nil, err
+	}
+	committed := int64(0)
+	if quota.LimitBytes > 0 {
+		used, e := s.accountUsageForIDs(tx, []string{owner})
+		if e != nil {
+			return nil, e
+		}
+		committed = used[owner]
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	for reservation := range s.tempReservations {
@@ -141,13 +155,26 @@ func (s *Store) reserveTemporaryUpload(owner, id string, size int64) (func(), er
 			own += reservation.size
 		}
 		identities[reservation.id] = reservation.owner
+		charges[reservation.id] += reservation.size
 	}
+	if prior, ok := identities[id]; ok && prior != owner {
+		return nil, errResourceHidden
+	}
+	// A resume reserves its whole logical payload at creation. Promotion to a
+	// staged name consumes that reservation, rather than charging it twice.
+	if size < 0 {
+		return nil, errUploadTemporaryLimit
+	}
+	size = max(int64(0), size-charges[id])
 	identities[id] = owner
 	count := 0
 	for _, user := range identities {
 		if user == owner {
 			count++
 		}
+	}
+	if quota.LimitBytes > 0 && (size > quota.LimitBytes || own > quota.LimitBytes-size || committed > quota.LimitBytes-size-own) {
+		return nil, errStorageQuota
 	}
 	if size < 0 || size > limits.OwnerBytes || own > limits.OwnerBytes-size || size > limits.GlobalBytes || global > limits.GlobalBytes-size || count > limits.OwnerTasks || len(identities) > limits.GlobalTasks {
 		return nil, errUploadTemporaryLimit
@@ -203,7 +230,7 @@ func checkTemporaryMetadata(reader sqlReader, owner, stageID, resumeID string, b
 	var total, own int64
 	err := reader.QueryRow(`SELECT COALESCE(sum(bytes),0),COALESCE(sum(CASE WHEN owner=? THEN bytes ELSE 0 END),0) FROM (
  SELECT length(CAST(track_json AS BLOB)) bytes,user_id owner FROM upload_staging WHERE id!=?
- UNION ALL SELECT length(CAST(value AS BLOB)),json_extract(value,'$.owner') FROM meta WHERE key LIKE 'upload_resume/%' AND key!=?)`, owner, stageID, resumableMetaPrefix+resumeID).Scan(&total, &own)
+ UNION ALL SELECT length(CAST(value AS BLOB)),CASE WHEN json_valid(value) THEN json_extract(value,'$.owner') ELSE '' END FROM meta WHERE key LIKE 'upload_resume/%' AND key!=?)`, owner, stageID, resumableMetaPrefix+resumeID).Scan(&total, &own)
 	if err != nil {
 		return err
 	}

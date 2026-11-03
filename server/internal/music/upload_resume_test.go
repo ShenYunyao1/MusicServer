@@ -250,7 +250,7 @@ func TestResumableFailedVerificationRetryIsBounded(t *testing.T) {
 		t.Fatal("expired retry guard retained")
 	}
 	now := time.Now().Add(2 * time.Minute)
-	a.store.finishResumeVerification("later", errors.New("long verification failed"), now)
+	a.store.finishResumeVerification("later", errAudioValidation, now)
 	if err := a.store.admitResumeVerification("later", now.Add(time.Second)); !errors.Is(err, errResumeVerificationRetry) {
 		t.Fatal("long failure bypassed cooldown", err)
 	}

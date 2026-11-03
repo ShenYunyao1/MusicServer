@@ -219,7 +219,10 @@ func (s *Store) stageAudioWithAssetsContext(ctx context.Context, name string, re
 	timings["probe_ms"] = time.Since(probeStarted).Milliseconds()
 	if probeErr != nil {
 		_ = root.Remove(relative)
-		return UploadPreview{}, probeErr
+		if ctx.Err() != nil {
+			return UploadPreview{}, ctx.Err()
+		}
+		return UploadPreview{}, fmt.Errorf("%w: %w", errAudioValidation, probeErr)
 	}
 	metadataStarted := time.Now()
 	setUploadPhase(ctx, "metadata")

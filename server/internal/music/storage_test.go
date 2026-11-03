@@ -19,7 +19,8 @@ func TestStorageConcurrentQuotaAndMidWriteLowSpace(t *testing.T) {
 	audio := validTestAudio(t)
 	second := append([]byte(nil), audio...)
 	second[len(second)-1] ^= 1
-	if _, err := api.store.SetStorageQuota(member.ID, int64(len(audio)), 0, MutationOptions{UserID: admin.ID}); err != nil {
+	quota, err := api.store.SetStorageQuota(member.ID, 2*int64(len(audio)), 0, MutationOptions{UserID: admin.ID})
+	if err != nil {
 		t.Fatal(err)
 	}
 	first, err := api.store.StageAudio("one.wav", bytes.NewReader(audio), nil, MutationOptions{UserID: member.ID})
@@ -28,6 +29,11 @@ func TestStorageConcurrentQuotaAndMidWriteLowSpace(t *testing.T) {
 	}
 	next, err := api.store.StageAudio("two.wav", bytes.NewReader(second), nil, MutationOptions{UserID: member.ID})
 	if err != nil {
+		t.Fatal(err)
+	}
+	// Policy can shrink while old drafts exist. Publication still rechecks the
+	// current quota atomically; admission alone is not sufficient.
+	if _, err := api.store.SetStorageQuota(member.ID, int64(len(audio)), quota.Version, MutationOptions{UserID: admin.ID}); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
@@ -125,11 +131,8 @@ func TestStorageQuotaDedupTransferAndVersionBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	preview, err := api.store.StageAudio("quota.wav", bytes.NewReader(audio), nil, MutationOptions{UserID: member.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := api.store.CommitUploadStage(preview.ID, MutationOptions{UserID: member.ID}); !errors.Is(err, errStorageQuota) {
-		t.Fatalf("quota did not reject commit: %v", err)
+	if !errors.Is(err, errStorageQuota) {
+		t.Fatalf("quota did not reject before writing: %v", err)
 	}
 	if _, err := api.store.SetStorageQuota(member.ID, 0, 0, options); !errors.Is(err, errVersionConflict) {
 		t.Fatal("stale quota update accepted")
@@ -137,11 +140,15 @@ func TestStorageQuotaDedupTransferAndVersionBoundary(t *testing.T) {
 	if _, err := api.store.SetStorageQuota(member.ID, 0, quota.Version, options); err != nil {
 		t.Fatal(err)
 	}
+	preview, err = api.store.StageAudio("quota.wav", bytes.NewReader(audio), nil, MutationOptions{UserID: member.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
 	track, dup, err := api.store.CommitUploadStage(preview.ID, MutationOptions{UserID: member.ID})
 	if err != nil || dup {
 		t.Fatal(err)
 	}
-	if _, err := api.store.SetStorageQuota(other.ID, 1, 0, options); err != nil {
+	if _, err := api.store.SetStorageQuota(other.ID, int64(len(audio)), 0, options); err != nil {
 		t.Fatal(err)
 	}
 	duplicate, err := api.store.StageAudio("same.wav", bytes.NewReader(audio), nil, MutationOptions{UserID: other.ID})

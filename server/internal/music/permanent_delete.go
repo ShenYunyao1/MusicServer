@@ -1,8 +1,10 @@
 package music
 
 import (
+	"context"
 	"database/sql"
 	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"slices"
@@ -197,6 +199,35 @@ func (s *Store) recoverPurgedMedia() error {
 }
 
 func (s *Store) PurgeUser(id string, options MutationOptions) error {
+	// Disabling already invalidates unfinished uploads. Reconcile their files
+	// now rather than forcing deletion to wait for the minute cleanup worker.
+	if err := s.readSnapshot(context.Background(), func(tx *sql.Tx) error {
+		if err := requireAdminActor(tx, []MutationOptions{options}); err != nil {
+			return err
+		}
+		if err := validateAccountMutationSession(tx, options); err != nil {
+			return err
+		}
+		if id == options.UserID {
+			return errAccountDeleteSelf
+		}
+		u, err := readUser(tx, id)
+		if err != nil {
+			return err
+		}
+		if u.Enabled {
+			return errAccountNotDisabled
+		}
+		if options.ExpectedVersion < 1 || options.ExpectedVersion != u.Version {
+			return errVersionConflict
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := s.CleanupResumableUploads(); err != nil {
+		log.Printf("account purge upload cleanup deferred: %v", err)
+	}
 	return s.transaction(func(tx *sql.Tx) error {
 		if err := requireAdminActor(tx, []MutationOptions{options}); err != nil {
 			return err
@@ -218,7 +249,7 @@ func (s *Store) PurgeUser(id string, options MutationOptions) error {
 			return errAccountNotDisabled
 		}
 		var assets bool
-		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM tracks WHERE owner_id=? OR uploaded_by=?) OR EXISTS(SELECT 1 FROM playlists WHERE owner_id=?) OR EXISTS(SELECT 1 FROM upload_staging WHERE user_id=?) OR EXISTS(SELECT 1 FROM meta WHERE key LIKE 'upload_resume/%' AND json_extract(value,'$.owner')=? AND json_extract(value,'$.state') NOT IN ('ready','canceled'))`, id, id, id, id, id).Scan(&assets); err != nil {
+		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM tracks WHERE owner_id=? OR uploaded_by=?) OR EXISTS(SELECT 1 FROM playlists WHERE owner_id=?) OR EXISTS(SELECT 1 FROM upload_staging WHERE user_id=?) OR EXISTS(SELECT 1 FROM meta WHERE key LIKE 'upload_resume/%' AND CASE WHEN json_valid(value) THEN json_extract(value,'$.owner') END=? AND CASE WHEN json_valid(value) THEN json_extract(value,'$.state') END NOT IN ('ready','canceled'))`, id, id, id, id, id).Scan(&assets); err != nil {
 			return err
 		}
 		if assets {
@@ -230,7 +261,7 @@ func (s *Store) PurgeUser(id string, options MutationOptions) error {
 		if err := deleteAccountTagRows(tx, id); err != nil {
 			return err
 		}
-		if _, err := tx.Exec("DELETE FROM meta WHERE key LIKE 'upload_receipt/%' AND json_extract(value,'$.owner')=?", id); err != nil {
+		if _, err := tx.Exec("DELETE FROM meta WHERE key LIKE 'upload_receipt/%' AND CASE WHEN json_valid(value) THEN json_extract(value,'$.owner') END=?", id); err != nil {
 			return err
 		}
 		// Preserve shared contributions while releasing their author foreign keys.
@@ -249,7 +280,7 @@ func (s *Store) PurgeUser(id string, options MutationOptions) error {
 				}
 			}
 		}
-		for _, q := range []string{"DELETE FROM sessions WHERE user_id=?", "DELETE FROM subscriptions WHERE user_id=?", "DELETE FROM playlist_invitations WHERE inviter_id=?1 OR recipient_id=?1", "DELETE FROM meta WHERE key LIKE 'upload_resume/%' AND json_extract(value,'$.owner')=?", "DELETE FROM meta WHERE key LIKE 'email_binding/%' AND value=?", "DELETE FROM meta WHERE key IN ('user_avatar/'||?1,'deleted_user/'||?1,'account_email/'||?1) OR ((key LIKE 'email_challenge/%' OR key LIKE 'mail_job/%') AND json_extract(value,'$.user_id')=?1)", "DELETE FROM settings WHERE key='storage_quota/'||?", "DELETE FROM users WHERE id=?"} {
+		for _, q := range []string{"DELETE FROM sessions WHERE user_id=?", "DELETE FROM subscriptions WHERE user_id=?", "DELETE FROM playlist_invitations WHERE inviter_id=?1 OR recipient_id=?1", "DELETE FROM meta WHERE key LIKE 'upload_resume/%' AND CASE WHEN json_valid(value) THEN json_extract(value,'$.owner') END=?", "DELETE FROM meta WHERE key LIKE 'email_binding/%' AND value=?", "DELETE FROM meta WHERE key IN ('user_avatar/'||?1,'deleted_user/'||?1,'account_email/'||?1) OR ((key LIKE 'email_challenge/%' OR key LIKE 'mail_job/%') AND CASE WHEN json_valid(value) THEN json_extract(value,'$.user_id') END=?1)", "DELETE FROM settings WHERE key='storage_quota/'||?", "DELETE FROM users WHERE id=?"} {
 			if _, err := tx.Exec(q, id); err != nil {
 				return err
 			}
