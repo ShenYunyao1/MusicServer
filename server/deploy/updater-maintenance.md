@@ -2,7 +2,7 @@
 
 ## 当前 schema 8→9 阶段
 
-schema 8 桥接候选为 **0.21.17**，参见 [schema 9 升级与数据保留](schema9-upgrade.md)。仅在正式 Release 已通过签名和摘要核验后使用：先安装 0.21.17 主程序，再由维护者从已验签的同版本 Linux 包执行以下命令，核对能力后才能安装 schema 9。`schema9-bridge.json` 的锁定提交用于后续 schema 9 发行，不可拿测试程序代替正式资产。
+正式 schema 8 桥接为 **0.21.17**（提交 `37f14b957739386d3dda4d94b0e217e8fc43b1c9`），参见 [schema 9 升级与数据保留](schema9-upgrade.md)。先安装 0.21.17 主程序，再由维护者从已验签的同版本 Linux 包执行以下命令，核对能力后才能安装 0.21.18／schema 9。`schema9-bridge.json` 锁定正式提交，不可拿测试程序代替正式资产。
 
 ```sh
 sudo ./musicserver-updater -config /etc/musicserver/updater.json -refresh-worker 0.21.17
