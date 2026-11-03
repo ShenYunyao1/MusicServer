@@ -42,6 +42,9 @@ func (s *Store) CleanupBackupTemporary() error {
 	return s.cleanupBackupTemporaryLocked()
 }
 func (s *Store) cleanupBackupTemporaryLocked() error {
+	if s.backupCleanupHook != nil {
+		return s.backupCleanupHook()
+	}
 	entries, err := os.ReadDir(s.backupDirectory())
 	if errors.Is(err, os.ErrNotExist) {
 		return nil

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 	"unicode"
 
 	"github.com/google/uuid"
+	"musicserver/internal/activity"
 	"musicserver/internal/version"
 )
 
@@ -181,7 +183,8 @@ func (s *Store) createBackupBundleForTarget(ctx context.Context, includeMedia bo
 	}
 	defer s.backupBundleMu.Unlock()
 	if err := s.cleanupBackupTemporaryLocked(); err != nil {
-		return BackupArchive{}, err
+		log.Printf("backup temporary cleanup deferred; new backup uses a fresh directory: %v", err)
+		_ = s.activity.Emit("server.cleanup_failed", activity.Fields{Reason: "storage"})
 	}
 	if err := backupAcquire(ctx, s.mediaMu.TryRLock); err != nil {
 		return BackupArchive{}, err
@@ -303,7 +306,37 @@ func (s *Store) createBackupBundleForTarget(ctx context.Context, includeMedia bo
 			}
 		}
 	}
-	report("checking", 0, 0)
+	var estimate, mediaEstimate int64
+	for _, input := range inputs {
+		var info os.FileInfo
+		var e error
+		if strings.HasPrefix(input.Path, "media/") {
+			info, e = root.Stat(input.Local)
+		} else {
+			info, e = os.Stat(input.Local)
+		}
+		if errors.Is(e, os.ErrNotExist) && strings.HasPrefix(input.Path, "media/") {
+			continue
+		}
+		if e != nil {
+			return BackupArchive{}, e
+		}
+		if !info.Mode().IsRegular() {
+			continue
+		}
+		estimate += info.Size()
+		if estimate > maxBackupBytes {
+			return BackupArchive{}, errors.New("backup exceeds format limits")
+		}
+		if strings.HasPrefix(input.Path, "media/") {
+			mediaEstimate += info.Size()
+		}
+	}
+	if err := s.checkSpace(s.backupDirectory(), estimate+mediaEstimate+estimate/50+int64(len(inputs))*1024+(1<<20)); err != nil {
+		return BackupArchive{}, err
+	}
+	var frozenDone int64
+	report("checking", 0, mediaEstimate)
 	// Mutable external files must be verified before the manifest is written.
 	// Freeze each one into private storage so changes during compression cannot
 	// invalidate an otherwise recoverable database backup.
@@ -320,7 +353,7 @@ func (s *Store) createBackupBundleForTarget(ctx context.Context, includeMedia bo
 			return BackupArchive{}, errors.New("unsupported backup path")
 		}
 		if strings.HasPrefix(input.Path, "media/") {
-			frozen, changed, e := s.freezeBackupMedia(ctx, root, input, filepath.Join(frozenDirectory, fmt.Sprintf("%06d", len(selected))))
+			frozen, changed, e := s.freezeBackupMedia(ctx, root, input, filepath.Join(frozenDirectory, fmt.Sprintf("%06d", len(selected))), func(n int64) { frozenDone += n; report("checking", frozenDone, mediaEstimate) })
 			if e != nil {
 				return BackupArchive{}, e
 			}
@@ -380,7 +413,7 @@ func (s *Store) createBackupBundleForTarget(ctx context.Context, includeMedia bo
 			os.Remove(final)
 		}
 	}()
-	compressed, _ := gzip.NewWriterLevel(storageWriter{s, s.backupDirectory(), output}, gzip.BestSpeed)
+	compressed, _ := gzip.NewWriterLevel(&backupSpaceWriter{store: s, path: s.backupDirectory(), writer: output}, gzip.BestSpeed)
 	archive := tar.NewWriter(compressed)
 	if err := archive.WriteHeader(&tar.Header{Name: "manifest.json", Mode: 0600, Size: int64(len(encoded))}); err != nil {
 		return BackupArchive{}, err

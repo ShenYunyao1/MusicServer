@@ -88,7 +88,7 @@ func (s *Store) StartBackup(includeMedia, automatic bool, options MutationOption
 		return BackupJob{}, errors.New("server is closing")
 	}
 	s.backupMu.Lock()
-	if s.backupJob.State == "running" || s.backupJob.State == "cancelling" {
+	if s.backupJob.State == "running" || s.backupJob.State == "cancelling" || s.backupJob.State == "completing" {
 		s.backupMu.Unlock()
 		return BackupJob{}, errBackupBusy
 	}
@@ -109,6 +109,9 @@ func (s *Store) StartBackup(includeMedia, automatic bool, options MutationOption
 			archive, err = s.CreateBackupBundle(ctx, includeMedia, func(phase string, done, total int64) {
 				s.backupMu.Lock()
 				s.backupJob.Phase, s.backupJob.Bytes, s.backupJob.Total = phase, done, total
+				if phase == "completed" {
+					s.backupJob.State = "completing"
+				}
 				s.backupMu.Unlock()
 			}, automatic)
 		}
@@ -151,7 +154,7 @@ func (s *Store) StartBackup(includeMedia, automatic bool, options MutationOption
 func (s *Store) CancelBackup() {
 	s.backupMu.Lock()
 	defer s.backupMu.Unlock()
-	if s.backupCancel != nil {
+	if s.backupCancel != nil && s.backupJob.State != "completing" {
 		s.backupJob.State = "cancelling"
 		s.backupCancel()
 	}
@@ -166,7 +169,7 @@ func (s *Store) CancelBackupJob(id string, options MutationOptions) error {
 		if s.backupJob.ID != id {
 			return errBackupJobNotFound
 		}
-		if s.backupCancel == nil || s.backupJob.State != "running" && s.backupJob.State != "cancelling" {
+		if s.backupCancel == nil || s.backupJob.Phase == "completed" || s.backupJob.State != "running" && s.backupJob.State != "cancelling" {
 			return errBackupJobFinished
 		}
 		if s.backupJob.State == "cancelling" {

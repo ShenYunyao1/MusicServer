@@ -37,43 +37,44 @@ var errVersionConflict = errors.New("record changed; refresh before editing")
 var errTrackInUse = errors.New("this track is used by another account's playlist; contact an administrator")
 
 type Store struct {
-	resumeVerifyMu   sync.Mutex
-	resumeVerifyNext map[string]time.Time
-	tempMu           sync.Mutex
-	tempLimits       *temporaryUploadLimits
-	tempReservations map[*temporaryUploadReservation]bool
-	badResumeOnce    sync.Once
-	tagBatches       tagBatchRuntime
-	mail             mailRuntime
-	storageWriteMu   sync.Mutex
-	spaceProbe       func(string) (diskspace.Space, error)
-	backupBundleMu   sync.Mutex
-	purgeMu          sync.Mutex
-	backupMu         sync.Mutex
-	backupJob        BackupJob
-	backupCancel     context.CancelFunc
-	backupReaders    map[string]int
-	changeMu         sync.Mutex
-	changeSignal     chan struct{}
-	changeStamp      string
-	changeWatchers   int
-	changeClosed     bool
-	activity         *activity.Journal
-	stageSlots       chan struct{}
-	activeStages     map[string]bool
-	dataPath         string
-	mediaRoot        string
-	db               *sql.DB
-	readDB           *sql.DB
-	schema           int
-	writeMu          sync.Mutex
-	stageMu          sync.Mutex
-	mediaMu          sync.RWMutex
-	scanMu           sync.Mutex
-	scanCancel       context.CancelFunc
-	scanStatus       ScanStatus
-	workers          sync.WaitGroup
-	closed           bool
+	resumeVerifyMu    sync.Mutex
+	resumeVerifyNext  map[string]time.Time
+	tempMu            sync.Mutex
+	tempLimits        *temporaryUploadLimits
+	tempReservations  map[*temporaryUploadReservation]bool
+	badResumeOnce     sync.Once
+	tagBatches        tagBatchRuntime
+	mail              mailRuntime
+	storageWriteMu    sync.Mutex
+	spaceProbe        func(string) (diskspace.Space, error)
+	backupBundleMu    sync.Mutex
+	backupCleanupHook func() error
+	purgeMu           sync.Mutex
+	backupMu          sync.Mutex
+	backupJob         BackupJob
+	backupCancel      context.CancelFunc
+	backupReaders     map[string]int
+	changeMu          sync.Mutex
+	changeSignal      chan struct{}
+	changeStamp       string
+	changeWatchers    int
+	changeClosed      bool
+	activity          *activity.Journal
+	stageSlots        chan struct{}
+	activeStages      map[string]bool
+	dataPath          string
+	mediaRoot         string
+	db                *sql.DB
+	readDB            *sql.DB
+	schema            int
+	writeMu           sync.Mutex
+	stageMu           sync.Mutex
+	mediaMu           sync.RWMutex
+	scanMu            sync.Mutex
+	scanCancel        context.CancelFunc
+	scanStatus        ScanStatus
+	workers           sync.WaitGroup
+	closed            bool
 }
 
 func NewStore(dataPath, mediaRoot string) (*Store, error) {

@@ -15,7 +15,7 @@ function setupBackupPane(pane){
 function backupPageVisible(){return state.user&&isAdministrator()&&state.page==='settings'&&location.hash.split('?')[0]==='#/admin/settings/backup'&&!document.hidden}
 function scheduleBackupRefresh(){
  clearTimeout(backupTimer);backupTimer=null;
- if(backupPageVisible())backupTimer=setTimeout(()=>{if(backupPageVisible())loadBackupManagement().catch(error=>{$('backupResult').textContent='读取备份失败：'+error.message;scheduleBackupRefresh()})},backupCurrentJob&&['running','cancelling'].includes(backupCurrentJob.state)?1000:30000);
+ if(backupPageVisible())backupTimer=setTimeout(()=>{if(backupPageVisible())loadBackupManagement().catch(error=>{$('backupResult').textContent='读取备份失败：'+error.message;scheduleBackupRefresh()})},backupCurrentJob&&['running','cancelling','completing'].includes(backupCurrentJob.state)?1000:30000);
 }
 async function loadBackupManagement(forcePolicy=false){
  if(!state.user||!isAdministrator()||backupLoading)return;
@@ -29,8 +29,8 @@ async function loadBackupManagement(forcePolicy=false){
  }finally{if(generation===backupGeneration){backupLoading=false;scheduleBackupRefresh()}}
 }
 function renderBackupJob(job){
- const active=['running','cancelling'].includes(job.state),progress=$('backupProgress');
- $('createBackup').disabled=$('createDatabaseBackup').disabled=active;$('cancelBackup').hidden=!active;$('cancelBackup').disabled=job.state==='cancelling';
+ const active=['running','cancelling','completing'].includes(job.state),progress=$('backupProgress');
+ $('createBackup').disabled=$('createDatabaseBackup').disabled=active;$('cancelBackup').hidden=!active||job.state==='completing';$('cancelBackup').disabled=job.state==='cancelling';
  progress.hidden=!active;
  const phases={snapshot:'创建数据库快照',checking:'检查并暂存媒体副本',packing:'归档与校验',completed:'完成'};
  if(active){if(job.total>0)progress.value=Math.min(100,Math.floor(job.bytes*100/job.total));else progress.removeAttribute('value');$('backupResult').textContent=(job.state==='cancelling'?'正在取消任务…':phases[job.phase]||'正在备份')+(job.total>0?' · '+formatBytes(job.bytes)+' / '+formatBytes(job.total):'')}
@@ -54,7 +54,7 @@ async function startManagedBackup(includeMedia){
  const generation=backupGeneration,userID=state.user?.id;
  $('createBackup').disabled=$('createDatabaseBackup').disabled=true;
  try{const job=await api('admin/backups','POST',{include_media:includeMedia});if(generation!==backupGeneration||state.user?.id!==userID)return;backupCurrentJob=job;renderBackupJob(job);await loadBackupManagement()}
- finally{if(generation===backupGeneration){scheduleBackupRefresh();if(!backupCurrentJob||!['running','cancelling'].includes(backupCurrentJob.state))$('createBackup').disabled=$('createDatabaseBackup').disabled=false}}
+ finally{if(generation===backupGeneration){scheduleBackupRefresh();if(!backupCurrentJob||!['running','cancelling','completing'].includes(backupCurrentJob.state))$('createBackup').disabled=$('createDatabaseBackup').disabled=false}}
 }
 async function saveBackupPolicy(){
  const generation=backupGeneration,userID=state.user?.id;

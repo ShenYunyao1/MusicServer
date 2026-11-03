@@ -11,7 +11,7 @@ func waitBackupJob(t *testing.T, s *Store) BackupJob {
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		job := s.BackupJob()
-		if job.State != "running" && job.State != "cancelling" {
+		if job.State != "running" && job.State != "cancelling" && job.State != "completing" {
 			return job
 		}
 		time.Sleep(10 * time.Millisecond)
