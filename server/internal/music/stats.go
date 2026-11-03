@@ -1,6 +1,7 @@
 package music
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"log"
@@ -72,6 +73,11 @@ ON CONFLICT(key_id) DO UPDATE SET
 }
 
 func (a *API) readCallStats(userIDs ...string) apiStatsResponse {
+	return a.readCallStatsContext(context.Background(), userIDs...)
+}
+func (a *API) readCallStatsContext(ctx context.Context, userIDs ...string) apiStatsResponse {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	result := apiStatsResponse{Keys: []apiCallStats{}}
 	if a == nil || a.store == nil || a.store.db == nil {
 		result.err = errors.New("statistics database is not available")
@@ -81,7 +87,7 @@ func (a *API) readCallStats(userIDs ...string) apiStatsResponse {
 	if len(userIDs) > 0 {
 		userID = userIDs[0]
 	}
-	rows, err := a.store.db.Query(`SELECT k.id,json_extract(k.payload,'$.name'),k.user_id,u.enabled,
+	rows, err := a.store.readDatabase().QueryContext(ctx, `SELECT k.id,json_extract(k.payload,'$.name'),k.user_id,u.enabled,
         COALESCE(s.total_requests,0),COALESCE(s.success_requests,0),COALESCE(s.failure_requests,0),
         COALESCE(s.total_bytes,0),COALESCE(s.total_duration_ms,0),COALESCE(s.last_called_at,''),COALESCE(s.last_status,0)
         FROM api_keys k JOIN users u ON u.id=k.user_id LEFT JOIN api_call_stats s ON s.key_id=k.id

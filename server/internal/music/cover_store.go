@@ -2,6 +2,7 @@ package music
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/binary"
@@ -293,6 +294,8 @@ func (s *Store) setTrackCoverGuarded(id string, data []byte, guard func(sqlReade
 func (s *Store) Cover(id string) (CoverAsset, bool) {
 	var asset CoverAsset
 	asset.ID = id
-	err := s.db.QueryRow("SELECT mime,data FROM cover_assets WHERE id=?", id).Scan(&asset.MIME, &asset.Data)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := s.readDatabase().QueryRowContext(ctx, "SELECT mime,data FROM cover_assets WHERE id=?", id).Scan(&asset.MIME, &asset.Data)
 	return asset, err == nil
 }

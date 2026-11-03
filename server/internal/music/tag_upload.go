@@ -1,12 +1,14 @@
 package music
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 type UploadTagEdit struct {
@@ -97,25 +99,28 @@ func parseUploadCommit(r *http.Request) (map[string]string, *UploadTagEdits, err
 	return fields, edits, nil
 }
 
-func (s *Store) uploadPreviewTags(preview *UploadPreview, record stagedRecord) error {
-	schema, err := sqliteSchemaIdentity(s.db)
+func (s *Store) uploadPreviewTags(preview *UploadPreview, record stagedRecord, contexts ...context.Context) error {
+	ctx, cancel := context.WithTimeout(readContext(contexts), 5*time.Second)
+	defer cancel()
+	reader := contextSQLReader{s.readDatabase(), ctx}
+	schema, err := sqliteSchemaIdentity(reader)
 	if err != nil {
 		return err
 	}
 	if schema < 8 {
 		return nil
 	}
-	if err := requireTagsSchema(s.db); err != nil {
+	if err := requireTagsSchema(reader); err != nil {
 		return err
 	}
 	preview.GenreValues = record.GenreValues
 	versions := &UploadTagVersions{PublicVersion: 1, PersonalVersion: 1}
 	if preview.DuplicateOf != "" {
-		public, err := trackTagVersion(s.db, preview.DuplicateOf, "public")
+		public, err := trackTagVersion(reader, preview.DuplicateOf, "public")
 		if err != nil {
 			return err
 		}
-		personal, err := trackTagVersion(s.db, preview.DuplicateOf, record.Track.OwnerID)
+		personal, err := trackTagVersion(reader, preview.DuplicateOf, record.Track.OwnerID)
 		if err != nil {
 			return err
 		}

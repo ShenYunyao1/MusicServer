@@ -304,33 +304,38 @@ func (s *Store) stageAudioWithAssetsContext(ctx context.Context, name string, re
 	return s.previewLocked(id, filepath.Base(name), record, created, expires)
 }
 
-func (s *Store) previewLocked(id, name string, record stagedRecord, created, expires time.Time) (UploadPreview, error) {
+func (s *Store) previewLocked(id, name string, record stagedRecord, created, expires time.Time, contexts ...context.Context) (UploadPreview, error) {
+	ctx, cancel := context.WithTimeout(readContext(contexts), 5*time.Second)
+	defer cancel()
+	reader := contextSQLReader{s.readDatabase(), ctx}
 	preview := UploadPreview{ID: id, OriginalName: name, Size: record.Track.Size, ContentHash: record.Track.ContentHash, Track: record.Track, CreatedAt: created, ExpiresAt: expires, Validation: "audio_stream_verified"}
-	if candidate, found, err := s.liveUploadDuplicate(s.db, record.Track.ContentHash); err != nil {
+	if candidate, found, err := s.liveUploadDuplicate(reader, record.Track.ContentHash); err != nil {
 		return UploadPreview{}, err
 	} else if found {
 		preview.DuplicateOf = candidate.ID
 	}
-	if err := s.uploadPreviewTags(&preview, record); err != nil {
+	if err := s.uploadPreviewTags(&preview, record, ctx); err != nil {
 		return UploadPreview{}, err
 	}
 	return preview, nil
 }
 
-func (s *Store) UploadStage(id string) (UploadPreview, bool, error) {
+func (s *Store) UploadStage(id string, contexts ...context.Context) (UploadPreview, bool, error) {
 	s.stageMu.Lock()
 	defer s.stageMu.Unlock()
-	preview, _, _, err := s.uploadStageLocked(id)
+	preview, _, _, err := s.uploadStageLocked(id, contexts...)
 	if errors.Is(err, os.ErrNotExist) {
 		return UploadPreview{}, false, nil
 	}
 	return preview, err == nil, err
 }
 
-func (s *Store) uploadStageLocked(id string) (UploadPreview, stagedRecord, string, error) {
+func (s *Store) uploadStageLocked(id string, contexts ...context.Context) (UploadPreview, stagedRecord, string, error) {
+	ctx, cancel := context.WithTimeout(readContext(contexts), 5*time.Second)
+	defer cancel()
 	var record stagedRecord
 	var name, path, encoded, created, expires string
-	err := s.db.QueryRow(`SELECT original_name,temp_path,track_json,created_at,expires_at FROM upload_staging WHERE id = ?`, id).Scan(&name, &path, &encoded, &created, &expires)
+	err := s.readDatabase().QueryRowContext(ctx, `SELECT original_name,temp_path,track_json,created_at,expires_at FROM upload_staging WHERE id = ?`, id).Scan(&name, &path, &encoded, &created, &expires)
 	if errors.Is(err, sql.ErrNoRows) {
 		return UploadPreview{}, record, "", os.ErrNotExist
 	}
@@ -349,7 +354,7 @@ func (s *Store) uploadStageLocked(id string) (UploadPreview, stagedRecord, strin
 		return UploadPreview{}, record, "", err
 	}
 	createdAt, _ := parsePersistedTime(created)
-	preview, err := s.previewLocked(id, name, record, createdAt, expiresAt)
+	preview, err := s.previewLocked(id, name, record, createdAt, expiresAt, ctx)
 	return preview, record, path, err
 }
 

@@ -10,14 +10,16 @@ import (
 	"time"
 )
 
-func (s *Store) Audit(limit int, before int64) ([]AuditEntry, error) {
+func (s *Store) Audit(limit int, before int64, contexts ...context.Context) ([]AuditEntry, error) {
 	if limit < 1 || limit > 500 {
 		limit = 100
 	}
 	if before <= 0 {
 		before = 1 << 62
 	}
-	rows, err := s.db.Query("SELECT id,actor,action,entity_id,changes,created_at,actor_type,user_id,credential_id FROM audit WHERE id<? ORDER BY id DESC LIMIT ?", before, limit)
+	ctx, cancel := context.WithTimeout(readContext(contexts), 5*time.Second)
+	defer cancel()
+	rows, err := s.readDatabase().QueryContext(ctx, "SELECT id,actor,action,entity_id,changes,created_at,actor_type,user_id,credential_id FROM audit WHERE id<? ORDER BY id DESC LIMIT ?", before, limit)
 	if err != nil {
 		return nil, err
 	}

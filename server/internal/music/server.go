@@ -631,7 +631,27 @@ func (a *API) cover(response http.ResponseWriter, request *http.Request) {
 	}
 	auth := authFromRequest(request)
 	var allowed bool
-	err := a.store.readSnapshot(request.Context(), func(tx *sql.Tx) error { var err error; allowed, err = coverReadable(tx, auth, id); return err })
+	asset := CoverAsset{ID: id}
+	etag := fmt.Sprintf("\"%s\"", id)
+	unchanged := matchesETag(request.Header.Get("If-None-Match"), etag)
+	missing := false
+	err := a.store.readQuery(request.Context(), func(reader sqlReader) error {
+		var err error
+		allowed, err = coverReadable(reader, auth, id)
+		if err != nil || !allowed {
+			return err
+		}
+		if request.Method == http.MethodHead || unchanged {
+			err = reader.QueryRow("SELECT mime FROM cover_assets WHERE id=?", id).Scan(&asset.MIME)
+		} else {
+			err = reader.QueryRow("SELECT mime,data FROM cover_assets WHERE id=?", id).Scan(&asset.MIME, &asset.Data)
+		}
+		if errors.Is(err, sql.ErrNoRows) {
+			missing = true
+			return nil
+		}
+		return err
+	})
 	if err != nil {
 		if errors.Is(err, errResourceHidden) || errors.Is(err, sql.ErrNoRows) {
 			writeError(response, 401, "AUTH_INVALID", "sign in again")
@@ -640,20 +660,15 @@ func (a *API) cover(response http.ResponseWriter, request *http.Request) {
 		writeError(response, 503, "DATABASE_UNAVAILABLE", "cover visibility unavailable")
 		return
 	}
-	if !allowed {
+	if !allowed || missing {
 		writeError(response, 404, "COVER_NOT_FOUND", "cover not found")
-		return
-	}
-	asset, ok := a.store.Cover(id)
-	if !ok {
-		writeError(response, http.StatusNotFound, "COVER_NOT_FOUND", "cover not found")
 		return
 	}
 	response.Header().Set("Content-Type", asset.MIME)
 	response.Header().Set("Cache-Control", "private, no-cache")
 	response.Header().Set("Vary", "X-API-Key, Authorization, Cookie")
-	response.Header().Set("ETag", fmt.Sprintf("\"%s\"", id))
-	if matchesETag(request.Header.Get("If-None-Match"), response.Header().Get("ETag")) {
+	response.Header().Set("ETag", etag)
+	if unchanged {
 		response.WriteHeader(http.StatusNotModified)
 		return
 	}
@@ -1448,7 +1463,14 @@ func (a *API) stagedUpload(response http.ResponseWriter, request *http.Request) 
 	}
 	id := parts[0]
 	var stageOwner string
-	if a.store.db.QueryRow("SELECT user_id FROM upload_staging WHERE id=?", id).Scan(&stageOwner) != nil || stageOwner != authFromRequest(request).userID {
+	ownerErr := a.store.readQuery(request.Context(), func(reader sqlReader) error {
+		return reader.QueryRow("SELECT user_id FROM upload_staging WHERE id=?", id).Scan(&stageOwner)
+	})
+	if ownerErr != nil && !errors.Is(ownerErr, sql.ErrNoRows) {
+		writeError(response, 503, "DATABASE_UNAVAILABLE", "upload visibility unavailable")
+		return
+	}
+	if ownerErr != nil || stageOwner != authFromRequest(request).userID {
 		writeError(response, 404, "STAGE_NOT_FOUND", "upload stage not found")
 		return
 	}
@@ -1505,7 +1527,7 @@ func (a *API) stagedUpload(response http.ResponseWriter, request *http.Request) 
 	}
 	switch request.Method {
 	case http.MethodGet:
-		preview, ok, err := a.store.UploadStage(id)
+		preview, ok, err := a.store.UploadStage(id, request.Context())
 		if err != nil {
 			writeError(response, http.StatusInternalServerError, "STAGE_READ_FAILED", err.Error())
 			return
@@ -1538,7 +1560,7 @@ func (a *API) keys(response http.ResponseWriter, request *http.Request) {
 			methodNotAllowed(response, request)
 			return
 		}
-		stats := a.readCallStats(authFromRequest(request).userID)
+		stats := a.readCallStatsContext(request.Context(), authFromRequest(request).userID)
 		if stats.err != nil {
 			writeError(response, 500, "STATS_READ_FAILED", "statistics unavailable")
 			return
@@ -1648,7 +1670,7 @@ func (a *API) adminStats(response http.ResponseWriter, request *http.Request) {
 		methodNotAllowed(response, request)
 		return
 	}
-	stats := a.readCallStats(request.URL.Query().Get("user_id"))
+	stats := a.readCallStatsContext(request.Context(), request.URL.Query().Get("user_id"))
 	if stats.err != nil {
 		writeError(response, http.StatusInternalServerError, "STATS_READ_FAILED", "failed to read API call statistics")
 		return
@@ -1800,9 +1822,9 @@ func (a *API) maintenance(response http.ResponseWriter, request *http.Request) {
 	case path == "/api/v2/admin/audit" && request.Method == http.MethodGet:
 		limit, _ := strconv.Atoi(request.URL.Query().Get("limit"))
 		before, _ := strconv.ParseInt(request.URL.Query().Get("before"), 10, 64)
-		result, err := a.store.Audit(limit, before)
+		result, err := a.store.Audit(limit, before, request.Context())
 		if err != nil {
-			writeError(response, 500, err.Error())
+			writeError(response, 503, "DATABASE_UNAVAILABLE", "audit unavailable")
 			return
 		}
 		writeJSON(response, 200, result)
