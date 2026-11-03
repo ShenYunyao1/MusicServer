@@ -13,6 +13,11 @@ module.exports=async({page,directory})=>{
  await page.waitForFunction(()=>memberPlayer.paused&&!memberPlayer.seeking&&Math.abs(memberPlayer.currentTime-4)<.2);
  await page.locator('.online-lyric-line[data-lyric-index="2"]').click();
  try{await page.waitForFunction(()=>lyricSeekTrace.some(event=>event.event==='seeked'&&event.time>=7&&event.time<8)&&memberPlayer.currentTime>=7&&!memberPlayer.paused)}catch(error){console.error('Lyric seek state',await page.evaluate(()=>({time:memberPlayer.currentTime,duration:memberPlayer.duration,seeking:memberPlayer.seeking,ready:memberPlayer.readyState,trace:lyricSeekTrace})));throw error}
+ // A recoverable media error causes a real source reload. The clicked lyric
+ // remains the requested position after metadata is available again.
+ await page.evaluate(()=>{memberPlayer.pause();memberPlayer.currentTime=4});await page.waitForFunction(()=>!memberPlayer.seeking&&Math.abs(memberPlayer.currentTime-4)<.2);
+ await page.evaluate(()=>{const originalLoad=memberPlayer.load;Object.defineProperty(memberPlayer,'error',{configurable:true,get:()=>({code:3,message:'isolated media reload fixture'})});memberPlayer.load=function(){delete this.error;this.load=originalLoad;return originalLoad.call(this)}});
+ await page.locator('.online-lyric-line[data-lyric-index="2"]').click();await page.waitForFunction(()=>memberPlayer.currentTime>=7&&!memberPlayer.paused&&!memberPlayer.seeking);
  await page.locator('#onlineSeek').fill('500');await page.locator('#onlineSeek').dispatchEvent('change');assert.ok(await page.evaluate(()=>Math.abs(memberPlayer.currentTime-memberPlayer.duration/2)<.5));
  await page.locator('#onlineMute').click();assert.equal(await page.evaluate(()=>memberPlayer.muted),true,JSON.stringify(await page.evaluate(()=>({muted:memberPlayer.muted,volume:memberPlayer.volume,hit:(()=>{const r=document.querySelector('#onlineMute').getBoundingClientRect();return document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.outerHTML})()}))));await page.locator('#onlineMute').click();assert.equal(await page.evaluate(()=>memberPlayer.muted),false);
  await page.locator('#onlineVolume').fill('0.4');await page.waitForFunction(()=>Math.abs(onlineOutput.level-.4)<.001&&onlineOutput.gain&&Math.abs(onlineOutput.gain.gain.value-.4)<.001);

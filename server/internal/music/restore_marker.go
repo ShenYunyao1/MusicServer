@@ -75,12 +75,18 @@ func managedRestoreStage(parent, name string) (bool, error) {
 		return false, nil
 	}
 	expectedParent := filepath.Dir(marker.Target)
-	if runtime.GOOS == "windows" {
-		if !strings.EqualFold(expectedParent, parent) {
+	if expectedParent != parent {
+		declared, err := os.Stat(expectedParent)
+		if err != nil {
+			return false, err
+		}
+		actual, err := os.Stat(parent)
+		if err != nil {
+			return false, err
+		}
+		if !declared.IsDir() || !os.SameFile(declared, actual) {
 			return false, nil
 		}
-	} else if expectedParent != parent {
-		return false, nil
 	}
 	return strings.HasPrefix(name, ".musicserver-restore-"+restoreTargetKey(marker.Target)+"-"), nil
 }
