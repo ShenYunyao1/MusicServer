@@ -132,6 +132,7 @@ async function saveRegistrationSettings(event){
 }
 function renderMailState(settings){
   $('mailSettingsState').textContent=mailDirty?'存在未保存的邮件设置，请先保存再发送测试邮件。':settings.tested?'邮件服务已通过投递测试。':settings.configured?'已配置，完成测试邮件后可启用注册。':'尚未完成邮件服务配置。';
+  if(settings.cleanup_warning)$('mailSettingsState').textContent+=' '+settings.cleanup_warning;
   $('mailSettingsState').hidden=false;
   $('mailCredentialState').textContent=settings.configured?'凭据已在服务器保存；留空保留原值。':'请输入服务商提供的 SMTP 密码或授权码。';
   $('mailCredentialState').hidden=false;

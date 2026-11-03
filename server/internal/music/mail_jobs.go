@@ -13,12 +13,15 @@ import (
 )
 
 type mailRuntime struct {
-	secretReadHook  func() // Private regression seam; never configured by HTTP.
-	secretWriteHook func()
-	mu              sync.Mutex
-	cancel          context.CancelFunc
-	wake            chan struct{}
-	started         bool
+	warningMu        sync.RWMutex
+	cleanupWarning   string
+	secretRemoveHook func(string) error
+	secretReadHook   func() // Private regression seam; never configured by HTTP.
+	secretWriteHook  func()
+	mu               sync.Mutex
+	cancel           context.CancelFunc
+	wake             chan struct{}
+	started          bool
 	// Test injection stays private and is never exposed through configuration.
 	sendHook func(context.Context, MailSettings, mailSecret, mailEnvelope, string) error
 	roots    *x509.CertPool
@@ -45,6 +48,7 @@ func (s *Store) InitMail() error {
 	if s.mail.started {
 		return nil
 	}
+	_ = s.cleanupMailSecretsLocked()
 	ctx, cancel := context.WithCancel(context.Background())
 	s.mail.cancel = cancel
 	s.mail.wake = make(chan struct{}, 1)
@@ -54,6 +58,7 @@ func (s *Store) InitMail() error {
 		defer s.workers.Done()
 		timer := time.NewTicker(time.Second)
 		defer timer.Stop()
+		nextCleanup := time.Now().Add(time.Minute)
 		for {
 			select {
 			case <-ctx.Done():
@@ -62,6 +67,10 @@ func (s *Store) InitMail() error {
 			case <-s.mail.wake:
 			}
 			_ = s.ProcessMailJobs(ctx, 4)
+			if time.Now().After(nextCleanup) {
+				_ = s.CleanupMailSecrets()
+				nextCleanup = time.Now().Add(time.Minute)
+			}
 		}
 	}()
 	return nil

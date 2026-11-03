@@ -32,6 +32,7 @@ func run() error {
 	formal := flag.Bool("formal", false, "validate formal-release prerequisites")
 	bridgeDir := flag.String("bridge-assets", "build/schema8-bridge", "formal schema-8 bridge asset directory")
 	flag.Parse()
+	*formal = formalPackagingRequired(*sign, *formal)
 	if *show {
 		fmt.Println(version.Version)
 		return nil

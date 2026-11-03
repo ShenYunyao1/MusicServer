@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"musicserver/internal/activity"
 	"net"
 	"net/mail"
 	"os"
@@ -28,14 +27,15 @@ var errMailInvalid = errors.New("验证码无效、已使用或已过期")
 var errMailAddressTaken = errors.New("该邮箱已被其他账户绑定")
 
 type MailSettings struct {
-	Host        string `json:"host"`
-	Port        int    `json:"port"`
-	TLSMode     string `json:"tls_mode"`
-	FromAddress string `json:"from_address"`
-	Username    string `json:"username"`
-	Version     int64  `json:"version"`
-	Configured  bool   `json:"configured"`
-	Tested      bool   `json:"tested"`
+	CleanupWarning string `json:"cleanup_warning,omitempty"`
+	Host           string `json:"host"`
+	Port           int    `json:"port"`
+	TLSMode        string `json:"tls_mode"`
+	FromAddress    string `json:"from_address"`
+	Username       string `json:"username"`
+	Version        int64  `json:"version"`
+	Configured     bool   `json:"configured"`
+	Tested         bool   `json:"tested"`
 }
 type mailSettingsRecord struct {
 	MailSettings
@@ -277,6 +277,9 @@ func (s *Store) MailSettings() (MailSettings, error) {
 		record.Configured = false
 		record.Tested = false
 	}
+	s.mail.warningMu.RLock()
+	record.CleanupWarning = s.mail.cleanupWarning
+	s.mail.warningMu.RUnlock()
 	return record.MailSettings, nil
 }
 func (s *Store) mailReadyFrom(reader sqlReader) bool {
@@ -324,7 +327,6 @@ func (s *Store) UpdateMailSettings(input MailSettingsInput, options MutationOpti
 	defer s.mail.mu.Unlock()
 	var result MailSettings
 	var createdPath string
-	var retiredSecret string
 	validateActor := func(tx *sql.Tx) error {
 		if err := requireAdminActor(tx, []MutationOptions{options}); err != nil {
 			return err
@@ -360,7 +362,6 @@ func (s *Store) UpdateMailSettings(input MailSettingsInput, options MutationOpti
 	}
 	secretID := prepared.SecretID
 	if input.Password != "" {
-		retiredSecret = prepared.SecretID
 		secretID, err = randomToken(16)
 		if err != nil {
 			return MailSettings{}, err
@@ -403,17 +404,8 @@ func (s *Store) UpdateMailSettings(input MailSettingsInput, options MutationOpti
 		return auditMutation(tx, "mail.settings", "mail", map[string]any{"version": current.Version}, map[string]any{"version": result.Version, "configured": true}, []MutationOptions{options})
 	})
 	committed = err == nil
-	if err == nil && retiredSecret != "" && validResumeID(retiredSecret) {
-		root, openErr := os.OpenRoot(s.mailSecretsDirectory())
-		if openErr == nil {
-			removeErr := root.Remove(retiredSecret + ".json")
-			_ = root.Close()
-			if removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-				_ = s.activity.Emit("mail.failed", activity.Fields{Reason: "MAIL_UNAVAILABLE"})
-			}
-		} else {
-			_ = s.activity.Emit("mail.failed", activity.Fields{Reason: "MAIL_UNAVAILABLE"})
-		}
+	if err == nil {
+		_ = s.cleanupMailSecretsLocked()
 	}
 	return result, err
 }

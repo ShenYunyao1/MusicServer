@@ -55,7 +55,8 @@ type eventInfo struct{ category, level, message string }
 var events = map[string]eventInfo{
 	"mail.queued": {"mail", "info", "验证邮件已排队"}, "mail.submitted": {"mail", "info", "邮件已提交投递服务"}, "mail.failed": {"mail", "warn", "邮件投递失败"},
 	"mail.verified": {"mail", "info", "账户邮箱验证完成"}, "mail.tested": {"mail", "info", "测试邮件已提交投递服务"},
-	"server.start": {"server", "info", "服务器启动"}, "server.stop": {"server", "info", "服务器停止"},
+	"mail.cleanup_failed": {"mail", "warn", "旧邮件凭据清理失败，后台将重试"},
+	"server.start":        {"server", "info", "服务器启动"}, "server.stop": {"server", "info", "服务器停止"},
 	"server.cleanup_failed":      {"server", "error", "清理过期暂存失败"},
 	"server.backup_prune_failed": {"server", "error", "备份已创建，但自动保留清理失败"},
 	"tag.batch_failed":           {"tag", "error", "标签批量任务执行失败"},

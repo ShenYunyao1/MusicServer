@@ -3,6 +3,7 @@ package music
 import (
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -54,7 +55,11 @@ func CleanupRestoreStaging(parent string) (removed, active int, failure error) {
 		}
 		unlock, e := LockDatabaseProcess(filepath.Join(absolute, ".musicserver-restorelock-"+parts[0]))
 		if e != nil {
-			active++
+			if errors.Is(e, ErrDatabaseInUse) {
+				active++
+			} else {
+				failures = append(failures, fmt.Errorf("restore staging %q: %w", name, e))
+			}
 			continue
 		}
 		owned, verifyErr := managedRestoreStage(absolute, name)

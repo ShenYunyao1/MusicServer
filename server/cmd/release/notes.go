@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"regexp"
 	"strings"
 )
@@ -9,16 +12,33 @@ import (
 func validateReleaseNotes(data []byte, release string, schema int) error {
 	notes := strings.TrimSpace(string(data))
 	heading, _, _ := strings.Cut(notes, "\n")
-	if !regexp.MustCompile(`(^|[^A-Za-z0-9.])v` + regexp.QuoteMeta(release) + `([^A-Za-z0-9.]|$)`).MatchString(heading) {
-		return fmt.Errorf("formal release notes heading must contain v%s", release)
+	if strings.TrimSpace(heading) != "# MusicServer v"+release {
+		return fmt.Errorf("formal release notes heading must be # MusicServer v%s", release)
 	}
-	for _, placeholder := range []string{"尚未正式发行", "下一版开发说明"} {
-		if strings.Contains(notes, placeholder) {
-			return fmt.Errorf("formal release notes contain development placeholder %q", placeholder)
-		}
+	if regexp.MustCompile(`(?i)\b(unreleased|draft|development)\b|草稿|尚未正式发行|下一版开发说明|待发布`).MatchString(notes) {
+		return fmt.Errorf("formal release notes contain development placeholders")
 	}
-	if !regexp.MustCompile(fmt.Sprintf(`(?i)\bschema\s+%d\b`, schema)).MatchString(notes) {
+	metadata := regexp.MustCompile(`(?m)^<!-- musicserver-release: (\{[^\r\n]*\}) -->\r?$`).FindAllSubmatch(data, -1)
+	if len(metadata) != 1 {
+		return fmt.Errorf("formal release notes require exactly one musicserver-release metadata comment")
+	}
+	var record struct {
+		Version string `json:"version"`
+		Schema  int    `json:"schema"`
+		Status  string `json:"status"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(metadata[0][1]))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&record); err != nil {
+		return fmt.Errorf("invalid release metadata: %w", err)
+	}
+	if decoder.Decode(new(any)) != io.EOF || record.Version != release || record.Schema != schema || record.Status != "stable" {
+		return fmt.Errorf("release metadata must match version, schema and stable status")
+	}
+	if !regexp.MustCompile(fmt.Sprintf(`(?i)\bschema(?:\s+|\s*[:：为]\s*)%d\b`, schema)).MatchString(notes) {
 		return fmt.Errorf("formal release notes must identify schema %d", schema)
 	}
 	return nil
 }
+
+func formalPackagingRequired(sign, formal bool) bool { return sign || formal }

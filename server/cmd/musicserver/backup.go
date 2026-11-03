@@ -20,10 +20,10 @@ func backupCommand(args []string) error {
 			return errors.New("--parent is required")
 		}
 		removed, active, err := music.CleanupRestoreStaging(*parent)
+		fmt.Printf("RESTORE CLEANUP: %d staging directories removed; %d directories skipped because another process holds their lock. Zero-byte lock files are retained.\n", removed, active)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("RESTORE CLEANUP: %d staging directories removed; %d locked or inaccessible directories skipped. Zero-byte lock files are retained.\n", removed, active)
 		return nil
 	}
 	if len(args) == 0 || args[0] != "restore" {

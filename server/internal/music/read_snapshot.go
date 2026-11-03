@@ -59,11 +59,9 @@ func (s *Store) readDatabase() *sql.DB {
 
 func (s *Store) initializeReadPool() error {
 	var mode string
-	if err := s.db.QueryRow("PRAGMA journal_mode=WAL").Scan(&mode); err != nil {
+	probeErr := s.db.QueryRow("PRAGMA journal_mode=WAL").Scan(&mode)
+	if err := walSupportError(s.dataPath, mode, probeErr); err != nil {
 		return err
-	}
-	if mode != "wal" {
-		return fmt.Errorf("SQLite WAL required for concurrent runtime readers, got %s", mode)
 	}
 	db, err := openSQLiteMode(s.dataPath, true)
 	if err != nil {
@@ -77,6 +75,17 @@ func (s *Store) initializeReadPool() error {
 	}
 	s.readDB = db
 	return nil
+}
+
+func walSupportError(path, mode string, cause error) error {
+	if cause == nil && mode == "wal" {
+		return nil
+	}
+	message := fmt.Sprintf("SQLite WAL unavailable for %q (mode %q): use a local writable filesystem with permission to create -wal/-shm files; network shares and read-only directories are unsupported", path, mode)
+	if cause != nil {
+		return fmt.Errorf("%s: %w", message, cause)
+	}
+	return errors.New(message)
 }
 
 func (s *Store) closeDatabases() error {
