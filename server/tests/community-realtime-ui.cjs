@@ -39,6 +39,10 @@ module.exports=async function({page,browser,base,directory}){
     await reader.page.click('[data-open-shared]');await reader.page.locator('#playlistDetail .playlist-track').waitFor();
     await page.evaluate(async id=>{const t=await api('tracks/'+id);await api('tracks/'+id,'PATCH',{title:'Live subscription track'},undefined,t.version)},shared.track_ids[0]);
     await reader.page.locator('#playlistDetail .track-title').filter({hasText:'Live subscription track'}).waitFor({timeout:5000});
+    await reader.page.fill('#playlistTrackSearch','nothing-matches-subscription');
+    await reader.page.waitForFunction(()=>state.liveSubscriptionPage?.total===0&&publicDetailSearchTimer===null,{},{timeout:3000});
+    await reader.page.fill('#playlistTrackSearch','Live subscription');
+    await reader.page.locator('#playlistDetail .track-title').filter({hasText:'Live subscription track'}).waitFor({timeout:3000});
     await page.click('[data-owner-invite-action="revoke"]');
     await reader.page.locator('[data-subscription-invalid]').waitFor({timeout:5000});
     assert.equal(await reader.page.locator('#playlistDetail .playlist-track').count(),0);

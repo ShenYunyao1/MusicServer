@@ -86,7 +86,8 @@ func TestLegacySQLiteSnapshotCanBeInspectedDownloadedAndDeleted(t *testing.T) {
 
 func TestRestoreStagingCleanupIsDestinationScoped(t *testing.T) {
 	dir := t.TempDir()
-	prefix := ".musicserver-restore-11111111111111111111111111111111-"
+	target := filepath.Join(dir, "restored")
+	prefix := ".musicserver-restore-" + restoreTargetKey(target) + "-"
 	remove := prefix + "12345"
 	keep := []string{".musicserver-restore-22222222222222222222222222222222-12345", prefix + "manual-copy", ".musicserver-restore-12345"}
 	for _, name := range append([]string{remove}, keep...) {
@@ -96,6 +97,9 @@ func TestRestoreStagingCleanupIsDestinationScoped(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, name, "data"), []byte("test"), 0600); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := writeRestoreMarker(filepath.Join(dir, remove), target); err != nil {
+		t.Fatal(err)
 	}
 	if err := cleanupRestoreTemporary(dir, prefix); err != nil {
 		t.Fatal(err)

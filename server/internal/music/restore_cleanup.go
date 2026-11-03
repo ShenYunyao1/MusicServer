@@ -57,6 +57,14 @@ func CleanupRestoreStaging(parent string) (removed, active int, failure error) {
 			active++
 			continue
 		}
+		owned, verifyErr := managedRestoreStage(absolute, name)
+		if verifyErr != nil {
+			failures = append(failures, verifyErr)
+		}
+		if !owned || verifyErr != nil {
+			unlock()
+			continue
+		}
 		e = root.RemoveAll(name)
 		unlock()
 		if e != nil {
@@ -91,6 +99,14 @@ func cleanupRestoreTemporary(parent, prefix string) error {
 			continue
 		}
 		if _, err := strconv.ParseUint(strings.TrimPrefix(entry.Name(), prefix), 10, 32); err != nil {
+			continue
+		}
+		owned, verifyErr := managedRestoreStage(parent, entry.Name())
+		if verifyErr != nil {
+			failures = append(failures, verifyErr)
+			continue
+		}
+		if !owned {
 			continue
 		}
 		if err := root.RemoveAll(entry.Name()); err != nil {

@@ -1594,6 +1594,10 @@ func (a *API) keys(response http.ResponseWriter, request *http.Request) {
 	}
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	id := parts[0]
+	if len(parts) != 1 && !(len(parts) == 2 && parts[1] == "rotate") {
+		writeError(response, 404, "NOT_FOUND", "key endpoint not found")
+		return
+	}
 	if len(parts) == 2 && parts[1] == "rotate" {
 		if request.Method != http.MethodPost {
 			methodNotAllowed(response, request)

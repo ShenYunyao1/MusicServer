@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -50,11 +51,21 @@ func TestAuditBackupCancelRejectsFinishedJobWithoutAudit(t *testing.T) {
 
 func TestAuditRestoreCleanupSkipsLockedTargetsAndUnmanagedNames(t *testing.T) {
 	parent := t.TempDir()
-	free := "00000000000000000000000000000001"
-	active := "00000000000000000000000000000002"
+	free := restoreTargetKey(filepath.Join(parent, "free"))
+	active := restoreTargetKey(filepath.Join(parent, "active"))
 	for _, name := range []string{".musicserver-restore-" + free + "-123", ".musicserver-restore-" + active + "-456", ".musicserver-restore-user-copy"} {
 		if err := os.Mkdir(filepath.Join(parent, name), 0700); err != nil {
 			t.Fatal(err)
+		}
+		if strings.Contains(name, free) {
+			if err := writeRestoreMarker(filepath.Join(parent, name), filepath.Join(parent, "free")); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if strings.Contains(name, active) {
+			if err := writeRestoreMarker(filepath.Join(parent, name), filepath.Join(parent, "active")); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	unlock, err := LockDatabaseProcess(filepath.Join(parent, ".musicserver-restorelock-"+active))

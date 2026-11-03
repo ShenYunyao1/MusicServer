@@ -219,6 +219,9 @@ func restoreBackupWithMountCheck(ctx context.Context, archivePath, destination s
 		return manifest, err
 	}
 	defer os.RemoveAll(temporary)
+	if err := writeRestoreMarker(temporary, filepath.Join(parent, filepath.Base(target))); err != nil {
+		return manifest, err
+	}
 	expected := map[string]BackupFile{}
 	for _, file := range manifest.Files {
 		expected[file.Path] = file
@@ -271,6 +274,9 @@ func restoreBackupWithMountCheck(ctx context.Context, archivePath, destination s
 		return manifest, err
 	}
 	if err := os.Remove(target); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return manifest, err
+	}
+	if err := os.Remove(filepath.Join(temporary, restoreMarkerName)); err != nil {
 		return manifest, err
 	}
 	if err := os.Rename(temporary, target); err != nil {

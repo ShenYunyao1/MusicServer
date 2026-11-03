@@ -3,6 +3,7 @@
 const PUBLIC_REFRESH_MS=5*60*1000;
 const communityCache=new Map();let communityTimer=null,communityRequest=0,communityLastCheck=0;
 let publicDetailSearchTimer=null;
+function searchSubscriptionDetail(id,value){clearTimeout(publicDetailSearchTimer);const owner=state.user?.id;publicDetailSearchTimer=setTimeout(()=>{publicDetailSearchTimer=null;if(owner===state.user?.id&&state.page==='playlists'&&state.playlistDetailId===id&&state.subscriptionsTab){browseSetRoute(value.trim().slice(0,256),0);scheduleCommunityRealtime(true)}},220)}
 function publicDetailRouteValues(){const query=new URLSearchParams(location.hash.split('?')[1]||''),raw=Number(query.get('offset'));return {offset:Number.isSafeInteger(raw)&&raw>=0&&raw<=1000000?raw:0,limit:50,q:(query.get('q')||'').trim().slice(0,256)}}
 function navigatePublicDetail(offset=0,query=publicDetailRouteValues().q){const values=new URLSearchParams();if(offset)values.set('offset',String(offset));if(query)values.set('q',query);location.hash='#/public/playlists/'+encodeURIComponent(state.publicDetailId)+(values.size?'?'+values:'')}
 function searchPublicDetail(value){clearTimeout(publicDetailSearchTimer);communityRequest++;const owner=state.user?.id,id=state.publicDetailId;publicDetailSearchTimer=setTimeout(()=>{publicDetailSearchTimer=null;if(owner===state.user?.id&&state.page==='public'&&id===state.publicDetailId){const query=value.trim().slice(0,256);if(publicDetailRouteValues().q===query)loadPublicDetail(id).catch(error=>setStatus(error.message,'error'));else navigatePublicDetail(0,query)}},220)}
