@@ -1,7 +1,6 @@
 package music
 
 import (
-	"database/sql"
 	"strings"
 )
 
@@ -37,7 +36,7 @@ func (s *Store) TrackTagFacets(auth authContext, q TagFacetQuery) (TagFacetPage,
 	if q.Scope != "public" && q.Scope != "personal" || !tagGroupID(q.GroupID) || !validFilterText(q.Search, 64) {
 		return page, errTagInvalid
 	}
-	err = s.tagRead(func(tx *sql.Tx) error {
+	err = s.tagRead(auth.requestContext, func(tx sqlReader) error {
 		actor, err := tagActor(tx, auth)
 		if err != nil {
 			return err

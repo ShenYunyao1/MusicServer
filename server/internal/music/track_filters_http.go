@@ -28,7 +28,7 @@ func (a *API) trackFiltersHTTP(w http.ResponseWriter, r *http.Request) bool {
 	if !a.requireAccount(w, r) {
 		return true
 	}
-	if err := requireTagsSchema(a.store.db); err != nil {
+	if err := requireTagsSchema(contextSQLReader{a.store.readDatabase(), r.Context()}); err != nil {
 		writeTrackFilterError(w, err)
 		return true
 	}

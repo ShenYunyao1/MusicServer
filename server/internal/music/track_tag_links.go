@@ -77,7 +77,7 @@ func trackTagsView(reader sqlReader, trackID, userID string) (TrackTagsView, err
 
 func (s *Store) GetTrackTags(auth authContext, trackID string) (TrackTagsView, error) {
 	var view TrackTagsView
-	err := s.tagRead(func(tx *sql.Tx) error {
+	err := s.tagRead(auth.requestContext, func(tx sqlReader) error {
 		actor, err := tagActor(tx, auth)
 		if err != nil {
 			return err

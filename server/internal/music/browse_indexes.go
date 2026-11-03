@@ -7,7 +7,7 @@ import (
 	"log"
 )
 
-const browseIndexVersion = "4"
+const browseIndexVersion = "5"
 
 func browseIndexDigest(reader sqlReader) (string, error) {
 	rows, err := reader.Query(`SELECT name,sql FROM sqlite_master WHERE (name GLOB 'browse_*' AND type IN ('table','trigger','index')) OR name IN ('tracks_cover_lookup','playlists_cover_lookup','audit_public_contributions','tags_scope_capacity') ORDER BY name`)
@@ -100,7 +100,7 @@ func initializeBrowseIndexes(db *sql.DB) error {
  CREATE INDEX IF NOT EXISTS tags_scope_capacity ON tags(scope_id) WHERE merged_into IS NULL;
  CREATE INDEX IF NOT EXISTS playlists_cover_lookup ON playlists(json_extract(payload,'$.cover_id')) WHERE json_valid(payload);
 	CREATE INDEX IF NOT EXISTS audit_public_contributions ON audit(user_id,created_at DESC) WHERE action='tag.create' AND json_valid(changes) AND json_extract(changes,'$.after.scope')='public';
- INSERT OR IGNORE INTO meta(key,value) VALUES('browse/epoch',lower(hex(randomblob(16)))),('browse/library','0'),('browse/admin','0');`); err != nil {
+ INSERT OR IGNORE INTO meta(key,value) VALUES('browse/epoch',lower(hex(randomblob(16)))),('browse/library','0'),('browse/admin','0'),('browse/community','0');`); err != nil {
 		return err
 	}
 	bump := func(key string) string {
@@ -128,13 +128,14 @@ func initializeBrowseIndexes(db *sql.DB) error {
 			definitions["subscriptions"] += account("OLD.user_id")
 		}
 		for table, body := range definitions {
+			body += bump("'browse/community'")
 			if _, err = tx.Exec(fmt.Sprintf("CREATE TRIGGER IF NOT EXISTS browse_%s_%s AFTER %s ON %s BEGIN %s END", table, event, event, table, body)); err != nil {
 				return err
 			}
 		}
 	}
 	if _, err = tx.Exec(`CREATE TRIGGER IF NOT EXISTS browse_user_visibility AFTER UPDATE OF enabled,display_name,role ON users BEGIN
- UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key IN ('browse/library','browse/admin');
+ UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key IN ('browse/library','browse/admin','browse/community');
  INSERT INTO meta(key,value) VALUES('browse/account/'||NEW.id,'1') ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1;
  INSERT INTO meta(key,value) SELECT DISTINCT 'browse/account/'||s.user_id,'1' FROM subscriptions s JOIN playlists p ON p.id=s.playlist_id WHERE p.owner_id=NEW.id ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1;
  END;`); err != nil {

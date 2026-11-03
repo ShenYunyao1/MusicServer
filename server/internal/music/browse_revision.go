@@ -9,7 +9,7 @@ import (
 // A JSON-safe fingerprint of incrementally maintained, account-bound stamps.
 // Read a constant number of counters, never the catalogue's individual rows.
 func browseAccountRevision(reader sqlReader, auth authContext) (int64, error) {
-	return browseAccountRevisionData(reader, auth, true)
+	return browseAccountRevisionData(reader, auth, false)
 }
 
 func playbackRevision(account int64, id, source string, version int64) int64 {

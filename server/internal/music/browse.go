@@ -102,13 +102,8 @@ func (a *API) browse(response http.ResponseWriter, request *http.Request) {
 	}
 	auth := authFromRequest(request)
 	var result any
-	transact := func(run func(*sql.Tx) error) error { return a.store.readSnapshot(request.Context(), run) }
-	// Explicit administrator inspection writes an audit row; ordinary reads
-	// neither acquire writeMu nor wake community streams.
-	if auth.role == "admin" && (len(parts) == 2 && parts[0] == "playback" && request.URL.Query().Get("source") == "own" || len(parts) == 3 && parts[0] == "playlists") {
-		transact = a.store.transaction
-	}
-	err = transact(func(tx *sql.Tx) error {
+	var inspected *browsePage
+	err = a.store.readQuery(request.Context(), func(tx sqlReader) error {
 		if err := browseIdentity(tx, auth); err != nil {
 			return err
 		}
@@ -155,18 +150,14 @@ func (a *API) browse(response http.ResponseWriter, request *http.Request) {
 				return err
 			}
 			if request.URL.Query().Get("source") == "own" && auth.role == "admin" && page.Playlist["owner_id"] != auth.userID && page.Playlist["system"] != true {
-				if err := auditMutation(tx, "playlist.admin.read", parts[1], nil, map[string]any{"owner_id": page.Playlist["owner_id"], "offset": q.Offset, "limit": q.Limit, "source": "playback"}, []MutationOptions{mutationOptions(request)}); err != nil {
-					return err
-				}
+				inspected = &page
 			}
 		case len(parts) == 3 && parts[0] == "playlists" && parts[2] == "tracks" && validID.MatchString(parts[1]):
 			if err := browsePlaylistTracks(tx, auth, parts[1], q, &page); err != nil {
 				return err
 			}
 			if auth.role == "admin" && page.Playlist["owner_id"] != auth.userID && page.Playlist["system"] != true {
-				if err := auditMutation(tx, "playlist.admin.read", parts[1], nil, map[string]any{"owner_id": page.Playlist["owner_id"], "offset": q.Offset, "limit": q.Limit}, []MutationOptions{mutationOptions(request)}); err != nil {
-					return err
-				}
+				inspected = &page
 			}
 		default:
 			return errResourceHidden
@@ -174,6 +165,9 @@ func (a *API) browse(response http.ResponseWriter, request *http.Request) {
 		result = page
 		return nil
 	})
+	if err == nil && inspected != nil {
+		err = a.store.auditPlaylistInspection(auth, parts[1], inspected.Playlist["owner_id"].(string), int64(inspected.Playlist["version"].(float64)), mutationOptions(request), map[string]any{"offset": q.Offset, "limit": q.Limit, "source": request.URL.Query().Get("source")})
+	}
 	if err != nil {
 		writeBrowseError(response, err)
 		return
@@ -354,7 +348,7 @@ func browseTrackWhere(tx sqlReader, auth authContext, q browseQuery) (string, []
 	return where, args, nil
 }
 
-func browseTracks(tx *sql.Tx, auth authContext, q browseQuery, page *browsePage) error {
+func browseTracks(tx sqlReader, auth authContext, q browseQuery, page *browsePage) error {
 	where, args, err := browseTrackWhere(tx, auth, q)
 	if err != nil {
 		return err
@@ -388,7 +382,7 @@ func browsePlaylistSummary(raw string, count int) (map[string]any, error) {
 	return item, nil
 }
 
-func browsePlaylists(tx *sql.Tx, auth authContext, q browseQuery, page *browsePage) error {
+func browsePlaylists(tx sqlReader, auth authContext, q browseQuery, page *browsePage) error {
 	where := "owner_id=? AND system=0"
 	args := []any{auth.userID}
 	if q.Search != "" {
@@ -425,7 +419,7 @@ func browsePlaylists(tx *sql.Tx, auth authContext, q browseQuery, page *browsePa
 	return rows.Err()
 }
 
-func browsePlaylistTracks(tx *sql.Tx, auth authContext, id string, q browseQuery, page *browsePage, playbackSource ...string) error {
+func browsePlaylistTracks(tx sqlReader, auth authContext, id string, q browseQuery, page *browsePage, playbackSource ...string) error {
 	var raw string
 	var count int
 	playback := len(playbackSource) > 0

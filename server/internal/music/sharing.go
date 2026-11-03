@@ -63,7 +63,7 @@ func scanInvitation(row interface{ Scan(...any) error }) (PlaylistInvitation, er
 func readInvitation(reader sqlReader, id string) (PlaylistInvitation, error) {
 	return scanInvitation(reader.QueryRow("SELECT "+invitationColumns+invitationJoin+" WHERE i.id=?", id))
 }
-func sharingOwner(tx *sql.Tx, id string, options MutationOptions) (Playlist, error) {
+func sharingOwner(tx sqlReader, id string, options MutationOptions) (Playlist, error) {
 	if err := subscriberIdentity(tx, options); err != nil {
 		return Playlist{}, err
 	}
@@ -136,9 +136,9 @@ func (s *Store) CreateInvitation(id, username string, options MutationOptions) (
 	return result, err
 }
 
-func (s *Store) ReceivedInvitation(id, userID string) (PlaylistInvitation, error) {
+func (s *Store) ReceivedInvitation(id, userID string, contexts ...context.Context) (PlaylistInvitation, error) {
 	var result PlaylistInvitation
-	err := s.readSnapshot(context.Background(), func(tx *sql.Tx) error {
+	err := s.readQuery(readContext(contexts), func(tx sqlReader) error {
 		if err := subscriberIdentity(tx, MutationOptions{UserID: userID}); err != nil {
 			return err
 		}
@@ -238,12 +238,12 @@ func (s *Store) InvitationAction(id, action string, options MutationOptions) (Pl
 	return result, err
 }
 
-func (s *Store) Invitations(userID, playlistID string, offset, limit int) (InvitationPage, error) {
+func (s *Store) Invitations(userID, playlistID string, offset, limit int, contexts ...context.Context) (InvitationPage, error) {
 	page := InvitationPage{Items: []PlaylistInvitation{}, Offset: offset, Limit: limit}
 	if offset < 0 || limit < 1 || limit > 100 {
 		return page, errors.New("invalid invitation page")
 	}
-	err := s.readSnapshot(context.Background(), func(tx *sql.Tx) error {
+	err := s.readQuery(readContext(contexts), func(tx sqlReader) error {
 		if err := subscriberIdentity(tx, MutationOptions{UserID: userID}); err != nil {
 			return err
 		}

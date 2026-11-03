@@ -16,8 +16,8 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
-func (s *Store) tagRead(run func(*sql.Tx) error) error {
-	return s.readSnapshot(context.Background(), func(tx *sql.Tx) error {
+func (s *Store) tagRead(ctx context.Context, run func(sqlReader) error) error {
+	return s.readQuery(readContext([]context.Context{ctx}), func(tx sqlReader) error {
 		if err := requireTagsSchema(tx); err != nil {
 			return err
 		}
@@ -222,7 +222,7 @@ func readTagGroup(reader sqlReader, id string) (TagGroup, error) {
 
 func (s *Store) ListTagGroups(auth authContext) ([]TagGroup, error) {
 	groups := []TagGroup{}
-	err := s.tagRead(func(tx *sql.Tx) error {
+	err := s.tagRead(auth.requestContext, func(tx sqlReader) error {
 		if _, err := tagActor(tx, auth); err != nil {
 			return err
 		}
@@ -486,7 +486,7 @@ func (s *Store) CreateTag(auth authContext, input TagInput) (Tag, error) {
 
 func (s *Store) GetTag(auth authContext, id string) (Tag, error) {
 	var tag Tag
-	err := s.tagRead(func(tx *sql.Tx) error {
+	err := s.tagRead(auth.requestContext, func(tx sqlReader) error {
 		actor, err := tagActor(tx, auth)
 		if err != nil {
 			return err
@@ -618,7 +618,7 @@ func (s *Store) ListTags(auth authContext, query TagQuery) (TagPage, error) {
 	if page.Offset < 0 || page.Offset > 1000000 || page.Limit < 1 || page.Limit > 100 {
 		return page, errTagInvalid
 	}
-	err := s.tagRead(func(tx *sql.Tx) error {
+	err := s.tagRead(auth.requestContext, func(tx sqlReader) error {
 		actor, err := tagActor(tx, auth)
 		if err != nil {
 			return err

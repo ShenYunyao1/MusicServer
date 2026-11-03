@@ -61,6 +61,8 @@ type Store struct {
 	changeStamp       string
 	changeWatchers    int
 	changeClosed      bool
+	realtimeFlightsMu sync.Mutex
+	realtimeFlights   map[string]*realtimeFlight
 	activity          *activity.Journal
 	stageSlots        chan struct{}
 	activeStages      map[string]bool
@@ -289,12 +291,14 @@ func (s *Store) APIKeys() []APIKey {
 	}
 	return keys
 }
-func (s *Store) AuthenticateSecret(secret string) (APIKey, bool) {
+func (s *Store) AuthenticateSecret(secret string, contexts ...context.Context) (APIKey, bool) {
 	if secret == "" {
 		return APIKey{}, false
 	}
 	var raw string
-	if err := s.db.QueryRow("SELECT payload FROM api_keys WHERE secret_hash=?", hashSecret(secret)).Scan(&raw); err != nil {
+	ctx, cancel := context.WithTimeout(readContext(contexts), 5*time.Second)
+	defer cancel()
+	if err := s.readDatabase().QueryRowContext(ctx, "SELECT payload FROM api_keys WHERE secret_hash=?", hashSecret(secret)).Scan(&raw); err != nil {
 		return APIKey{}, false
 	}
 	var key APIKey
@@ -397,7 +401,7 @@ func (s *Store) RemovedTracks() []Track {
 	return tracks
 }
 func (s *Store) Track(id string) (Track, bool) {
-	track, err := readTrackFrom(s.db, id, false)
+	track, err := readTrackFrom(s.readDatabase(), id, false)
 	return track, err == nil
 }
 func (s *Store) allTracks() ([]Track, error) {
@@ -427,7 +431,7 @@ func (s *Store) ReadPlaylists() ([]Playlist, error) {
 	return playlists, nil
 }
 func (s *Store) Playlist(id string) (Playlist, bool) {
-	playlist, err := readPlaylistFrom(s.db, id)
+	playlist, err := readPlaylistFrom(s.readDatabase(), id)
 	return playlist, err == nil
 }
 func clonePlaylist(value Playlist) Playlist {

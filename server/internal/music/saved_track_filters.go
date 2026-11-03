@@ -143,7 +143,7 @@ func checkSavedTrackFilterName(reader sqlReader, userID, exceptID, normalized st
 
 func (s *Store) ListSavedTrackFilters(auth authContext) ([]SavedTrackFilter, error) {
 	items := []SavedTrackFilter{}
-	err := s.tagRead(func(tx *sql.Tx) error {
+	err := s.tagRead(auth.requestContext, func(tx sqlReader) error {
 		if _, err := tagActor(tx, auth); err != nil {
 			return err
 		}
@@ -183,7 +183,7 @@ func (s *Store) ListSavedTrackFilters(auth authContext) ([]SavedTrackFilter, err
 
 func (s *Store) GetSavedTrackFilter(auth authContext, id string) (SavedTrackFilter, error) {
 	var result SavedTrackFilter
-	err := s.tagRead(func(tx *sql.Tx) error {
+	err := s.tagRead(auth.requestContext, func(tx sqlReader) error {
 		if _, err := tagActor(tx, auth); err != nil {
 			return err
 		}

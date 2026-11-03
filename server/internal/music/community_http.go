@@ -2,7 +2,6 @@ package music
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -37,11 +36,11 @@ func matchesETag(header, etag string) bool {
 	}
 	return false
 }
-func (s *Store) publicCatalog(query string, offset, limit int, conditional string) (PublicCatalog, string, bool, error) {
+func (s *Store) publicCatalog(query string, offset, limit int, conditional string, contexts ...context.Context) (PublicCatalog, string, bool, error) {
 	page := PublicCatalog{Items: []PublicPlaylistSummary{}, Offset: offset, Limit: limit}
 	etag := ""
 	unchanged := false
-	err := s.readSnapshot(context.Background(), func(tx *sql.Tx) error {
+	err := s.readQuery(readContext(contexts), func(tx sqlReader) error {
 		if err := tx.QueryRow("SELECT value FROM meta WHERE key='public_revision'").Scan(&page.Revision); err != nil {
 			return err
 		}
@@ -102,7 +101,7 @@ func (a *API) community(response http.ResponseWriter, request *http.Request) {
 			writeError(response, 400, "INVALID_QUERY", "query is too long")
 			return
 		}
-		page, etag, unchanged, err := a.store.publicCatalog(query, offset, limit, request.Header.Get("If-None-Match"))
+		page, etag, unchanged, err := a.store.publicCatalog(query, offset, limit, request.Header.Get("If-None-Match"), request.Context())
 		if err != nil {
 			writeError(response, 500, "READ_FAILED", "unable to read public catalog")
 			return
@@ -133,7 +132,7 @@ func (a *API) community(response http.ResponseWriter, request *http.Request) {
 			return
 		}
 		var page publicDetailPage
-		err = a.store.readSnapshot(request.Context(), func(tx *sql.Tx) error {
+		err = a.store.readQuery(request.Context(), func(tx sqlReader) error {
 			var err error
 			page, err = readPublicDetailPage(tx, authFromRequest(request), id, q)
 			return err
@@ -150,7 +149,7 @@ func (a *API) community(response http.ResponseWriter, request *http.Request) {
 			methodNotAllowed(response, request)
 			return
 		}
-		views, err := a.store.Subscriptions(authFromRequest(request).userID)
+		views, err := a.store.Subscriptions(authFromRequest(request).userID, request.Context())
 		if err != nil {
 			writeError(response, 500, "READ_FAILED", "unable to read subscriptions")
 			return

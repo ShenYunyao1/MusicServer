@@ -100,7 +100,7 @@ func setPlaylistVisibility(p *Playlist, visibility string) error {
 func (s *Store) SetPlaylistVisibility(id, visibility string, options ...MutationOptions) (Playlist, error) {
 	return s.mutatePlaylistAction(id, false, "playlist.visibility", func(p *Playlist) error { return setPlaylistVisibility(p, visibility) }, options...)
 }
-func subscriberIdentity(tx *sql.Tx, options MutationOptions) error {
+func subscriberIdentity(tx sqlReader, options MutationOptions) error {
 	if options.UserID == "" {
 		return errResourceHidden
 	}
@@ -251,9 +251,9 @@ func subscriptionViews(reader sqlReader, userID string) ([]Playlist, error) {
 	}
 	return result, nil
 }
-func (s *Store) Subscriptions(userID string) ([]Playlist, error) {
+func (s *Store) Subscriptions(userID string, contexts ...context.Context) ([]Playlist, error) {
 	var result []Playlist
-	err := s.readSnapshot(context.Background(), func(tx *sql.Tx) error { var err error; result, err = subscriptionViews(tx, userID); return err })
+	err := s.readQuery(readContext(contexts), func(tx sqlReader) error { var err error; result, err = subscriptionViews(tx, userID); return err })
 	return result, err
 }
 func (s *Store) UpdateSubscriptionNote(id, trackID, note string, options MutationOptions) (Playlist, error) {

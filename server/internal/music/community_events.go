@@ -17,7 +17,7 @@ func (s *Store) notifyCommunityCommit() {
 		return
 	}
 	var stamp string
-	if s.db.QueryRow("SELECT (SELECT value FROM meta WHERE key='revision')||':'||(SELECT value FROM meta WHERE key='public_revision')||':'||(SELECT COALESCE(MAX(id),0) FROM audit)").Scan(&stamp) != nil {
+	if s.db.QueryRow("SELECT COALESCE((SELECT value FROM meta WHERE key='browse/community'),'0')||':'||(SELECT value FROM meta WHERE key='public_revision')").Scan(&stamp) != nil {
 		return
 	}
 	if stamp == s.changeStamp {
@@ -33,7 +33,7 @@ func (s *Store) watchCommunity() func() {
 	s.changeMu.Lock()
 	s.changeWatchers++
 	if s.changeWatchers == 1 {
-		_ = s.db.QueryRow("SELECT (SELECT value FROM meta WHERE key='revision')||':'||(SELECT value FROM meta WHERE key='public_revision')||':'||(SELECT COALESCE(MAX(id),0) FROM audit)").Scan(&s.changeStamp)
+		_ = s.db.QueryRow("SELECT COALESCE((SELECT value FROM meta WHERE key='browse/community'),'0')||':'||(SELECT value FROM meta WHERE key='public_revision')").Scan(&s.changeStamp)
 	}
 	if s.changeSignal == nil {
 		s.changeSignal = make(chan struct{})

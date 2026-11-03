@@ -71,7 +71,7 @@ func (a *API) sharing(response http.ResponseWriter, request *http.Request) {
 			writeError(response, 400, "INVALID_PAGE", err.Error())
 			return
 		}
-		page, err := a.store.Invitations(authFromRequest(request).userID, playlistID, offset, limit)
+		page, err := a.store.Invitations(authFromRequest(request).userID, playlistID, offset, limit, request.Context())
 		if err != nil {
 			writeSharingError(response, err)
 			return
@@ -80,7 +80,7 @@ func (a *API) sharing(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if recipientRoute && len(parts) == 2 && validID.MatchString(parts[1]) && request.Method == "GET" {
-		invite, err := a.store.ReceivedInvitation(parts[1], authFromRequest(request).userID)
+		invite, err := a.store.ReceivedInvitation(parts[1], authFromRequest(request).userID, request.Context())
 		if err != nil {
 			writeSharingError(response, err)
 			return

@@ -175,7 +175,7 @@ func (a *API) accountAuth(response http.ResponseWriter, request *http.Request) {
 	case path == "avatar" || path == "avatar/content":
 		a.avatarHTTP(response, request)
 	case path == "me" && request.Method == "GET":
-		user, err := readUser(a.store.db, auth.userID)
+		user, err := readUser(contextSQLReader{a.store.readDatabase(), request.Context()}, auth.userID)
 		if err != nil {
 			writeError(response, 500, "ACCOUNT_FAILED", "account unavailable")
 			return

@@ -1,6 +1,7 @@
 package music
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"database/sql"
@@ -291,18 +292,25 @@ func (s *Store) Login(username, password, ip string) (User, Session, string, err
 	})
 	return user, session, token, err
 }
-func (s *Store) sessionIdentity(token string) (User, Session, bool) {
+func (s *Store) sessionIdentity(token string, contexts ...context.Context) (User, Session, bool) {
 	var session Session
+	var user User
 	var version int64
 	var created, active, expires string
-	err := s.db.QueryRow("SELECT id,user_id,auth_version,created_at,last_active_at,expires_at FROM sessions WHERE token_hash=? AND revoked_at=''", hashSecret(token)).Scan(&session.ID, &session.UserID, &version, &created, &active, &expires)
+	err := s.readQuery(readContext(contexts), func(reader sqlReader) error {
+		if err := reader.QueryRow("SELECT id,user_id,auth_version,created_at,last_active_at,expires_at FROM sessions WHERE token_hash=? AND revoked_at=''", hashSecret(token)).Scan(&session.ID, &session.UserID, &version, &created, &active, &expires); err != nil {
+			return err
+		}
+		var err error
+		user, err = readUser(reader, session.UserID)
+		return err
+	})
 	if err != nil {
 		return User{}, session, false
 	}
 	session.CreatedAt, _ = parsePersistedTime(created)
 	session.LastActiveAt, _ = parsePersistedTime(active)
 	session.ExpiresAt, _ = parsePersistedTime(expires)
-	user, err := readUser(s.db, session.UserID)
 	now := time.Now()
 	return user, session, err == nil && user.Enabled && user.AuthVersion == version && now.Before(session.ExpiresAt) && now.Before(session.LastActiveAt.Add(sessionIdle))
 }

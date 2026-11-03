@@ -193,17 +193,14 @@ func (s *Store) reportListening(auth authContext, sid, trackID string, played in
 				return err
 			}
 			var total, recent int
-			if err = tx.QueryRow("SELECT count(*),COALESCE(sum(started_at>=?),0) FROM listening_sessions WHERE user_id=?", stamp-60000, auth.userID).Scan(&total, &recent); err != nil {
+			if err = tx.QueryRow("SELECT count(*),COALESCE(sum(started_at>=?),0) FROM listening_sessions WHERE user_id=?", stamp-int64(time.Hour/time.Millisecond), auth.userID).Scan(&total, &recent); err != nil {
 				return err
-			}
-			if recent >= 120 {
-				return listenError(429, "LISTENING_LIMIT", "listening session limit reached")
 			}
 			if total >= 3000 {
 				// Unconfirmed guards have never counted a play. Reclaim an
 				// idle one rather than letting abandoned starts lock the whole
 				// account for 24 hours; counted replay guards stay intact.
-				result, err := tx.Exec(`DELETE FROM listening_sessions WHERE user_id=? AND session_id IN (SELECT session_id FROM listening_sessions WHERE user_id=? AND counted=0 AND last_seen_at<? ORDER BY last_seen_at,session_id LIMIT ?)`, auth.userID, auth.userID, now.Add(-time.Minute).UnixMilli(), total-2999)
+				result, err := tx.Exec(`DELETE FROM listening_sessions WHERE user_id=? AND session_id IN (SELECT session_id FROM listening_sessions WHERE user_id=? AND counted=0 AND last_seen_at<? ORDER BY last_seen_at,session_id LIMIT 3000)`, auth.userID, auth.userID, now.Add(-time.Minute).UnixMilli())
 				if err != nil {
 					return err
 				}
@@ -211,9 +208,20 @@ func (s *Store) reportListening(auth authContext, sid, trackID string, played in
 				if err != nil {
 					return err
 				}
-				if removed < int64(total-2999) {
+				// New hourly admission bounds a fresh 24h window below 3000.
+				// Leave headroom for old counted guards, without deleting replay
+				// evidence or locking existing accounts until tomorrow.
+				if total-int(removed) >= 6000 {
 					return listenError(429, "LISTENING_LIMIT", "active listening session limit reached; retry after current sessions finish")
 				}
+				if removed > 0 {
+					if err := tx.QueryRow("SELECT count(*) FROM listening_sessions WHERE user_id=? AND started_at>=?", auth.userID, stamp-int64(time.Hour/time.Millisecond)).Scan(&recent); err != nil {
+						return err
+					}
+				}
+			}
+			if recent >= 120 {
+				return listenError(429, "LISTENING_LIMIT", "每账户每小时最多创建120次听歌统计会话，请稍后重试；不影响播放")
 			}
 			minimum = 30000
 			if duration > 0 {
@@ -296,7 +304,7 @@ func parseListeningQuery(r *http.Request) (listeningQuery, error) {
 }
 func (s *Store) listListening(auth authContext, q listeningQuery, now time.Time) (map[string]any, error) {
 	result := map[string]any{"items": []map[string]any{}, "total": 0, "offset": q.offset, "limit": q.limit}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(readContext([]context.Context{auth.requestContext}), 5*time.Second)
 	defer cancel()
 	tx, err := s.readDatabase().BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {

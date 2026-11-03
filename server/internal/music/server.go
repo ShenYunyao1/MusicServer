@@ -61,6 +61,7 @@ type API struct {
 }
 
 type authContext struct {
+	requestContext     context.Context
 	userID             string
 	authVersion        int64
 	session            bool
@@ -673,12 +674,18 @@ func withAuth(ctx context.Context, auth authContext) context.Context {
 // from ServeHTTP; the context value is attached through the request context.
 func authFromRequest(request *http.Request) authContext {
 	if value, ok := request.Context().Value(authContextKey{}).(authContext); ok {
+		value.requestContext = request.Context()
 		return value
 	}
 	return authContext{}
 }
 
 func (a *API) authenticate(request *http.Request) (authContext, bool) {
+	auth, valid := a.authenticateIdentity(request)
+	auth.requestContext = request.Context()
+	return auth, valid
+}
+func (a *API) authenticateIdentity(request *http.Request) (authContext, bool) {
 	provided := request.Header.Get("X-API-Key")
 	authorization := request.Header.Get("Authorization")
 	bearer := strings.HasPrefix(strings.ToLower(authorization), "bearer ") || strings.EqualFold(authorization, "bearer")
@@ -686,11 +693,11 @@ func (a *API) authenticate(request *http.Request) (authContext, bool) {
 		if provided == "" {
 			provided = strings.TrimSpace(authorization[len("Bearer"):])
 		}
-		key, ok := a.store.AuthenticateSecret(provided)
+		key, ok := a.store.AuthenticateSecret(provided, request.Context())
 		if !ok {
 			return authContext{}, false
 		}
-		user, err := readUser(a.store.db, key.UserID)
+		user, err := readUser(contextSQLReader{a.store.readDatabase(), request.Context()}, key.UserID)
 		if err != nil || !user.Enabled || user.MustChangePassword {
 			return authContext{}, false
 		}
@@ -707,7 +714,7 @@ func (a *API) authenticate(request *http.Request) (authContext, bool) {
 	if err != nil {
 		return authContext{}, false
 	}
-	user, session, ok := a.store.sessionIdentity(cookie.Value)
+	user, session, ok := a.store.sessionIdentity(cookie.Value, request.Context())
 	if !ok {
 		return authContext{}, false
 	}
@@ -794,17 +801,17 @@ func (a *API) activeRequests(keyID string) int {
 
 func canReadPlaylist(auth authContext, store *Store, p Playlist) bool {
 	if auth.session {
-		return playlistReadAccess(store.db, auth, p)
+		return playlistReadAccess(store.readDatabase(), auth, p)
 	}
-	current, err := currentKeyAuth(store.db, auth)
-	return err == nil && playlistReadAccess(store.db, current, p)
+	current, err := currentKeyAuth(store.readDatabase(), auth)
+	return err == nil && playlistReadAccess(store.readDatabase(), current, p)
 }
 
 func canReadTrack(auth authContext, store *Store, id string) bool {
 	if auth.session || auth.role == "admin" {
 		return true
 	}
-	current, err := currentKeyAuth(store.db, auth)
+	current, err := currentKeyAuth(store.readDatabase(), auth)
 	if err != nil {
 		return false
 	}
@@ -813,7 +820,7 @@ func canReadTrack(auth authContext, store *Store, id string) bool {
 			continue
 		}
 		var exists bool
-		if store.db.QueryRow("SELECT EXISTS(SELECT 1 FROM playlist_tracks m JOIN playlists p ON p.id=m.playlist_id LEFT JOIN users u ON u.id=p.owner_id WHERE m.playlist_id=? AND m.track_id=? AND (p.system=1 OR p.owner_id=? OR (u.enabled=1 AND EXISTS(SELECT 1 FROM subscriptions s WHERE s.user_id=? AND s.playlist_id=p.id) AND (p.visibility='public' OR (p.visibility='shared' AND EXISTS(SELECT 1 FROM playlist_invitations i WHERE i.playlist_id=p.id AND i.inviter_id=p.owner_id AND i.recipient_id=? AND i.state='accepted'))))))", playlistID, id, current.userID, current.userID, current.userID).Scan(&exists) == nil && exists {
+		if store.readDatabase().QueryRow("SELECT EXISTS(SELECT 1 FROM playlist_tracks m JOIN playlists p ON p.id=m.playlist_id LEFT JOIN users u ON u.id=p.owner_id WHERE m.playlist_id=? AND m.track_id=? AND (p.system=1 OR p.owner_id=? OR (u.enabled=1 AND EXISTS(SELECT 1 FROM subscriptions s WHERE s.user_id=? AND s.playlist_id=p.id) AND (p.visibility='public' OR (p.visibility='shared' AND EXISTS(SELECT 1 FROM playlist_invitations i WHERE i.playlist_id=p.id AND i.inviter_id=p.owner_id AND i.recipient_id=? AND i.state='accepted'))))))", playlistID, id, current.userID, current.userID, current.userID).Scan(&exists) == nil && exists {
 			return true
 		}
 	}
@@ -851,7 +858,7 @@ func (a *API) playlists(response http.ResponseWriter, request *http.Request) {
 	switch request.Method {
 	case http.MethodGet:
 		var playlists []Playlist
-		err := a.store.transaction(func(tx *sql.Tx) error {
+		err := a.store.readQuery(request.Context(), func(tx sqlReader) error {
 			auth := authFromRequest(request)
 			var err error
 			auth, err = currentSyncObjectAuth(tx, auth)
@@ -928,6 +935,10 @@ func (a *API) playlist(response http.ResponseWriter, request *http.Request) {
 		a.playlistTracks(response, request, id)
 		return
 	}
+	if request.Method == http.MethodGet {
+		a.readPlaylistDetail(response, request, id)
+		return
+	}
 	playlist, ok := a.store.Playlist(id)
 	if !ok {
 		writeError(response, http.StatusNotFound, "NOT_FOUND", "playlist not found")
@@ -986,33 +997,7 @@ func (a *API) playlist(response http.ResponseWriter, request *http.Request) {
 		response.WriteHeader(http.StatusNoContent)
 		return
 	}
-	if request.Method != http.MethodGet {
-		methodNotAllowed(response, request)
-		return
-	}
-	tracks := make([]Track, 0, len(playlist.TrackIDs))
-	if auth := authFromRequest(request); auth.session && auth.role == "admin" && !playlist.System && playlist.OwnerID != auth.userID {
-		if err := a.store.transaction(func(tx *sql.Tx) error {
-			return auditMutation(tx, "playlist.admin.read", playlist.ID, nil, map[string]string{"owner_id": playlist.OwnerID}, []MutationOptions{mutationOptions(request)})
-		}); err != nil {
-			writeError(response, 500, "AUDIT_FAILED", "unable to record management access")
-			return
-		}
-	}
-	for _, trackID := range playlist.TrackIDs {
-		if track, err := readTrackFrom(a.store.db, trackID, true); err == nil {
-			if track.Removed || track.Missing {
-				track = unavailableTrack(track)
-			}
-			tracks = append(tracks, publicTrack(track, authFromRequest(request)))
-		}
-	}
-	view, err := readablePlaylistView(a.store.db, authFromRequest(request), playlist)
-	if err != nil {
-		writeError(response, 500, "READ_FAILED", "unable to read playlist")
-		return
-	}
-	writeJSON(response, http.StatusOK, map[string]any{"playlist": view, "tracks": tracks})
+	methodNotAllowed(response, request)
 }
 
 func writePlaylistMutationError(response http.ResponseWriter, err error) {

@@ -80,7 +80,9 @@ func (s *Store) temporaryUploadSnapshot(owner string) (*temporaryUsageSnapshot, 
 	var own int64
 	charges := map[string]int64{}
 	identities := map[string]string{}
-	tx, err := s.readDatabase().BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	tx, err := s.readDatabase().BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, err
 	}

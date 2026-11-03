@@ -124,14 +124,56 @@ func indexRealtime(snapshot realtimeSnapshot) (map[string]realtimeIndex, string)
 // Projections use the same ownership and privacy rules as the ordinary endpoints.
 // The next comparison reads authoritative data again; cursors contain no records.
 func (s *Store) realtimeSnapshot(auth authContext, view realtimeView) (realtimeSnapshot, error) {
+	ctx, cancel := context.WithTimeout(readContext([]context.Context{auth.requestContext}), 5*time.Second)
+	defer cancel()
+	raw, _ := json.Marshal([]any{auth.userID, auth.role, auth.authVersion, view, s.tempEpoch.Load()})
+	key := string(raw)
+	s.realtimeFlightsMu.Lock()
+	if flight := s.realtimeFlights[key]; flight != nil {
+		s.realtimeFlightsMu.Unlock()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-flight.done:
+			return flight.snapshot, flight.err
+		}
+	}
+	if len(s.realtimeFlights) >= 64 {
+		s.realtimeFlightsMu.Unlock()
+		return nil, errors.New("realtime view capacity reached")
+	}
+	flight := &realtimeFlight{done: make(chan struct{})}
+	if s.realtimeFlights == nil {
+		s.realtimeFlights = map[string]*realtimeFlight{}
+	}
+	s.realtimeFlights[key] = flight
+	s.realtimeFlightsMu.Unlock()
+	auth.requestContext = ctx
+	flight.snapshot, flight.err = s.computeRealtimeSnapshot(auth, view)
+	s.realtimeFlightsMu.Lock()
+	delete(s.realtimeFlights, key)
+	close(flight.done)
+	s.realtimeFlightsMu.Unlock()
+	return flight.snapshot, flight.err
+}
+
+type realtimeFlight struct {
+	done     chan struct{}
+	snapshot realtimeSnapshot
+	err      error
+}
+
+func (s *Store) computeRealtimeSnapshot(auth authContext, view realtimeView) (realtimeSnapshot, error) {
+	ctx, cancel := context.WithTimeout(readContext([]context.Context{auth.requestContext}), 5*time.Second)
+	defer cancel()
 	snapshot := realtimeSnapshot{}
 	var pending int
-	if err := s.db.QueryRow("SELECT count(*) FROM playlist_invitations WHERE recipient_id=? AND state='pending'", auth.userID).Scan(&pending); err != nil {
+	if err := s.readDatabase().QueryRowContext(ctx, "SELECT count(*) FROM playlist_invitations WHERE recipient_id=? AND state='pending'", auth.userID).Scan(&pending); err != nil {
 		return nil, err
 	}
 	snapshot["badge"] = newRealtimeSection(map[string]any{"pending": pending})
 	if view.Catalog {
-		page, _, _, err := s.publicCatalog(view.Query, view.Offset, 30, "")
+		page, _, _, err := s.publicCatalog(view.Query, view.Offset, 30, "", ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -144,7 +186,7 @@ func (s *Store) realtimeSnapshot(auth authContext, view realtimeView) (realtimeS
 		snapshot["catalog"] = section
 	}
 	if view.Subscriptions {
-		items, err := s.Subscriptions(auth.userID)
+		items, err := s.Subscriptions(auth.userID, ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -157,10 +199,10 @@ func (s *Store) realtimeSnapshot(auth authContext, view realtimeView) (realtimeS
 		snapshot["subscriptions"] = section
 	}
 	if view.Invitations {
-		page, err := s.Invitations(auth.userID, "", view.InvitationOffset, 30)
+		page, err := s.Invitations(auth.userID, "", view.InvitationOffset, 30, ctx)
 		if view.InvitationID != "" {
 			var i PlaylistInvitation
-			i, err = s.ReceivedInvitation(view.InvitationID, auth.userID)
+			i, err = s.ReceivedInvitation(view.InvitationID, auth.userID, ctx)
 			page = InvitationPage{Items: []PlaylistInvitation{}, Limit: 30}
 			if err == nil {
 				page.Items = append(page.Items, i)
@@ -188,7 +230,7 @@ func (s *Store) realtimeSnapshot(auth authContext, view realtimeView) (realtimeS
 		if limit == 0 {
 			limit = 50
 		}
-		err := s.readSnapshot(context.Background(), func(tx *sql.Tx) error {
+		err := s.readQuery(ctx, func(tx sqlReader) error {
 			page, err := readExternalDetailPage(tx, auth, view.SubscriptionDetail, browseQuery{Offset: view.SubscriptionOffset, Limit: limit, Search: view.SubscriptionQuery}, true)
 			if errors.Is(err, sql.ErrNoRows) || errors.Is(err, errResourceHidden) {
 				return nil
@@ -212,12 +254,12 @@ func (s *Store) realtimeSnapshot(auth authContext, view realtimeView) (realtimeS
 	if view.OwnerPlaylist != "" {
 		playlist := newRealtimeSection(map[string]any{"available": false})
 		invitations := newRealtimeSection(map[string]any{"total": 0, "offset": view.OwnerOffset, "limit": 30})
-		p, err := readPlaylistFrom(s.db, view.OwnerPlaylist)
+		p, err := readPlaylistFrom(contextSQLReader{s.readDatabase(), ctx}, view.OwnerPlaylist)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
 		if err == nil && p.OwnerID == auth.userID && !p.System {
-			page, err := s.Invitations(auth.userID, p.ID, view.OwnerOffset, 30)
+			page, err := s.Invitations(auth.userID, p.ID, view.OwnerOffset, 30, ctx)
 			if err != nil && !errors.Is(err, errResourceHidden) {
 				return nil, err
 			}
@@ -243,7 +285,7 @@ func (s *Store) realtimeSnapshot(auth authContext, view realtimeView) (realtimeS
 		if limit == 0 {
 			limit = 50
 		}
-		err := s.readSnapshot(context.Background(), func(tx *sql.Tx) error {
+		err := s.readQuery(ctx, func(tx sqlReader) error {
 			page, err := readPublicDetailPage(tx, auth, view.PublicDetail, browseQuery{Offset: view.PublicOffset, Limit: limit, Search: view.PublicQuery})
 			if errors.Is(err, errResourceHidden) {
 				return nil

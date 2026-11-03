@@ -1,7 +1,6 @@
 package music
 
 import (
-	"database/sql"
 	"encoding/json"
 	"net/http"
 )
@@ -15,7 +14,7 @@ type TagSyncState struct {
 
 func (s *Store) tagSyncState(auth authContext) (TagSyncState, error) {
 	var state TagSyncState
-	err := s.tagRead(func(tx *sql.Tx) error {
+	err := s.tagRead(auth.requestContext, func(tx sqlReader) error {
 		var err error
 		state.TrackFilterBaseline, err = trackFilterBaseline(tx, auth)
 		if err != nil {
