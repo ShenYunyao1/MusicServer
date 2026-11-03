@@ -7,10 +7,10 @@ import (
 	"log"
 )
 
-const browseIndexVersion = "2"
+const browseIndexVersion = "3"
 
 func browseIndexDigest(reader sqlReader) (string, error) {
-	rows, err := reader.Query(`SELECT name,sql FROM sqlite_master WHERE (name GLOB 'browse_*' AND type IN ('table','trigger')) OR name IN ('tracks_cover_lookup','playlists_cover_lookup','audit_public_contributions') ORDER BY name`)
+	rows, err := reader.Query(`SELECT name,sql FROM sqlite_master WHERE (name GLOB 'browse_*' AND type IN ('table','trigger')) OR name IN ('tracks_cover_lookup','playlists_cover_lookup','audit_public_contributions','tags_scope_capacity') ORDER BY name`)
 	if err != nil {
 		return "", err
 	}
@@ -71,7 +71,7 @@ func initializeBrowseIndexes(db *sql.DB) error {
 			return err
 		}
 	}
-	if _, err := tx.Exec("DROP INDEX IF EXISTS tracks_cover_lookup;DROP INDEX IF EXISTS playlists_cover_lookup;DROP INDEX IF EXISTS audit_public_contributions;DROP TABLE IF EXISTS browse_track_search;DELETE FROM meta WHERE key='browse/search_version';"); err != nil {
+	if _, err := tx.Exec("DROP INDEX IF EXISTS tracks_cover_lookup;DROP INDEX IF EXISTS playlists_cover_lookup;DROP INDEX IF EXISTS audit_public_contributions;DROP INDEX IF EXISTS tags_scope_capacity;DROP TABLE IF EXISTS browse_track_search;DELETE FROM meta WHERE key='browse/search_version';"); err != nil {
 		return err
 	}
 	searchText := func(alias string) string {
@@ -97,6 +97,7 @@ func initializeBrowseIndexes(db *sql.DB) error {
 		}
 	}
 	if _, err = tx.Exec(`CREATE INDEX IF NOT EXISTS tracks_cover_lookup ON tracks(json_extract(payload,'$.cover_id')) WHERE json_valid(payload);
+ CREATE INDEX IF NOT EXISTS tags_scope_capacity ON tags(scope_id) WHERE merged_into IS NULL;
  CREATE INDEX IF NOT EXISTS playlists_cover_lookup ON playlists(json_extract(payload,'$.cover_id')) WHERE json_valid(payload);
 	CREATE INDEX IF NOT EXISTS audit_public_contributions ON audit(user_id,created_at DESC) WHERE action='tag.create' AND json_valid(changes) AND json_extract(changes,'$.after.scope')='public';
  INSERT OR IGNORE INTO meta(key,value) VALUES('browse/epoch',lower(hex(randomblob(16)))),('browse/library','0'),('browse/admin','0');`); err != nil {

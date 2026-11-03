@@ -48,7 +48,7 @@ func TestAuditTagBatchProtectsDictionaryReferences(t *testing.T) {
 	}
 }
 
-func TestAuditTagTombstonesCountTowardsStorageLimit(t *testing.T) {
+func TestAuditTagUnusedTombstonesReleaseStorageLimit(t *testing.T) {
 	s, auth := batchStore(t)
 	err := s.tagTransaction(false, func(tx *sql.Tx) error {
 		if err := ensureTagScope(tx, auth.userID); err != nil {
@@ -65,8 +65,8 @@ func TestAuditTagTombstonesCountTowardsStorageLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateTag(auth, TagInput{Scope: "personal", GroupID: "genre", Name: "Overflow"}); !errors.Is(err, errTagLimit) {
-		t.Fatalf("tombstone quota bypass: %v", err)
+	if _, err := s.CreateTag(auth, TagInput{Scope: "personal", GroupID: "genre", Name: "Reclaimed slot"}); err != nil {
+		t.Fatalf("unused tombstones blocked capacity: %v", err)
 	}
 }
 

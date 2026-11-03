@@ -63,8 +63,8 @@ func compactTagTombstones(tx *sql.Tx, scope string) error {
 AND NOT EXISTS(SELECT 1 FROM tags child WHERE child.merged_into=t.id)
 AND NOT EXISTS(SELECT 1 FROM track_tags l WHERE l.tag_id=t.id)
 AND NOT EXISTS(SELECT 1 FROM track_tag_overrides o WHERE o.tag_id=t.id)
-AND NOT EXISTS(SELECT 1 FROM tag_batches b,json_tree(b.payload) j WHERE json_extract(b.payload,'$.state')='running' AND b.expires_at>? AND j.type='text' AND j.value=t.id)
-ORDER BY t.updated_at,t.id LIMIT 1000)`, scope, persistedTime(time.Now()))
+AND NOT EXISTS(SELECT 1 FROM tag_batches b,json_tree(b.payload) j WHERE (json_extract(b.payload,'$.state')='running' OR (?<>'public' AND json_extract(b.payload,'$.state')='preview')) AND b.expires_at>? AND j.type='text' AND j.value=t.id)
+ORDER BY t.updated_at,t.id LIMIT 1000)`, scope, scope, persistedTime(time.Now()))
 	if err != nil {
 		return err
 	}
@@ -85,7 +85,7 @@ func (s *Store) CleanupTagDictionary() error {
 	}
 	return s.tagTransaction(false, func(tx *sql.Tx) error {
 		var count int
-		if err := tx.QueryRow("SELECT count(*) FROM tags WHERE scope_id='public'").Scan(&count); err != nil {
+		if err := tx.QueryRow("SELECT count(*) FROM tags WHERE scope_id='public' AND merged_into IS NULL").Scan(&count); err != nil {
 			return err
 		}
 		if count < publicTagLimit {

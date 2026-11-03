@@ -445,7 +445,7 @@ func (s *Store) CreateTag(auth authContext, input TagInput) (Tag, error) {
 			}
 		}
 		var count int
-		if err := tx.QueryRow("SELECT count(*) FROM tags WHERE scope_id=?", scopeID).Scan(&count); err != nil {
+		if err := tx.QueryRow("SELECT count(*) FROM tags WHERE scope_id=? AND merged_into IS NULL", scopeID).Scan(&count); err != nil {
 			return err
 		}
 		limit := personalTagLimit
@@ -453,13 +453,10 @@ func (s *Store) CreateTag(auth authContext, input TagInput) (Tag, error) {
 			limit = publicTagLimit
 		}
 		if count >= limit {
-			if scopeID != "public" {
-				return errTagStorageLimit
-			}
 			if err := compactTagTombstones(tx, scopeID); err != nil {
 				return err
 			}
-			if err := tx.QueryRow("SELECT count(*) FROM tags WHERE scope_id=?", scopeID).Scan(&count); err != nil {
+			if err := tx.QueryRow("SELECT count(*) FROM tags WHERE scope_id=? AND merged_into IS NULL", scopeID).Scan(&count); err != nil {
 				return err
 			}
 			if count >= limit {
