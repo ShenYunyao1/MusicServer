@@ -8,6 +8,16 @@ spec.loader.exec_module(upgrade)
 
 
 class MigrationHistoryTest(unittest.TestCase):
+    def test_only_valid_derived_updates_can_advance(self):
+        before={'meta':[('sync_secret','retain'),('browse/community','3'),('browse/schema_version','5'),('browse/schema_digest','a'*64),('browse/epoch','retain-epoch')]}
+        current=dict(before['meta']);current.update({'browse/community':'4','browse/schema_version':'6','browse/schema_digest':'b'*64})
+        upgrade.assert_preserved_rows(before,{'meta':list(current.items())},8,9)
+        for key,value in [('sync_secret','changed'),('browse/community','2'),('browse/community','invalid'),('browse/schema_digest','invalid'),('browse/epoch','changed')]:
+            invalid={**current,key:value}
+            with self.assertRaises(AssertionError):upgrade.assert_preserved_rows(before,{'meta':list(invalid.items())},8,9)
+        del current['browse/community']
+        with self.assertRaises(AssertionError):upgrade.assert_preserved_rows(before,{'meta':list(current.items())},8,9)
+
     def test_only_registered_derived_metadata_additions_are_allowed(self):
         before={'meta':[('sync_secret','must retain'),('revision','5')]}
         additions=[('browse/schema_version','2'),('browse/schema_digest','digest'),('browse/epoch','epoch'),('browse/library','0'),('browse/admin','0'),('browse/search_version','1'),('browse/account/00000000-0000-4000-8000-000000000001','1')]

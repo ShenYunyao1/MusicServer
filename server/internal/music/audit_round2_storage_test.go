@@ -113,6 +113,11 @@ func TestRound2PendingUsageIncludesAttachmentsAndLiveReservation(t *testing.T) {
 	if err != nil || usage[u.ID] != int64(len(audio)+len(words)+len(cover)) {
 		t.Fatal("commit usage mismatch", usage, track, err)
 	}
+	response := sessionRequest(a, token, "GET", "/api/v2/auth/storage", "")
+	var storage AccountStorage
+	if err := json.Unmarshal(response.Body.Bytes(), &storage); err != nil || response.Code != 200 || storage.AudioBytes != int64(len(audio)) || storage.CoverBytes != int64(len(cover)) || storage.LyricsBytes != int64(len(words)) {
+		t.Fatal("capacity breakdown missing", response.Code, response.Body, err)
+	}
 }
 
 func TestRound2HardLinkedStagingUsesPhysicalBytesOnce(t *testing.T) {

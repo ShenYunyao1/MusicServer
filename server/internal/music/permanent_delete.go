@@ -299,6 +299,11 @@ func (s *Store) PurgeUser(id string, options MutationOptions) error {
 		if _, err := tx.Exec("DELETE FROM meta WHERE key='browse/account/'||?", id); err != nil {
 			return err
 		}
+		if storageProjectionReady(tx) {
+			if _, err := tx.Exec("DELETE FROM browse_temp_metadata WHERE owner=? AND bytes=0", id); err != nil {
+				return err
+			}
+		}
 		return auditMutation(tx, "account.purge", id, user, nil, []MutationOptions{options})
 	})
 }

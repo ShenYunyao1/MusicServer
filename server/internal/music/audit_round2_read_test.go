@@ -44,6 +44,35 @@ func TestRound2TagEditsDoNotInvalidateOrdinaryBrowse(t *testing.T) {
 		t.Fatal("tag edit restarted ordinary browse", before, after, err)
 	}
 }
+
+func TestRound2CredentialRevocationSignalsWithoutInvalidatingLibrary(t *testing.T) {
+	a, _ := testAPI(t)
+	s := a.store
+	auth := tagTestAuth(t, s, "admin")
+	other, _ := readyMember(t, a, "credential-signal")
+	before, err := browseAccountRevision(s.db, auth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unwatch := s.watchCommunity()
+	defer unwatch()
+	signal := s.communitySignal()
+	if err := s.transaction(func(tx *sql.Tx) error {
+		_, err := tx.Exec("UPDATE users SET auth_version=auth_version+1 WHERE id=?", other.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := browseAccountRevision(s.db, auth)
+	if err != nil || before != after {
+		t.Fatal("unrelated credential change invalidated library", err)
+	}
+	select {
+	case <-signal:
+	default:
+		t.Fatal("credential revocation was not signaled")
+	}
+}
 func TestRound2AuditOnlyWriteDoesNotWakeCommunity(t *testing.T) {
 	a, _ := testAPI(t)
 	s := a.store

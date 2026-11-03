@@ -54,6 +54,10 @@ func storageProjectionReady(reader sqlReader) bool {
 }
 func accountStorageBreakdown(reader sqlReader, id string) (storageBreakdown, error) {
 	var b storageBreakdown
+	if !storageProjectionReady(reader) {
+		err := reader.QueryRow("SELECT COALESCE(sum(json_extract(payload,'$.size')),0) FROM tracks WHERE uploaded_by=? AND missing=0 AND json_valid(payload)", id).Scan(&b.AudioBytes)
+		return b, err
+	}
 	err := reader.QueryRow(`SELECT COALESCE(sum(CASE WHEN kind='audio' THEN bytes ELSE 0 END),0),COALESCE(sum(CASE WHEN kind='cover' THEN bytes ELSE 0 END),0),COALESCE(sum(CASE WHEN kind='lyrics' THEN bytes ELSE 0 END),0) FROM (SELECT asset,kind,max(bytes) bytes FROM browse_storage_refs WHERE owner=? AND resource_type<>'stage' GROUP BY asset,kind)`, id).Scan(&b.AudioBytes, &b.CoverBytes, &b.LyricsBytes)
 	return b, err
 }
@@ -119,6 +123,9 @@ func writePlaylistStorage(tx *sql.Tx, p Playlist) error {
 // Explicit administrator disk refresh reconciles external file changes outside
 // the write lock. Publication paths rely on scanner-known sizes instead.
 func (s *Store) reconcileAudioStorage() error {
+	if !storageProjectionReady(s.readDatabase()) {
+		return nil
+	}
 	type entry struct {
 		id, asset, path string
 		before, after   int64
@@ -184,6 +191,9 @@ func stageStorageRefs(record stagedRecord) []storageReference {
 	return refs
 }
 func pendingAttachmentBytes(reader sqlReader, owner string) (int64, error) {
+	if !storageProjectionReady(reader) {
+		return 0, nil
+	}
 	var total int64
 	err := reader.QueryRow(`SELECT COALESCE(sum(bytes),0) FROM (SELECT r.asset,max(r.bytes) bytes FROM browse_storage_refs r WHERE r.owner=? AND r.resource_type='stage' AND NOT EXISTS(SELECT 1 FROM browse_storage_refs c WHERE c.owner=r.owner AND c.asset=r.asset AND c.resource_type<>'stage') GROUP BY r.asset)`, owner).Scan(&total)
 	return total, err

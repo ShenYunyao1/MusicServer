@@ -126,7 +126,7 @@ func indexRealtime(snapshot realtimeSnapshot) (map[string]realtimeIndex, string)
 func (s *Store) realtimeSnapshot(auth authContext, view realtimeView) (realtimeSnapshot, error) {
 	ctx, cancel := context.WithTimeout(readContext([]context.Context{auth.requestContext}), 5*time.Second)
 	defer cancel()
-	raw, _ := json.Marshal([]any{auth.userID, auth.role, auth.authVersion, view, s.tempEpoch.Load()})
+	raw, _ := json.Marshal([]any{auth.userID, auth.keyID, auth.role, auth.authVersion, view, s.tempEpoch.Load()})
 	key := string(raw)
 	s.realtimeFlightsMu.Lock()
 	if flight := s.realtimeFlights[key]; flight != nil {

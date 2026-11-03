@@ -65,13 +65,25 @@ def assert_preserved_rows(before, after, source, target):
     for table, rows in before.items():
         if table == 'meta':
             previous, current = dict(rows), dict(after[table])
-            assert all(current.get(key) == value for key, value in previous.items()), 'old rows changed in meta'
             def derived(key):
                 if key in {'browse/epoch','browse/library','browse/admin','browse/community','browse/search_version','browse/schema_version','browse/schema_digest'}: return True
                 if key.startswith('browse/account/'):
                     try: return str(uuid.UUID(key[len('browse/account/'):])) == key[len('browse/account/'):]
                     except ValueError: return False
                 return False
+            for key, value in previous.items():
+                assert key in current, 'old meta key removed: ' + key
+                if current[key] == value: continue
+                # Session revocation during migration advances the community
+                # counter. Versioned derived caches can also change definition;
+                # business metadata (sync secrets/revision/etc.) stays exact.
+                counter = key in {'browse/library','browse/admin','browse/community','browse/search_version','browse/schema_version'} or key.startswith('browse/account/') and derived(key)
+                if counter:
+                    assert value.isdecimal() and current[key].isdecimal() and int(current[key]) >= int(value), 'derived counter regressed: ' + key
+                elif key == 'browse/schema_digest':
+                    assert len(current[key]) == 64 and all(c in '0123456789abcdef' for c in current[key]), 'invalid derived digest'
+                else:
+                    raise AssertionError('old business meta changed: ' + key)
             assert all(derived(key) for key in current.keys() - previous.keys()), 'unrecognized metadata additions'
             continue
         if table != 'schema_migrations':
@@ -176,7 +188,7 @@ def main():
             assert list(root.glob(f'.schema-{args.from_schema}-to-{args.to_schema}-*/snapshot.sqlite'))==backups,'same-schema restart created another migration snapshot'
             restarted.login('admin',password)
             with closing(sqlite3.connect(database)) as db: assert db.execute('SELECT count(*) FROM schema_migrations').fetchone()[0]==expected_migrations
-            print(f'PASS real binary {args.from_schema}->{args.to_schema}: all old table rows, password, Key, media UUID/hash, playlist notes and repeated startup')
+            print(f'PASS real binary {args.from_schema}->{args.to_schema}: all business rows, controlled derived metadata, password, Key, media UUID/hash, playlist notes and repeated startup')
         finally:
             if process is not None: stop(process)
 
