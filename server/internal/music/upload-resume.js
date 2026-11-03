@@ -471,7 +471,16 @@ async function restoreResumeQueue() {
           upload.commitResult=receipt;upload.status=receipt.duplicate?'已去重':'完成';upload.stageId=null;upload.needsSourceFile=false;
           if(upload.targetPlaylistID&&!upload.playlistAssigned){upload.assignmentError='加入目标歌单尚未完成';upload.error='已入库，仅加入歌单待重试'}
           pendingReceiptCleanup.push(upload);
-        }catch(_){if(resumeCurrent(owner,epoch,upload)){upload.status='失败';upload.error=error.message}}
+        }catch(receiptError){if(resumeCurrent(owner,epoch,upload)){
+          if(error.code==='UPLOAD_PREVIEW_EXPIRED'&&receiptError.status===404){
+            try{
+              try{await resumeJSON('/'+task.id,'DELETE',undefined,owner,epoch)}catch(cleanupError){if(cleanupError.status!==404)throw cleanupError}
+              if(!resumeCurrent(owner,epoch,upload))return;
+              upload.resumeId=null;upload.resumeTask=null;upload.stageId=null;upload.preview=null;upload.progress=null;upload.targetLocked=false;
+              upload.status='选择原文件继续';upload.error='原预览已过期，目标已解锁，请选择原文件重新上传。';
+            }catch(cleanupError){if(resumeCurrent(owner,epoch,upload)){upload.status='失败';upload.error='过期任务清理失败，请重试取消：'+cleanupError.message}}
+          }else{upload.status='失败';upload.error=error.message}
+        }}
       }
     }
   }

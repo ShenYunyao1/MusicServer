@@ -172,3 +172,6 @@ test('broken gain graph never falls back to loud playback',async()=>{
 });
 
 test('media error retries even when browser leaves paused false',async()=>{const f=fixture();f.c.playOnlineTrack({id:'failed',lyrics:''});await settle();f.audio.error={code:4};f.audio.paused=false;const before=f.audio.playCalls;await f.c.toggleOnlinePlayback();assert.ok(f.audio.playCalls>before);});
+
+test('queue playback does not cancel an independently requested track detail',()=>{const f=fixture();f.c.state.trackDetailGeneration=7;f.c.playOnlineTrack({id:'next',lyrics:''},true);assert.equal(f.c.state.trackDetailGeneration,7)});
+test('collapsed lyric updates preserve focus on the lyric container',()=>{const f=fixture();f.c.playOnlineTrack({id:'focus',lyrics:'[00:00]First\n[00:02]Second\n[00:04]Third'});f.c.showOnlineLyrics(true);const body=f.get('onlineLyricsLines');body.focus();f.audio.currentTime=2.5;f.c.highlightOnlineLyrics();assert.equal(f.c.document.activeElement,body)});

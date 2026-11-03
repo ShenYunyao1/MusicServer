@@ -67,7 +67,6 @@ async function loadOnlineCover(track,current,signal){
 function setOnlineTrackText(track){$('previewTitle').textContent=track.title||'未命名曲目';$('previewTitle').title=track.title||'未命名曲目';$('onlineArtist').textContent=[track.artist||'未知歌手',track.album].filter(Boolean).join(' · ');$('onlineArtist').title=$('onlineArtist').textContent;$('onlineLyricsTitle').textContent=track.title||'歌词'}
 function playOnlineTrack(track,fromQueue=false){
  if(!state.user||track.missing||track.removed||!onlinePlayerBar)return;
- state.trackDetailGeneration=(state.trackDetailGeneration||0)+1;
  if(!fromQueue)clearOnlineQueue();
  if(typeof newListeningSession==='function')newListeningSession(track);
  onlinePlayback.plainLyrics='';onlinePlayback.textMode=false;
@@ -168,7 +167,7 @@ function renderOnlineLyrics(text){
 }
 function highlightOnlineLyrics(force=false){
  if(!onlineLyricsPanel||!onlinePlayback.lyrics.length||onlinePlayback.textMode)return;const index=playerLyricIndex(onlinePlayback.lyrics,memberPlayer.currentTime);if(index===onlinePlayback.active&&!force)return;
- onlinePlayback.active=index;const body=$('onlineLyricsLines'),savedScroll=body.scrollTop||0,focusedIndex=body.contains(document.activeElement)?document.activeElement.dataset.lyricIndex:null;
+ onlinePlayback.active=index;const body=$('onlineLyricsLines'),savedScroll=body.scrollTop||0,focus=document.activeElement,focusedIndex=focus!==body&&body.contains(focus)&&/^\d+$/.test(focus?.dataset?.lyricIndex||'')?focus.dataset.lyricIndex:null;
  if(onlineLyricsExpanded&&body.dataset.lyricMode==='expanded'&&!force){body.querySelector('[aria-current="true"]')?.removeAttribute('aria-current');body.querySelector('[data-lyric-index="'+index+'"]')?.setAttribute('aria-current','true');followOnlineLyrics();return}
  body.replaceChildren();body.dataset.lyricMode=onlineLyricsExpanded?'expanded':'collapsed';
  const indices=onlineLyricsExpanded?onlinePlayback.lyrics.map((_,i)=>i):[index-1,index,index+1];
