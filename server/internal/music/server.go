@@ -1562,7 +1562,7 @@ func (a *API) stagedUpload(response http.ResponseWriter, request *http.Request) 
 		case errors.Is(err, errResumeBusy):
 			// The preview is being read/finished right now; retry shortly.
 			response.Header().Set("Retry-After", "1")
-			writeError(response, http.StatusTooManyRequests, "UPLOAD_BUSY", err.Error())
+			writeError(response, http.StatusTooManyRequests, "UPLOAD_BUSY", "upload stage is busy; retry shortly")
 		case err != nil:
 			writeError(response, http.StatusInternalServerError, "STAGE_DELETE_FAILED", err.Error())
 		default:

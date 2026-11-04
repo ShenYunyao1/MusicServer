@@ -72,11 +72,16 @@ func (s *Store) accountStorageRows(reader sqlReader, where string, args []any, o
 	if err != nil {
 		return page, err
 	}
+	ids := make([]string, 0, len(page.Items))
 	for i := range page.Items {
-		b, err := accountStorageBreakdown(reader, page.Items[i].ID)
-		if err != nil {
-			return page, err
-		}
+		ids = append(ids, page.Items[i].ID)
+	}
+	used, err := accountStorageBreakdowns(reader, ids)
+	if err != nil {
+		return page, err
+	}
+	for i := range page.Items {
+		b := used[page.Items[i].ID]
 		page.Items[i].storageBreakdown = b
 		page.Items[i].UsedBytes = b.total()
 	}
