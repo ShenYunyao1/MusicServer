@@ -113,5 +113,13 @@ func (s *Store) discardAccountTemporary(id string, options MutationOptions) erro
 	}
 	// The ordinary stage sweep recognizes generated orphan names and retries a
 	// post-commit filesystem failure; a SQL rollback never removes live bytes.
-	return errors.Join(failures...)
+	if len(failures) == 0 {
+		return nil
+	}
+	// The discard audit was committed with the row deletions; record that the
+	// filesystem half is still pending so the audit does not claim full cleanup.
+	compensation := s.transaction(func(tx *sql.Tx) error {
+		return auditMutation(tx, "account.temporary_discard_incomplete", id, nil, map[string]int{"files": len(failures)}, []MutationOptions{options})
+	})
+	return errors.Join(append(failures, compensation)...)
 }

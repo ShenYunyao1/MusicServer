@@ -18,28 +18,31 @@ func methodNotAllowed(w http.ResponseWriter, r *http.Request) {
 	writeError(w, 405, "METHOD_NOT_ALLOWED", "method not allowed")
 }
 
+// exactRouteMethods is shared and immutable: routeMethods runs on every request
+// (trailing-slash normalization and the final method gate).
+var exactRouteMethods = map[string]string{
+	"setup": "GET, POST", "health": "GET", "tracks": "GET", "playlists": "GET, POST", "playlists/editor": "POST", "playlists/order": "PUT",
+	"auth/keys": "GET, POST, DELETE", "auth/keys/stats": "GET", "auth/avatar": "GET, PUT", "auth/avatar/content": "GET", "auth/profile": "PUT", "auth/storage": "GET", "auth/email": "GET", "auth/email/challenge": "POST", "auth/email/verify": "POST",
+	"admin/settings": "GET, PUT, PATCH", "admin/users": "GET, POST", "admin/mail": "GET, PUT", "admin/mail/test": "POST", "admin/registration": "GET, PUT",
+	"registration": "POST", "registration/config": "GET", "admin/backups": "GET, POST", "admin/backups/policy": "PUT",
+	"admin/storage": "GET", "admin/storage/accounts": "GET", "admin/storage/policy": "PUT", "admin/storage/cleanup-updates": "POST",
+	"admin/update": "GET", "admin/update/check": "POST", "admin/update/apply": "POST", "admin/removed": "GET", "admin/audit": "GET", "admin/stats": "GET", "admin/logs": "GET",
+	"admin/scan": "POST", "admin/scan/status": "GET", "admin/scan/cancel": "POST",
+	"community/events": "GET", "community/sync": "POST", "public/playlists": "GET", "subscriptions": "GET", "invitations": "GET",
+	"listening/sessions": "POST", "listening/tracks": "GET", "sync": "GET", "sync/tracks": "POST",
+	"uploads": "POST", "uploads/stage": "POST", "uploads/preflight": "GET", "uploads/resumable": "GET, POST",
+	"browse/summary": "GET", "browse/tracks": "GET", "browse/playlists": "GET", "browse/playlists/move": "POST",
+	"tags": "GET, POST", "tag-groups": "GET, POST", "tag-sync": "GET", "tag-batches": "GET, POST",
+	"track-query": "POST", "track-facets": "POST", "saved-track-filters": "GET, POST",
+}
+
 func routeMethods(path string) string {
 	p := strings.TrimPrefix(path, "/api/v2/")
 	if p == path || strings.Contains(p, "//") {
 		return ""
 	}
 	p = strings.TrimSuffix(p, "/")
-	exact := map[string]string{
-		"setup": "GET, POST", "health": "GET", "tracks": "GET", "playlists": "GET, POST", "playlists/editor": "POST", "playlists/order": "PUT",
-		"auth/keys": "GET, POST, DELETE", "auth/keys/stats": "GET", "auth/avatar": "GET, PUT", "auth/avatar/content": "GET", "auth/profile": "PUT", "auth/storage": "GET", "auth/email": "GET", "auth/email/challenge": "POST", "auth/email/verify": "POST",
-		"admin/settings": "GET, PUT, PATCH", "admin/users": "GET, POST", "admin/mail": "GET, PUT", "admin/mail/test": "POST", "admin/registration": "GET, PUT",
-		"registration": "POST", "registration/config": "GET", "admin/backups": "GET, POST", "admin/backups/policy": "PUT",
-		"admin/storage": "GET", "admin/storage/accounts": "GET", "admin/storage/policy": "PUT", "admin/storage/cleanup-updates": "POST",
-		"admin/update": "GET", "admin/update/check": "POST", "admin/update/apply": "POST", "admin/removed": "GET", "admin/audit": "GET", "admin/stats": "GET", "admin/logs": "GET",
-		"admin/scan": "POST", "admin/scan/status": "GET", "admin/scan/cancel": "POST",
-		"community/events": "GET", "community/sync": "POST", "public/playlists": "GET", "subscriptions": "GET", "invitations": "GET",
-		"listening/sessions": "POST", "listening/tracks": "GET", "sync": "GET", "sync/tracks": "POST",
-		"uploads": "POST", "uploads/stage": "POST", "uploads/preflight": "GET", "uploads/resumable": "GET, POST",
-		"browse/summary": "GET", "browse/tracks": "GET", "browse/playlists": "GET", "browse/playlists/move": "POST",
-		"tags": "GET, POST", "tag-groups": "GET, POST", "tag-sync": "GET", "tag-batches": "GET, POST",
-		"track-query": "POST", "track-facets": "POST", "saved-track-filters": "GET, POST",
-	}
-	if allow := exact[p]; allow != "" {
+	if allow := exactRouteMethods[p]; allow != "" {
 		return allow
 	}
 	if strings.HasPrefix(p, "auth/") {

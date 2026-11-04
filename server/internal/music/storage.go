@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"musicserver/internal/diskspace"
@@ -247,7 +248,11 @@ func (s *Store) StorageOverview(contexts ...context.Context) (StorageSummary, er
 		if err := reader.QueryRow("SELECT value FROM settings WHERE key='storage_refreshed_at'").Scan(&out.UsageRefreshedAt); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		used, err := s.accountUsage(reader)
+		used, err := accountStorageBreakdowns(reader)
+		if err != nil {
+			return err
+		}
+		quotas, err := storageQuotas(reader)
 		if err != nil {
 			return err
 		}
@@ -264,7 +269,7 @@ func (s *Store) StorageOverview(contexts ...context.Context) (StorageSummary, er
 				return err
 			}
 			account.Deleted = deleted != ""
-			account.UsedBytes = used[account.ID]
+			account.UsedBytes = used[account.ID].total()
 			out.Accounts = append(out.Accounts, account)
 		}
 		err = rows.Err()
@@ -273,17 +278,78 @@ func (s *Store) StorageOverview(contexts ...context.Context) (StorageSummary, er
 			return err
 		}
 		for i := range out.Accounts {
-			b, err := accountStorageBreakdown(reader, out.Accounts[i].ID)
-			if err != nil {
-				return err
-			}
+			b := used[out.Accounts[i].ID]
 			out.Accounts[i].storageBreakdown = b
 			out.MediaBytes += b.AudioBytes
-			if err := readStorageJSON(reader, "storage_quota/"+out.Accounts[i].ID, &out.Accounts[i].StorageQuota); err != nil {
-				return err
-			}
+			out.Accounts[i].StorageQuota = quotas[out.Accounts[i].ID]
 		}
 		return nil
 	})
+	return out, err
+}
+
+// accountStorageBreakdowns aggregates every account in one pass so the capacity
+// page does not run a per-account query inside its 5 second snapshot.
+func accountStorageBreakdowns(reader sqlReader) (map[string]storageBreakdown, error) {
+	out := map[string]storageBreakdown{}
+	if !storageProjectionReady(reader) {
+		rows, err := reader.Query("SELECT uploaded_by,COALESCE(sum(json_extract(payload,'$.size')),0) FROM tracks WHERE missing=0 AND json_valid(payload) GROUP BY uploaded_by")
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var owner string
+			var b storageBreakdown
+			if err := rows.Scan(&owner, &b.AudioBytes); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out[owner] = b
+		}
+		err = rows.Err()
+		rows.Close()
+		return out, err
+	}
+	rows, err := reader.Query(`SELECT owner,COALESCE(sum(CASE WHEN kind='audio' THEN bytes ELSE 0 END),0),COALESCE(sum(CASE WHEN kind='cover' THEN bytes ELSE 0 END),0),COALESCE(sum(CASE WHEN kind='lyrics' THEN bytes ELSE 0 END),0) FROM (SELECT owner,asset,kind,max(bytes) bytes FROM browse_storage_refs WHERE resource_type<>'stage' GROUP BY owner,asset,kind) GROUP BY owner`)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var owner string
+		var b storageBreakdown
+		if err := rows.Scan(&owner, &b.AudioBytes, &b.CoverBytes, &b.LyricsBytes); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		out[owner] = b
+	}
+	err = rows.Err()
+	rows.Close()
+	return out, err
+}
+
+// storageQuotas reads every account quota in one query; malformed values still
+// fail the snapshot like readStorageJSON did per account.
+func storageQuotas(reader sqlReader) (map[string]StorageQuota, error) {
+	out := map[string]StorageQuota{}
+	rows, err := reader.Query("SELECT key,value FROM settings WHERE key LIKE 'storage_quota/%'")
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var key, raw string
+		if err := rows.Scan(&key, &raw); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		var quota StorageQuota
+		if err := json.Unmarshal([]byte(raw), &quota); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		out[strings.TrimPrefix(key, "storage_quota/")] = quota
+	}
+	err = rows.Err()
+	rows.Close()
 	return out, err
 }

@@ -945,6 +945,29 @@ func (s *Store) InitializeResumableUploads() error {
 func (s *Store) CleanupResumableUploads() error {
 	return s.cleanupResumableUploads("")
 }
+
+// resumeCleanupExpired decides whether a checkpoint may be deleted. Missing or
+// corrupt checkpoints are discarded; any other read failure is reported so the
+// caller keeps live bytes for a later pass.
+func resumeCleanupExpired(task resumableUpload, readErr error, user User, userErr error) (bool, error) {
+	if readErr != nil {
+		if errors.Is(readErr, errResumeCorrupt) || errors.Is(readErr, errResourceHidden) {
+			return true, nil
+		}
+		return false, readErr
+	}
+	if !time.Now().Before(task.ExpiresAt) {
+		return true, nil
+	}
+	if userErr != nil {
+		if errors.Is(userErr, sql.ErrNoRows) {
+			return true, nil
+		}
+		return false, userErr
+	}
+	return !user.Enabled || user.MustChangePassword || user.DeletedAt != "", nil
+}
+
 func (s *Store) cleanupResumableUploads(owner string) error {
 	if owner == "" {
 		if err := s.cleanupUploadReceipts(); err != nil {
@@ -990,16 +1013,24 @@ func (s *Store) cleanupResumableUploads(owner string) error {
 			continue
 		}
 		task, e := readResume(s.db, id)
-		expired := e != nil || !time.Now().Before(task.ExpiresAt)
-		if !expired {
-			u, userErr := readUser(s.db, task.OwnerID)
-			expired = userErr != nil || !u.Enabled || u.MustChangePassword || u.DeletedAt != ""
+		var user User
+		var userErr error
+		if e == nil && time.Now().Before(task.ExpiresAt) {
+			user, userErr = readUser(s.db, task.OwnerID)
+		}
+		expired, decisionErr := resumeCleanupExpired(task, e, user, userErr)
+		if decisionErr != nil {
+			// A transient database failure is not evidence that the upload is
+			// gone; keep the chunk and checkpoint for the next cleanup pass.
+			lock.Unlock()
+			cleanupErrors = append(cleanupErrors, decisionErr)
+			continue
 		}
 		if expired {
 			if e == nil {
 				e = s.removeResumeStage(task)
 			}
-			if e != nil && !errors.Is(e, errResumeCorrupt) {
+			if e != nil && !errors.Is(e, errResumeCorrupt) && !errors.Is(e, errResourceHidden) {
 				lock.Unlock()
 				cleanupErrors = append(cleanupErrors, e)
 				continue

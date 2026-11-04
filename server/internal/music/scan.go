@@ -436,7 +436,7 @@ func (s *Store) runScanWithWalker(ctx context.Context, full bool, options []Muta
 					return err
 				}
 				track.Version++
-				if err := writeTrack(tx, track); err != nil {
+				if err := writeTrackWithEnforcement(tx, track, false); err != nil {
 					return err
 				}
 			}
@@ -454,7 +454,7 @@ func (s *Store) runScanWithWalker(ctx context.Context, full bool, options []Muta
 			}
 			if tagsChanged && !metadataChanged {
 				track.Version++
-				if err := writeTrack(tx, track); err != nil {
+				if err := writeTrackWithEnforcement(tx, track, false); err != nil {
 					return err
 				}
 			}
@@ -471,7 +471,7 @@ func (s *Store) runScanWithWalker(ctx context.Context, full bool, options []Muta
 			}
 			// Reconcile the derived usage from this scan's observed size even if
 			// metadata is unchanged (e.g. an older projection was corrected to 0).
-			if err := writeTrackStorage(tx, track); err != nil {
+			if err := reconcileTrackStorage(tx, track); err != nil {
 				return err
 			}
 			if _, err := tx.Exec("INSERT INTO scan_stamps VALUES(?,?) ON CONFLICT(track_id) DO UPDATE SET stamp=excluded.stamp", track.ID, candidate.stamp); err != nil {
@@ -498,7 +498,7 @@ func (s *Store) runScanWithWalker(ctx context.Context, full bool, options []Muta
 			before := current
 			current.Missing = true
 			current.Version++
-			if err := writeTrack(tx, current); err != nil {
+			if err := writeTrackWithEnforcement(tx, current, false); err != nil {
 				return err
 			}
 			if !current.Removed {

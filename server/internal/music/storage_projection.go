@@ -98,7 +98,7 @@ func replaceStorageRefs(tx *sql.Tx, kind, id, owner string, refs []storageRefere
 	}
 	return nil
 }
-func writeTrackStorage(tx *sql.Tx, t Track) error {
+func writeTrackStorageWithEnforcement(tx *sql.Tx, t Track, enforce bool) error {
 	if !storageProjectionReady(tx) {
 		return nil
 	}
@@ -106,7 +106,52 @@ func writeTrackStorage(tx *sql.Tx, t Track) error {
 	if err != nil {
 		return err
 	}
-	return replaceStorageRefs(tx, "track", t.ID, t.UploadedBy, refs, true)
+	return replaceStorageRefs(tx, "track", t.ID, t.UploadedBy, refs, enforce)
+}
+
+// reconcileTrackStorage rewrites derived rows only when the observed projection
+// differs, and never enforces the quota: the media scan is the maintenance path
+// that must still correct externally changed files for an over-quota account.
+func reconcileTrackStorage(tx *sql.Tx, t Track) error {
+	if !storageProjectionReady(tx) {
+		return nil
+	}
+	refs, err := trackStorageRefs(tx, t)
+	if err != nil {
+		return err
+	}
+	rows, err := tx.Query("SELECT asset,kind,bytes FROM browse_storage_refs WHERE resource_type='track' AND resource_id=?", t.ID)
+	if err != nil {
+		return err
+	}
+	stored := map[string]storageReference{}
+	for rows.Next() {
+		var ref storageReference
+		if err := rows.Scan(&ref.asset, &ref.kind, &ref.bytes); err != nil {
+			rows.Close()
+			return err
+		}
+		stored[ref.asset] = ref
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	current := 0
+	for _, ref := range refs {
+		if ref.bytes <= 0 {
+			continue
+		}
+		current++
+		if got, ok := stored[ref.asset]; !ok || got.kind != ref.kind || got.bytes != ref.bytes {
+			return replaceStorageRefs(tx, "track", t.ID, t.UploadedBy, refs, false)
+		}
+	}
+	if current != len(stored) {
+		return replaceStorageRefs(tx, "track", t.ID, t.UploadedBy, refs, false)
+	}
+	return nil
 }
 func writePlaylistStorage(tx *sql.Tx, p Playlist) error {
 	if !storageProjectionReady(tx) {

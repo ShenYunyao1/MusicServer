@@ -1555,11 +1555,17 @@ func (a *API) stagedUpload(response http.ResponseWriter, request *http.Request) 
 		preview.Track = publicTrack(preview.Track, authFromRequest(request))
 		writeJSON(response, http.StatusOK, preview)
 	case http.MethodDelete:
-		if err := a.store.DeleteUploadStage(id); errors.Is(err, os.ErrNotExist) {
+		err := a.store.DeleteUploadStage(id)
+		switch {
+		case errors.Is(err, os.ErrNotExist):
 			writeError(response, http.StatusNotFound, "STAGE_NOT_FOUND", "upload stage not found")
-		} else if err != nil {
+		case errors.Is(err, errResumeBusy):
+			// The preview is being read/finished right now; retry shortly.
+			response.Header().Set("Retry-After", "1")
+			writeError(response, http.StatusTooManyRequests, "UPLOAD_BUSY", err.Error())
+		case err != nil:
 			writeError(response, http.StatusInternalServerError, "STAGE_DELETE_FAILED", err.Error())
-		} else {
+		default:
 			response.WriteHeader(http.StatusNoContent)
 		}
 	default:
