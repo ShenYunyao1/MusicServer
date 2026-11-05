@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "INVALID_REALTIME_VIEW",
+    "message": "invalid realtime view"
+  }
+}

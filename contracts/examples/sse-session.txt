@@ -1,0 +1,15 @@
+: heartbeat
+
+event: ready
+data: {}
+
+event: change
+data: {}
+
+: heartbeat
+
+event: reconnect
+data: {}
+
+event: expired
+data: {}

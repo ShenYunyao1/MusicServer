@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://musicserver.local/contracts/library-sync-tracks-request.schema.json",
+  "title": "Batch track resolution request",
+  "description": "POST /api/v2/sync/tracks. Resolves at most 100 unique track IDs from one protocol-2 delta cursor. Every ID must be visible to the caller; otherwise the whole request returns 404 TRACK_NOT_FOUND.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["cursor", "ids"],
+  "properties": {
+    "cursor": { "type": "string" },
+    "ids": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$" }
+    }
+  }
+}

@@ -1,0 +1,198 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://musicserver.local/contracts/realtime-sync-response.schema.json",
+  "title": "Realtime delta sync response",
+  "description": "Sections absent from the map are unchanged. A present section always carries changed/removed/order/meta; reset is omitted when false.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["cursor", "reset", "sections"],
+  "properties": {
+    "cursor": { "type": "string", "maxLength": 128 },
+    "reset": {
+      "type": "boolean",
+      "description": "True means every present section is a full baseline; discard cached rows for those sections."
+    },
+    "sections": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "badge": { "$ref": "#/$defs/badgeSection" },
+        "catalog": { "$ref": "#/$defs/catalogSection" },
+        "subscriptions": { "$ref": "#/$defs/subscriptionsSection" },
+        "invitations": { "$ref": "#/$defs/invitationsSection" },
+        "subscription_tracks": { "$ref": "#/$defs/subscriptionTracksSection" },
+        "owner_playlist": { "$ref": "#/$defs/ownerPlaylistSection" },
+        "owner_invitations": { "$ref": "#/$defs/ownerInvitationsSection" },
+        "detail_playlist": { "$ref": "#/$defs/detailPlaylistSection" },
+        "detail_tracks": { "$ref": "#/$defs/detailTracksSection" }
+      }
+    }
+  },
+  "$defs": {
+
+    "badgeSection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["changed", "removed", "order", "meta"],
+      "properties": {
+        "reset": { "type": "boolean" },
+        "changed": { "type": "array", "maxItems": 0 },
+        "removed": { "type": "array", "maxItems": 0 },
+        "order": { "type": "array", "maxItems": 0 },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["pending"],
+          "properties": { "pending": { "type": "integer", "minimum": 0 } }
+        }
+      }
+    },
+    "catalogSection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["changed", "removed", "order", "meta"],
+      "properties": {
+        "reset": { "type": "boolean" },
+        "changed": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/public-playlist" } },
+        "removed": { "type": "array", "items": { "type": "string" } },
+        "order": { "type": "array", "items": { "type": "string" } },
+        "meta": { "$ref": "#/$defs/pageMeta" }
+      }
+    },
+    "subscriptionsSection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["changed", "removed", "order", "meta"],
+      "properties": {
+        "reset": { "type": "boolean" },
+        "changed": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/playlist" } },
+        "removed": { "type": "array", "items": { "type": "string" } },
+        "order": { "type": "array", "items": { "type": "string" } },
+        "meta": { "type": "object", "additionalProperties": false }
+      }
+    },
+    "invitationsSection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["changed", "removed", "order", "meta"],
+      "properties": {
+        "reset": { "type": "boolean" },
+        "changed": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/invitation" } },
+        "removed": { "type": "array", "items": { "type": "string" } },
+        "order": { "type": "array", "items": { "type": "string" } },
+        "meta": { "$ref": "#/$defs/pageMeta" }
+      }
+    },
+    "subscriptionTracksSection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["changed", "removed", "order", "meta"],
+      "properties": {
+        "reset": { "type": "boolean" },
+        "changed": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/browse-track" } },
+        "removed": { "type": "array", "items": { "type": "string" } },
+        "order": { "type": "array", "items": { "type": "string" } },
+        "meta": {
+          "type": "object",
+          "anyOf": [
+            { "type": "object", "additionalProperties": false },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["total", "offset", "limit", "playlist"],
+              "properties": {
+                "total": { "type": "integer", "minimum": 0 },
+                "offset": { "type": "integer", "minimum": 0 },
+                "limit": { "type": "integer", "minimum": 1, "maximum": 100 },
+                "playlist": { "$ref": "common.schema.json#/$defs/playlist" }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "ownerPlaylistSection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["changed", "removed", "order", "meta"],
+      "properties": {
+        "reset": { "type": "boolean" },
+        "changed": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/playlist" } },
+        "removed": { "type": "array", "items": { "type": "string" } },
+        "order": { "type": "array", "items": { "type": "string" } },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["available"],
+          "properties": { "available": { "type": "boolean" } }
+        }
+      }
+    },
+    "ownerInvitationsSection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["changed", "removed", "order", "meta"],
+      "properties": {
+        "reset": { "type": "boolean" },
+        "changed": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/invitation" } },
+        "removed": { "type": "array", "items": { "type": "string" } },
+        "order": { "type": "array", "items": { "type": "string" } },
+        "meta": { "$ref": "#/$defs/pageMeta" }
+      }
+    },
+    "detailPlaylistSection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["changed", "removed", "order", "meta"],
+      "properties": {
+        "reset": { "type": "boolean" },
+        "changed": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/playlist" } },
+        "removed": { "type": "array", "items": { "type": "string" } },
+        "order": { "type": "array", "items": { "type": "string" } },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["available"],
+          "properties": { "available": { "type": "boolean" } }
+        }
+      }
+    },
+    "detailTracksSection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["changed", "removed", "order", "meta"],
+      "properties": {
+        "reset": { "type": "boolean" },
+        "changed": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/browse-track" } },
+        "removed": { "type": "array", "items": { "type": "string" } },
+        "order": { "type": "array", "items": { "type": "string" } },
+        "meta": {
+          "type": "object",
+          "anyOf": [
+            { "type": "object", "additionalProperties": false },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["total", "offset", "limit"],
+              "properties": {
+                "total": { "type": "integer", "minimum": 0 },
+                "offset": { "type": "integer", "minimum": 0 },
+                "limit": { "type": "integer", "minimum": 1, "maximum": 100 }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "pageMeta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "offset", "limit"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "offset": { "type": "integer", "minimum": 0 },
+        "limit": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

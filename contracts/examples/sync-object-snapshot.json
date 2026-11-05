@@ -1,0 +1,26 @@
+{
+  "object_delta": true,
+  "changed_track_ids": ["t-alpha", "t-beta"],
+  "revision": 12,
+  "changed_tracks": [],
+  "playlists": [
+    {
+      "visibility": "private",
+      "owner_id": "u-demo",
+      "system": false,
+      "id": "p-focus",
+      "name": "Focus",
+      "description": "Contract sample playlist",
+      "track_ids": ["t-alpha", "t-beta"],
+      "updated_at": "2026-11-01T10:05:00Z",
+      "sort_order": 1,
+      "version": 4
+    }
+  ],
+  "full_snapshot": true,
+  "deleted_tracks": [],
+  "deleted_playlists": [],
+  "cursor": "mock-cursor-object-snapshot-1",
+  "has_more": true,
+  "reset": true
+}

@@ -1,0 +1,30 @@
+{
+  "cursor": "mock-cursor-delta-1",
+  "reset": false,
+  "sections": {
+    "badge": {
+      "changed": [],
+      "removed": [],
+      "order": [],
+      "meta": { "pending": 3 }
+    },
+    "catalog": {
+      "changed": [
+        {
+          "id": "p-radio",
+          "name": "Radio",
+          "description": "Public sampling playlist",
+          "cover_id": "cv-radio",
+          "cover_mime": "image/png",
+          "owner_id": "s-owner",
+          "source_owner_name": "S. Owner",
+          "track_count": 13,
+          "published_at": "2026-10-20T09:00:00Z"
+        }
+      ],
+      "removed": [],
+      "order": ["p-radio"],
+      "meta": { "total": 1, "offset": 0, "limit": 30 }
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://musicserver.local/contracts/realtime-sync-request.schema.json",
+  "title": "Realtime delta sync request",
+  "description": "POST /api/v2/community/sync. The body must be exactly one JSON object of at most 16 KiB. The cursor is opaque and must be sent back unchanged.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "cursor": {
+      "type": "string",
+      "maxLength": 128,
+      "description": "Empty or omitted for a reset baseline."
+    },
+    "view": { "$ref": "realtime-view.schema.json" }
+  }
+}

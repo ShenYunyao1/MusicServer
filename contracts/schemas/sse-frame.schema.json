@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://musicserver.local/contracts/sse-frame.schema.json",
+  "title": "Community realtime SSE frame",
+  "description": "Parsed form of one text/event-stream frame emitted by GET /api/v2/community/events. Heartbeats are comment-only frames (`: heartbeat`) and carry no JSON payload.",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "event", "data"],
+      "properties": {
+        "type": { "const": "event" },
+        "event": { "enum": ["ready", "change", "expired", "reconnect"] },
+        "data": { "type": "object", "additionalProperties": false }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": { "type": { "const": "heartbeat" } }
+    }
+  ]
+}

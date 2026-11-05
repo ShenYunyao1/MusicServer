@@ -1,0 +1,46 @@
+{
+  "revision": 13,
+  "tracks": [
+    {
+      "uploaded_by": "u-demo",
+      "owner_id": "u-demo",
+      "id": "t-alpha",
+      "title": "Alpha",
+      "artist": "Demo Artist",
+      "album": "Demo Album",
+      "genre": "Ambient",
+      "lyrics": "[00:01.00]hello",
+      "duration_ms": 180000,
+      "bitrate_kbps": 320,
+      "sample_rate": 44100,
+      "channels": 2,
+      "bits_per_sample": 16,
+      "path": "Demo/alpha.mp3",
+      "size": 5242880,
+      "content_hash": "9f2c1d4e8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d",
+      "format": "mp3",
+      "modified_at": "2026-11-01T10:00:00Z",
+      "version": 3
+    },
+    {
+      "uploaded_by": "u-demo",
+      "owner_id": "u-demo",
+      "id": "t-beta",
+      "title": "Beta",
+      "artist": "Demo Artist",
+      "album": "Demo Album",
+      "genre": "Ambient",
+      "duration_ms": 210000,
+      "bitrate_kbps": 256,
+      "sample_rate": 48000,
+      "channels": 2,
+      "bits_per_sample": 16,
+      "path": "Demo/beta.flac",
+      "size": 20971520,
+      "content_hash": "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809",
+      "format": "flac",
+      "modified_at": "2026-11-02T09:30:00Z",
+      "version": 2
+    }
+  ]
+}
