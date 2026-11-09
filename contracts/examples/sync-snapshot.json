@@ -1,0 +1,53 @@
+{
+  "revision": 12,
+  "changed_tracks": [
+    {
+      "uploaded_by": "u-demo",
+      "owner_id": "u-demo",
+      "id": "t-alpha",
+      "title": "Alpha",
+      "artist": "Demo Artist",
+      "album": "Demo Album",
+      "genre": "Ambient",
+      "comment": "contract sample",
+      "lyrics": "[00:01.00]hello",
+      "cover_id": "cv-demo",
+      "cover_mime": "image/png",
+      "cover_source": "sidecar",
+      "duration_ms": 180000,
+      "bitrate_kbps": 320,
+      "sample_rate": 44100,
+      "channels": 2,
+      "bits_per_sample": 16,
+      "path": "Demo/alpha.mp3",
+      "size": 5242880,
+      "content_hash": "9f2c1d4e8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d",
+      "format": "mp3",
+      "modified_at": "2026-11-01T10:00:00Z",
+      "version": 3
+    }
+  ],
+  "playlists": [
+    {
+      "visibility": "private",
+      "read_only": false,
+      "owner_id": "u-demo",
+      "system": false,
+      "id": "p-focus",
+      "name": "Focus",
+      "description": "Contract sample playlist",
+      "track_ids": ["t-alpha", "t-missing"],
+      "unavailable_track_ids": ["t-missing"],
+      "updated_at": "2026-11-01T10:05:00Z",
+      "sort_order": 1,
+      "track_notes": { "t-alpha": "keep" },
+      "version": 4
+    }
+  ],
+  "full_snapshot": true,
+  "deleted_tracks": [],
+  "deleted_playlists": [],
+  "cursor": "mock-cursor-snapshot-1",
+  "has_more": true,
+  "reset": true
+}

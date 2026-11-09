@@ -1,0 +1,46 @@
+{
+  "revision": 13,
+  "changed_tracks": [
+    {
+      "uploaded_by": "u-demo",
+      "owner_id": "u-demo",
+      "id": "t-beta",
+      "title": "Beta",
+      "artist": "Demo Artist",
+      "album": "Demo Album",
+      "genre": "Ambient",
+      "duration_ms": 210000,
+      "bitrate_kbps": 256,
+      "sample_rate": 48000,
+      "channels": 2,
+      "bits_per_sample": 16,
+      "path": "Demo/beta.flac",
+      "size": 20971520,
+      "content_hash": "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809",
+      "format": "flac",
+      "modified_at": "2026-11-02T09:30:00Z",
+      "version": 2
+    }
+  ],
+  "playlists": [
+    {
+      "visibility": "private",
+      "owner_id": "u-demo",
+      "system": false,
+      "id": "p-focus",
+      "name": "Focus",
+      "description": "Contract sample playlist",
+      "track_ids": ["t-alpha", "t-beta", "t-missing"],
+      "unavailable_track_ids": ["t-missing"],
+      "updated_at": "2026-11-02T09:31:00Z",
+      "sort_order": 1,
+      "version": 5
+    }
+  ],
+  "full_snapshot": false,
+  "deleted_tracks": ["t-gone"],
+  "deleted_playlists": [],
+  "cursor": "mock-cursor-delta-1",
+  "has_more": false,
+  "reset": false
+}

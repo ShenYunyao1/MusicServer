@@ -1,0 +1,32 @@
+{
+  "revision": 14,
+  "changed_tracks": [
+    {
+      "uploaded_by": "u-demo",
+      "owner_id": "u-demo",
+      "id": "t-alpha",
+      "title": "Alpha",
+      "artist": "Demo Artist",
+      "album": "Demo Album",
+      "genre": "Ambient",
+      "duration_ms": 180000,
+      "bitrate_kbps": 320,
+      "sample_rate": 44100,
+      "channels": 2,
+      "bits_per_sample": 16,
+      "path": "Demo/alpha.mp3",
+      "size": 5242880,
+      "content_hash": "9f2c1d4e8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d",
+      "format": "mp3",
+      "modified_at": "2026-11-01T10:00:00Z",
+      "version": 3
+    }
+  ],
+  "playlists": [],
+  "full_snapshot": true,
+  "deleted_tracks": [],
+  "deleted_playlists": [],
+  "cursor": "mock-cursor-reset-1",
+  "has_more": false,
+  "reset": true
+}

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://musicserver.local/contracts/library-sync-tracks-response.schema.json",
+  "title": "Batch track resolution response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["revision", "tracks"],
+  "properties": {
+    "revision": { "type": "integer", "minimum": 0 },
+    "tracks": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/track" } }
+  }
+}

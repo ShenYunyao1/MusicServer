@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://musicserver.local/contracts/library-sync-response.schema.json",
+  "title": "Library sync response",
+  "description": "GET /api/v2/sync. Protocol 1 (default) carries full track objects; protocol=2 replaces track payloads with changed_track_ids and sets object_delta=true.",
+  "oneOf": [
+    { "$ref": "#/$defs/protocol1" },
+    { "$ref": "#/$defs/protocol2" }
+  ],
+  "$defs": {
+    "common": {
+      "type": "object",
+      "required": ["revision", "changed_tracks", "playlists", "full_snapshot", "deleted_tracks", "deleted_playlists", "cursor", "has_more", "reset"],
+      "properties": {
+        "revision": { "type": "integer", "minimum": 0 },
+        "changed_tracks": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/track" } },
+        "playlists": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/playlist" } },
+        "full_snapshot": { "type": "boolean" },
+        "deleted_tracks": { "type": "array", "items": { "type": "string" } },
+        "deleted_playlists": { "type": "array", "items": { "type": "string" } },
+        "cursor": { "type": "string", "description": "Opaque HMAC-signed cursor. Expires after 24 hours." },
+        "has_more": { "type": "boolean" },
+        "reset": { "type": "boolean" }
+      }
+    },
+    "protocol1": {
+      "allOf": [{ "$ref": "#/$defs/common" }],
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "revision": { "type": "integer", "minimum": 0 },
+        "changed_tracks": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/track" } },
+        "playlists": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/playlist" } },
+        "full_snapshot": { "type": "boolean" },
+        "deleted_tracks": { "type": "array", "items": { "type": "string" } },
+        "deleted_playlists": { "type": "array", "items": { "type": "string" } },
+        "cursor": { "type": "string" },
+        "has_more": { "type": "boolean" },
+        "reset": { "type": "boolean" }
+      }
+    },
+    "protocol2": {
+      "allOf": [{ "$ref": "#/$defs/common" }],
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["object_delta", "changed_track_ids"],
+      "properties": {
+        "object_delta": { "const": true },
+        "changed_track_ids": { "type": "array", "items": { "type": "string" } },
+        "revision": { "type": "integer", "minimum": 0 },
+        "changed_tracks": { "type": "array", "maxItems": 0 },
+        "playlists": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/playlist" } },
+        "full_snapshot": { "type": "boolean" },
+        "deleted_tracks": { "type": "array", "items": { "type": "string" } },
+        "deleted_playlists": { "type": "array", "items": { "type": "string" } },
+        "cursor": { "type": "string" },
+        "has_more": { "type": "boolean" },
+        "reset": { "type": "boolean" }
+      }
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "cursor": "mock-cursor-reset-1",
+  "view": {
+    "catalog": true,
+    "query": "",
+    "offset": 0,
+    "subscriptions": true
+  }
+}

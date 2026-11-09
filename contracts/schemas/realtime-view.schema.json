@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://musicserver.local/contracts/realtime-view.schema.json",
+  "title": "Realtime view selector",
+  "description": "Selects which projections a realtime stream or delta sync observes. Unknown fields are rejected by the server. Omitted fields mean false, an empty string, or zero.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "catalog": {
+      "type": "boolean",
+      "description": "Watch the public catalog page selected by query/offset (page size is fixed at 30)."
+    },
+    "query": {
+      "type": "string",
+      "maxLength": 1024,
+      "description": "Catalog search text; also applied when view.catalog is true."
+    },
+    "offset": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000000,
+      "description": "Catalog page offset."
+    },
+    "subscriptions": {
+      "type": "boolean",
+      "description": "Watch the caller's subscription list."
+    },
+    "subscription_detail": {
+      "type": "string",
+      "pattern": "^$|^[A-Za-z0-9_-]{1,128}$",
+      "description": "Playlist ID whose read-only detail (external view) should be watched."
+    },
+    "subscription_offset": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000000
+    },
+    "subscription_limit": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Detail page size; 0 selects the server default (50)."
+    },
+    "subscription_query": {
+      "type": "string",
+      "maxLength": 1024
+    },
+    "invitations": {
+      "type": "boolean",
+      "description": "Watch received playlist invitations."
+    },
+    "invitation_id": {
+      "type": "string",
+      "pattern": "^$|^[A-Za-z0-9_-]{1,128}$",
+      "description": "When set, the invitations section contains only this invitation (if visible)."
+    },
+    "invitation_offset": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000000
+    },
+    "owner_playlist": {
+      "type": "string",
+      "pattern": "^$|^[A-Za-z0-9_-]{1,128}$",
+      "description": "Owned playlist whose sharing state (invitations) should be watched."
+    },
+    "owner_offset": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000000
+    },
+    "public_detail": {
+      "type": "string",
+      "pattern": "^$|^[A-Za-z0-9_-]{1,128}$",
+      "description": "Public playlist whose detail page should be watched."
+    },
+    "public_offset": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000000
+    },
+    "public_limit": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Detail page size; 0 selects the server default (50)."
+    },
+    "public_query": {
+      "type": "string",
+      "maxLength": 1024
+    }
+  }
+}

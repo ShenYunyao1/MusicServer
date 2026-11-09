@@ -1,0 +1,200 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://musicserver.local/contracts/common.schema.json",
+  "title": "Shared protocol objects",
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,128}$",
+      "description": "Opaque resource identifier. Never parse beyond passing it back."
+    },
+    "track": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "uploaded_by",
+        "owner_id",
+        "id",
+        "title",
+        "path",
+        "size",
+        "content_hash",
+        "format",
+        "modified_at",
+        "version"
+      ],
+      "properties": {
+        "uploaded_by": { "type": "string" },
+        "owner_id": { "type": "string" },
+        "id": { "$ref": "#/$defs/id" },
+        "title": { "type": "string" },
+        "artist": { "type": "string" },
+        "album": { "type": "string" },
+        "genre": { "type": "string" },
+        "comment": { "type": "string" },
+        "lyrics": { "type": "string" },
+        "embedded_lyrics": { "type": "boolean" },
+        "lyrics_source": { "type": "string" },
+        "cover_id": { "type": "string" },
+        "cover_mime": { "type": "string" },
+        "cover_source": { "type": "string" },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "bitrate_kbps": { "type": "integer", "minimum": 0 },
+        "sample_rate": { "type": "integer", "minimum": 0 },
+        "channels": { "type": "integer", "minimum": 0 },
+        "bits_per_sample": { "type": "integer", "minimum": 0 },
+        "path": {
+          "type": "string",
+          "description": "Media-relative path. Empty for non-admin callers."
+        },
+        "size": { "type": "integer", "minimum": 0 },
+        "content_hash": { "type": "string" },
+        "format": { "type": "string" },
+        "modified_at": { "type": "string", "format": "date-time" },
+        "version": { "type": "integer", "minimum": 1 },
+        "removed": { "type": "boolean" },
+        "missing": { "type": "boolean" }
+      }
+    },
+    "browse-track": {
+      "type": "object",
+      "description": "Track row used by subscription/detail sections. Lyrics are stripped and detail_loaded marks the lazy detail state.",
+      "additionalProperties": false,
+      "required": [
+        "uploaded_by",
+        "owner_id",
+        "id",
+        "title",
+        "path",
+        "size",
+        "content_hash",
+        "format",
+        "modified_at",
+        "version",
+        "detail_loaded"
+      ],
+      "properties": {
+        "uploaded_by": { "type": "string" },
+        "owner_id": { "type": "string" },
+        "id": { "$ref": "#/$defs/id" },
+        "title": { "type": "string" },
+        "artist": { "type": "string" },
+        "album": { "type": "string" },
+        "genre": { "type": "string" },
+        "comment": { "type": "string" },
+        "embedded_lyrics": { "type": "boolean" },
+        "lyrics_source": { "type": "string" },
+        "cover_id": { "type": "string" },
+        "cover_mime": { "type": "string" },
+        "cover_source": { "type": "string" },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "bitrate_kbps": { "type": "integer", "minimum": 0 },
+        "sample_rate": { "type": "integer", "minimum": 0 },
+        "channels": { "type": "integer", "minimum": 0 },
+        "bits_per_sample": { "type": "integer", "minimum": 0 },
+        "path": { "type": "string" },
+        "size": { "type": "integer", "minimum": 0 },
+        "content_hash": { "type": "string" },
+        "format": { "type": "string" },
+        "modified_at": { "type": "string", "format": "date-time" },
+        "version": { "type": "integer", "minimum": 1 },
+        "removed": { "type": "boolean" },
+        "missing": { "type": "boolean" },
+        "detail_loaded": { "type": "boolean" }
+      }
+    },
+    "playlist": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["visibility", "system", "id", "name", "track_ids", "updated_at", "sort_order", "version"],
+      "properties": {
+        "visibility": { "type": "string", "enum": ["private", "shared", "public"] },
+        "published_at": { "type": "string", "format": "date-time" },
+        "read_only": { "type": "boolean" },
+        "subscription_status": { "type": "string", "enum": ["active", "invalid"] },
+        "subscription_reason": { "type": "string" },
+        "subscription_version": { "type": "integer", "minimum": 0 },
+        "source_owner_name": { "type": "string" },
+        "cover_id": { "type": "string" },
+        "cover_mime": { "type": "string" },
+        "unavailable_track_ids": { "type": "array", "items": { "$ref": "#/$defs/id" } },
+        "owner_id": { "type": "string" },
+        "system": { "type": "boolean" },
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "track_ids": { "type": "array", "items": { "$ref": "#/$defs/id" } },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "sort_order": { "type": "integer", "minimum": 0 },
+        "track_notes": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "version": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "public-playlist": {
+      "type": "object",
+      "description": "Catalog row (PublicPlaylistSummary): a public playlist with its author display name.",
+      "additionalProperties": false,
+      "required": ["id", "name", "description", "owner_id", "source_owner_name", "track_count", "published_at"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "cover_id": { "type": "string" },
+        "cover_mime": { "type": "string" },
+        "owner_id": { "type": "string" },
+        "source_owner_name": { "type": "string" },
+        "track_count": { "type": "integer", "minimum": 0 },
+        "published_at": { "type": "string" }
+      }
+    },
+    "invitation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "playlist_id",
+        "inviter_id",
+        "recipient_id",
+        "recipient_username",
+        "recipient_display_name",
+        "inviter_name",
+        "inviter_username",
+        "playlist_name",
+        "state",
+        "version",
+        "created_at",
+        "updated_at",
+        "available"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "playlist_id": { "$ref": "#/$defs/id" },
+        "inviter_id": { "type": "string" },
+        "recipient_id": { "type": "string" },
+        "recipient_username": { "type": "string" },
+        "recipient_display_name": { "type": "string" },
+        "inviter_name": { "type": "string" },
+        "inviter_username": { "type": "string" },
+        "playlist_name": { "type": "string" },
+        "state": { "type": "string", "enum": ["pending", "accepted", "declined", "revoked"] },
+        "version": { "type": "integer", "minimum": 1 },
+        "created_at": { "type": "string" },
+        "updated_at": { "type": "string" },
+        "available": { "type": "boolean" }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string" },
+        "message": { "type": "string" },
+        "request_id": { "type": "string" }
+      }
+    }
+  }
+}

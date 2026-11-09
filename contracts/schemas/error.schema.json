@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://musicserver.local/contracts/error.schema.json",
+  "title": "Error response envelope",
+  "description": "All JSON API failures use this envelope. The same code is also mirrored in the X-Error-Code response header.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["error"],
+  "properties": {
+    "error": { "$ref": "common.schema.json#/$defs/error" }
+  }
+}
