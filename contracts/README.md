@@ -62,7 +62,8 @@ mock 只监听 `127.0.0.1`，数据固定在 `fixtures/mock-state.json`。
 `server/internal/music/protocol_contract_test.go` 会读取 `contracts/examples/*.json`，用 `DisallowUnknownFields` 解码到真实的 `SyncResponse`、`realtimeReply`、`realtimeView`、`Playlist`、`PlaylistInvitation` 等类型，并检查 SSE 示例事件集合：
 
 ```bash
-go test ./server/internal/music -run TestProtocolContract -count=1
+cd server
+go test ./internal/music -run TestProtocolContract -count=1
 ```
 
 这样示例与 Go JSON tag 保持一致；只改文档/示例而不改代码也会被发现。
@@ -72,6 +73,8 @@ go test ./server/internal/music -run TestProtocolContract -count=1
 `lib/validate.mjs` 支持：`$ref`（本地与相对文件）、`type`、`required`、`properties`、`additionalProperties`、`items`、`enum`、`const`、`pattern`、`minLength`/`maxLength`、`minimum`/`maximum`、`minItems`/`maxItems`、`uniqueItems`、`oneOf`/`anyOf`/`allOf`。`format` 仅作注解，不校验。使用其他关键字会在自检时报 `unsupported keyword`。
 
 如需用标准校验器复核，可任选 ajv 等实现；schema 均为 draft 2020-12，未使用自定义扩展。
+
+搜索词及 SSE 原始 view JSON 的运行期限额按 UTF-8 字节计算，分别为 1024 和 4096。JSON Schema 的 maxLength 按字符计数，Mock 额外校验字节边界。Mock 使用固定账户和样本，支持分页及搜索，不模拟生产数据库故障、访问授权变化和所有限流条件。
 
 ## 不在本目录的范围
 

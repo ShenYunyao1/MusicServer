@@ -2,12 +2,58 @@ package music
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// Compare actual HTTP projections with the same schemas consumed by clients.
+// The tags CI job provides Node and enables this check explicitly.
+func TestProtocolContractLiveResponse(t *testing.T) {
+	if os.Getenv("MUSIC_SERVER_CONTRACT_LIVE") != "1" {
+		t.Skip("enabled by contract browser CI")
+	}
+	a, owner, reader, p := communityFixture(t)
+	if _, err := a.store.SetPlaylistVisibility(p.ID, "public", MutationOptions{UserID: owner.ID, ExpectedVersion: p.Version}); err != nil {
+		t.Fatal(err)
+	}
+	token := communityLogin(t, a.store, reader.Username)
+	program := `import fs from 'node:fs'; import path from 'node:path'; import {pathToFileURL} from 'node:url';
+const {loadSchema,validate}=await import(pathToFileURL(path.resolve('contracts/lib/validate.mjs')));
+const file=path.resolve('contracts/schemas/realtime-sync-response.schema.json');
+const errors=validate(JSON.parse(fs.readFileSync(0,'utf8')),loadSchema(file),{file});
+if(errors.length){console.error(errors.join('\n'));process.exit(1)}`
+	for _, state := range []string{"active", "unavailable"} {
+		if state == "unavailable" {
+			if err := a.store.transaction(func(tx *sql.Tx) error {
+				track, err := readTrackFrom(tx, p.TrackIDs[0], true)
+				if err != nil {
+					return err
+				}
+				track.Removed = true
+				return writeTrack(tx, track)
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		body, _ := json.Marshal(map[string]any{"view": map[string]any{"catalog": true, "public_detail": p.ID}})
+		w := mailRequest(a, token, "POST", "/api/v2/community/sync", string(body), 0)
+		if w.Code != 200 {
+			t.Fatal(w.Code, w.Body)
+		}
+		cmd := exec.Command("node", "--input-type=module", "-e", program)
+		cmd.Dir = filepath.Join("..", "..", "..")
+		cmd.Stdin = bytes.NewReader(w.Body.Bytes())
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%s wire contract: %v\n%s", state, err, output)
+		}
+	}
+}
 
 // TestProtocolContractExamples keeps contracts/examples structurally tied to
 // the real wire types. It is intentionally not a golden-file test: it decodes
@@ -99,8 +145,8 @@ func decodeContractStrict(t *testing.T, raw []byte, value any) {
 		t.Fatalf("decode: %v", err)
 	}
 	var extra any
-	if err := decoder.Decode(&extra); err == nil {
-		t.Fatal("example contains more than one JSON value")
+	if err := decoder.Decode(&extra); err != io.EOF {
+		t.Fatalf("example contains trailing data: %v", err)
 	}
 }
 
@@ -112,7 +158,11 @@ func checkRealtimeExampleSections(t *testing.T, sections map[string]realtimeDelt
 			var value []PublicPlaylistSummary
 			decodeContractStrict(t, mustJSON(t, delta.Changed), &value)
 		case "subscriptions", "owner_playlist", "detail_playlist":
-			var value []Playlist
+			var value []struct {
+				Playlist
+				TrackCount      int  `json:"track_count"`
+				MembersComplete bool `json:"members_complete"`
+			}
 			decodeContractStrict(t, mustJSON(t, delta.Changed), &value)
 		case "invitations", "owner_invitations":
 			var value []PlaylistInvitation

@@ -58,49 +58,59 @@
     },
     "browse-track": {
       "type": "object",
-      "description": "Track row used by subscription/detail sections. Lyrics are stripped and detail_loaded marks the lazy detail state.",
+      "description": "Current detail-page projection. Optional metadata can be null. Unavailable rows carry only identity and status.",
       "additionalProperties": false,
       "required": [
-        "uploaded_by",
-        "owner_id",
         "id",
         "title",
-        "path",
-        "size",
-        "content_hash",
-        "format",
-        "modified_at",
         "version",
         "detail_loaded"
       ],
       "properties": {
-        "uploaded_by": { "type": "string" },
-        "owner_id": { "type": "string" },
-        "id": { "$ref": "#/$defs/id" },
-        "title": { "type": "string" },
-        "artist": { "type": "string" },
-        "album": { "type": "string" },
-        "genre": { "type": "string" },
-        "comment": { "type": "string" },
-        "embedded_lyrics": { "type": "boolean" },
-        "lyrics_source": { "type": "string" },
-        "cover_id": { "type": "string" },
-        "cover_mime": { "type": "string" },
-        "cover_source": { "type": "string" },
-        "duration_ms": { "type": "integer", "minimum": 0 },
-        "bitrate_kbps": { "type": "integer", "minimum": 0 },
-        "sample_rate": { "type": "integer", "minimum": 0 },
-        "channels": { "type": "integer", "minimum": 0 },
-        "bits_per_sample": { "type": "integer", "minimum": 0 },
-        "path": { "type": "string" },
-        "size": { "type": "integer", "minimum": 0 },
-        "content_hash": { "type": "string" },
-        "format": { "type": "string" },
-        "modified_at": { "type": "string", "format": "date-time" },
-        "version": { "type": "integer", "minimum": 1 },
-        "removed": { "type": "boolean" },
-        "missing": { "type": "boolean" },
-        "detail_loaded": { "type": "boolean" }
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "title": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "detail_loaded": {
+          "const": false
+        },
+        "artist": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "album": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cover_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "duration_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "removed": {
+          "type": "boolean"
+        },
+        "missing": {
+          "type": "boolean"
+        }
       }
     },
     "playlist": {
@@ -130,7 +140,9 @@
           "type": "object",
           "additionalProperties": { "type": "string" }
         },
-        "version": { "type": "integer", "minimum": 1 }
+        "version": { "type": "integer", "minimum": 1 },
+        "track_count": { "type": "integer", "minimum": 0 },
+        "members_complete": { "type": "boolean" }
       }
     },
     "public-playlist": {

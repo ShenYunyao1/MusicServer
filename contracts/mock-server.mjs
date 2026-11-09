@@ -89,7 +89,7 @@ function validView(input) {
   }
   for (const key of ['query', 'subscription_detail', 'subscription_query', 'invitation_id', 'owner_playlist', 'public_detail', 'public_query']) {
     if (input[key] === undefined) continue;
-    if (typeof input[key] !== 'string' || input[key].length > 1024) return null;
+    if (typeof input[key] !== 'string' || Buffer.byteLength(input[key], 'utf8') > 1024) return null;
     if (['subscription_detail', 'invitation_id', 'owner_playlist', 'public_detail'].includes(key) && input[key] !== '' && !ID.test(input[key])) return null;
   }
   for (const key of ['offset', 'subscription_offset', 'subscription_limit', 'invitation_offset', 'owner_offset', 'public_offset', 'public_limit']) {
@@ -97,7 +97,13 @@ function validView(input) {
     if (!Number.isInteger(input[key])) return null;
     if (input[key] < 0 || input[key] > (key.endsWith('limit') ? 100 : 1000000)) return null;
   }
-  return input;
+  const normalized = {};
+  for (const key of VIEW_FIELDS) {
+    if (['catalog', 'subscriptions', 'invitations'].includes(key)) normalized[key] = input[key] ?? false;
+    else if (key.endsWith('offset') || key.endsWith('limit')) normalized[key] = input[key] ?? 0;
+    else normalized[key] = input[key] ?? '';
+  }
+  return normalized;
 }
 
 function section(rows, meta, order = rows.map((row) => row.id)) {
@@ -114,7 +120,8 @@ function snapshotFor(view, state) {
     badge: section([], { pending: state.community.pending }, []),
   };
   if (view.catalog) {
-    const slice = page(state.community.catalog, view.offset, 30);
+    const rows = state.community.catalog.filter(row => [row.name, row.description, row.source_owner_name].join(' ').toLowerCase().includes(view.query.toLowerCase()));
+    const slice = page(rows, view.offset, 30);
     sections.catalog = section(slice.rows, { total: slice.total, offset: slice.offset, limit: slice.limit });
   }
   if (view.subscriptions) {
@@ -132,8 +139,9 @@ function snapshotFor(view, state) {
     if (!detail) {
       sections.subscription_tracks = section([], {});
     } else {
-      const slice = page(detail.tracks, view.subscription_offset, view.subscription_limit || 50);
-      sections.subscription_tracks = section(slice.rows, { total: slice.total, offset: slice.offset, limit: slice.limit, playlist: detail.playlist });
+      const rows = filterTracks(detail.tracks, view.subscription_query, state.tracks);
+      const slice = page(rows, view.subscription_offset, view.subscription_limit || 50);
+      sections.subscription_tracks = section(slice.rows, { total: slice.total, offset: slice.offset, limit: slice.limit, playlist: detailPlaylist(detail, slice, view.subscription_query) });
     }
   }
   if (view.owner_playlist) {
@@ -147,13 +155,26 @@ function snapshotFor(view, state) {
     const detail = view.public_detail === 'p-radio' ? state.community.public_detail : null;
     sections.detail_playlist = section(detail ? [detail.playlist] : [], { available: detail !== null });
     if (detail) {
-      const slice = page(detail.tracks, view.public_offset, view.public_limit || 50);
+      const rows = filterTracks(detail.tracks, view.public_query, state.tracks);
+      const slice = page(rows, view.public_offset, view.public_limit || 50);
+      sections.detail_playlist.rows = [detailPlaylist(detail, slice, view.public_query)];
       sections.detail_tracks = section(slice.rows, { total: slice.total, offset: slice.offset, limit: slice.limit });
     } else {
       sections.detail_tracks = section([], {});
     }
   }
   return sections;
+}
+
+function detailPlaylist(detail, slice, query) {
+  return { ...detail.playlist, track_ids:slice.rows.map(track => track.id), track_count:detail.tracks.length, members_complete:query === '' && slice.rows.length === detail.tracks.length };
+}
+
+function filterTracks(tracks, query, originals) {
+  return tracks.filter(track => {
+    const metadata = originals.find(item => item.id === track.id) || track;
+    return [metadata.title, metadata.artist, metadata.album, metadata.genre].join(' ').toLowerCase().includes(query.toLowerCase());
+  });
 }
 
 function indexesFor(sections) {
@@ -415,7 +436,7 @@ function createMockServer(options = {}) {
     if (pathname === '/api/v2/community/events' && req.method === 'GET') {
       if (!(req.headers.cookie ?? '').includes(SESSION_COOKIE)) return error(res, 403, 'SESSION_REQUIRED', 'account session required');
       const rawView = url.searchParams.get('view') ?? '{}';
-      if (rawView.length > 4096) return error(res, 400, 'INVALID_REALTIME_VIEW', 'invalid realtime view');
+      if (Buffer.byteLength(rawView, 'utf8') > 4096) return error(res, 400, 'INVALID_REALTIME_VIEW', 'invalid realtime view');
       let view;
       try {
         view = JSON.parse(rawView);

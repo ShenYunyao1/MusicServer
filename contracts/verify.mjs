@@ -60,6 +60,15 @@ for (const frame of parseSSE(fs.readFileSync(path.join(EXAMPLES, 'sse-session.tx
 }
 ok('example sse-session.txt', 'sse-frame.schema.json');
 
+for (const value of [
+  { id:'track', title:'Title', version:1, detail_loaded:false, artist:null, album:null, cover_id:null, duration_ms:null },
+  { id:'missing', title:'Unavailable', version:1, detail_loaded:false, missing:true, removed:false },
+]) {
+  const errors = validate(value, { $ref:'common.schema.json#/$defs/browse-track' }, { file:sseSchema });
+  assert.deepEqual(errors, [], 'real detail projection must satisfy the schema');
+}
+ok('real detail projection including unavailable and nullable metadata');
+
 const mock = createMockServer({ heartbeatMs: 60 });
 await new Promise((resolve) => mock.server.listen(0, '127.0.0.1', resolve));
 const base = `http://127.0.0.1:${mock.server.address().port}`;
@@ -185,6 +194,28 @@ assert.equal(realtime.value.sections.badge.meta.pending, 2 + 2);
 assert.equal(realtime.value.sections.catalog.changed[0].track_count, 12 + 2);
 assert.equal(realtime.value.sections.catalog.reset, true);
 const realtimeCursor = realtime.value.cursor;
+
+const normalized = await request('/api/v2/community/sync', {
+  method: 'POST', headers: CSRF_HEADERS,
+  body: { cursor: realtimeCursor, view: { subscriptions: true, offset: 0, catalog: true } },
+});
+assert.equal(normalized.value.reset, false);
+assert.equal(normalized.value.cursor, realtimeCursor);
+for (const key of ['query', 'subscription_query', 'public_query']) {
+  const oversized = await request('/api/v2/community/sync', {
+    method: 'POST', headers: CSRF_HEADERS, body: { view: { [key]: '日'.repeat(400) } },
+  });
+  assert.equal(oversized.status, 400, `${key} must enforce UTF-8 bytes`);
+}
+const search = await request('/api/v2/community/sync', {
+  method: 'POST', headers: CSRF_HEADERS,
+  body: { view: { catalog: true, query: 'no-such-playlist', public_detail: 'p-radio', public_query: 'no-such-track', subscription_detail: 'p-radio', subscription_query: 'no-such-track' } },
+});
+for (const name of ['catalog', 'detail_tracks', 'subscription_tracks']) {
+  assert.equal(search.value.sections[name].meta.total, 0);
+  assert.deepEqual(search.value.sections[name].changed, []);
+}
+ok('realtime canonical view, UTF-8 limits and search filtering');
 
 const noop = await request('/api/v2/community/sync', {
   method: 'POST',
