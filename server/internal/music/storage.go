@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"musicserver/internal/diskspace"
@@ -166,27 +167,6 @@ func (w storageWriter) Write(data []byte) (int, error) {
 // The scanner and mutations maintain reference sizes atomically. External file
 // changes become visible on scan, rather than forcing every upload to stat the
 // entire library under the global write/admission lock.
-func (s *Store) accountUsage(reader sqlReader) (map[string]int64, error) {
-	rows, err := reader.Query("SELECT id FROM users")
-	if err != nil {
-		return nil, err
-	}
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return nil, err
-	}
-	return s.accountUsageForIDs(reader, ids)
-}
 func directoryBytes(path string) (int64, error) {
 	return directoryBytesWithWalker(path, filepath.WalkDir)
 }
@@ -247,7 +227,11 @@ func (s *Store) StorageOverview(contexts ...context.Context) (StorageSummary, er
 		if err := reader.QueryRow("SELECT value FROM settings WHERE key='storage_refreshed_at'").Scan(&out.UsageRefreshedAt); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		used, err := s.accountUsage(reader)
+		used, err := accountStorageBreakdowns(reader, nil)
+		if err != nil {
+			return err
+		}
+		quotas, err := storageQuotas(reader)
 		if err != nil {
 			return err
 		}
@@ -264,7 +248,7 @@ func (s *Store) StorageOverview(contexts ...context.Context) (StorageSummary, er
 				return err
 			}
 			account.Deleted = deleted != ""
-			account.UsedBytes = used[account.ID]
+			account.UsedBytes = used[account.ID].total()
 			out.Accounts = append(out.Accounts, account)
 		}
 		err = rows.Err()
@@ -273,17 +257,132 @@ func (s *Store) StorageOverview(contexts ...context.Context) (StorageSummary, er
 			return err
 		}
 		for i := range out.Accounts {
-			b, err := accountStorageBreakdown(reader, out.Accounts[i].ID)
-			if err != nil {
-				return err
-			}
+			b := used[out.Accounts[i].ID]
 			out.Accounts[i].storageBreakdown = b
 			out.MediaBytes += b.AudioBytes
-			if err := readStorageJSON(reader, "storage_quota/"+out.Accounts[i].ID, &out.Accounts[i].StorageQuota); err != nil {
-				return err
+			if raw, ok := quotas[out.Accounts[i].ID]; ok {
+				if err := json.Unmarshal(raw, &out.Accounts[i].StorageQuota); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
 	})
+	return out, err
+}
+
+// accountStorageBreakdowns aggregates every account (ids == nil) or the given
+// accounts in one pass so capacity readers do not run a per-account query
+// inside their 5 second snapshot.
+func accountStorageBreakdowns(reader sqlReader, ids []string) (map[string]storageBreakdown, error) {
+	out := map[string]storageBreakdown{}
+	filter := ""
+	var args []any
+	if ids != nil {
+		if len(ids) == 0 {
+			return out, nil
+		}
+		if !storageProjectionReady(reader) {
+			// Keep the fallback bounded to the requested page as well.
+			placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+			filter = " AND uploaded_by IN (" + placeholders + ")"
+			for _, id := range ids {
+				args = append(args, id)
+			}
+			rows, err := reader.Query("SELECT COALESCE(uploaded_by,''),COALESCE(sum(json_extract(payload,'$.size')),0) FROM tracks WHERE missing=0 AND json_valid(payload)"+filter+" GROUP BY uploaded_by", args...)
+			if err != nil {
+				return nil, err
+			}
+			for rows.Next() {
+				var owner string
+				var b storageBreakdown
+				if err := rows.Scan(&owner, &b.AudioBytes); err != nil {
+					rows.Close()
+					return nil, err
+				}
+				out[owner] = b
+			}
+			err = rows.Err()
+			rows.Close()
+			return out, err
+		}
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+		filter = " AND owner IN (" + placeholders + ")"
+		for _, id := range ids {
+			args = append(args, id)
+		}
+		rows, err := reader.Query(`SELECT owner,COALESCE(sum(CASE WHEN kind='audio' THEN bytes ELSE 0 END),0),COALESCE(sum(CASE WHEN kind='cover' THEN bytes ELSE 0 END),0),COALESCE(sum(CASE WHEN kind='lyrics' THEN bytes ELSE 0 END),0) FROM (SELECT owner,asset,kind,max(bytes) bytes FROM browse_storage_refs WHERE resource_type<>'stage'`+filter+` GROUP BY owner,asset,kind) GROUP BY owner`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var owner string
+			var b storageBreakdown
+			if err := rows.Scan(&owner, &b.AudioBytes, &b.CoverBytes, &b.LyricsBytes); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out[owner] = b
+		}
+		err = rows.Err()
+		rows.Close()
+		return out, err
+	}
+	if !storageProjectionReady(reader) {
+		rows, err := reader.Query("SELECT COALESCE(uploaded_by,''),COALESCE(sum(json_extract(payload,'$.size')),0) FROM tracks WHERE missing=0 AND json_valid(payload) GROUP BY uploaded_by")
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var owner string
+			var b storageBreakdown
+			if err := rows.Scan(&owner, &b.AudioBytes); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out[owner] = b
+		}
+		err = rows.Err()
+		rows.Close()
+		return out, err
+	}
+	rows, err := reader.Query(`SELECT owner,COALESCE(sum(CASE WHEN kind='audio' THEN bytes ELSE 0 END),0),COALESCE(sum(CASE WHEN kind='cover' THEN bytes ELSE 0 END),0),COALESCE(sum(CASE WHEN kind='lyrics' THEN bytes ELSE 0 END),0) FROM (SELECT owner,asset,kind,max(bytes) bytes FROM browse_storage_refs WHERE resource_type<>'stage' GROUP BY owner,asset,kind) GROUP BY owner`)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var owner string
+		var b storageBreakdown
+		if err := rows.Scan(&owner, &b.AudioBytes, &b.CoverBytes, &b.LyricsBytes); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		out[owner] = b
+	}
+	err = rows.Err()
+	rows.Close()
+	return out, err
+}
+
+// storageQuotas reads every quota row in one query without decoding it. Values
+// are decoded per listed account by the caller, so orphan or malformed rows for
+// accounts outside the page cannot fail the whole snapshot. substr() avoids the
+// LIKE '_' wildcard.
+func storageQuotas(reader sqlReader) (map[string]json.RawMessage, error) {
+	out := map[string]json.RawMessage{}
+	rows, err := reader.Query("SELECT key,value FROM settings WHERE substr(key,1,14)='storage_quota/'")
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var key, raw string
+		if err := rows.Scan(&key, &raw); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		out[strings.TrimPrefix(key, "storage_quota/")] = json.RawMessage(raw)
+	}
+	err = rows.Err()
+	rows.Close()
 	return out, err
 }

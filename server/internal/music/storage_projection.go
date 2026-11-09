@@ -12,6 +12,7 @@ import (
 type storageReference struct {
 	asset, kind string
 	bytes       int64
+	owner       string
 }
 type storageBreakdown struct {
 	AudioBytes  int64 `json:"audio_bytes"`
@@ -23,7 +24,7 @@ func (b storageBreakdown) total() int64 { return b.AudioBytes + b.CoverBytes + b
 func trackStorageRefs(reader sqlReader, t Track) ([]storageReference, error) {
 	refs := []storageReference{}
 	if !t.Missing && t.Size > 0 {
-		refs = append(refs, storageReference{"audio:" + t.Path, "audio", t.Size})
+		refs = append(refs, storageReference{asset: "audio:" + t.Path, kind: "audio", bytes: t.Size})
 	}
 	if t.CoverID != "" && t.CoverSource != "embedded" {
 		var size int64
@@ -32,11 +33,11 @@ func trackStorageRefs(reader sqlReader, t Track) ([]storageReference, error) {
 			return nil, err
 		}
 		if size > 0 {
-			refs = append(refs, storageReference{"cover:" + t.CoverID, "cover", size})
+			refs = append(refs, storageReference{asset: "cover:" + t.CoverID, kind: "cover", bytes: size})
 		}
 	}
 	if t.Lyrics != "" && (t.LyricsSource == "manual" || t.LyricsSource == "sidecar" || t.LyricsSource == "external" || !t.EmbeddedLyrics) {
-		refs = append(refs, storageReference{"lyrics:" + hashBytes([]byte(t.Lyrics)), "lyrics", int64(len(t.Lyrics))})
+		refs = append(refs, storageReference{asset: "lyrics:" + hashBytes([]byte(t.Lyrics)), kind: "lyrics", bytes: int64(len(t.Lyrics))})
 	}
 	return refs, nil
 }
@@ -98,7 +99,7 @@ func replaceStorageRefs(tx *sql.Tx, kind, id, owner string, refs []storageRefere
 	}
 	return nil
 }
-func writeTrackStorage(tx *sql.Tx, t Track) error {
+func writeTrackStorageWithEnforcement(tx *sql.Tx, t Track, enforce bool) error {
 	if !storageProjectionReady(tx) {
 		return nil
 	}
@@ -106,7 +107,53 @@ func writeTrackStorage(tx *sql.Tx, t Track) error {
 	if err != nil {
 		return err
 	}
-	return replaceStorageRefs(tx, "track", t.ID, t.UploadedBy, refs, true)
+	return replaceStorageRefs(tx, "track", t.ID, t.UploadedBy, refs, enforce)
+}
+
+// reconcileTrackStorage rewrites derived rows only when the observed projection
+// differs, and never enforces the quota: the media scan is the maintenance path
+// that must still correct externally changed files for an over-quota account.
+func reconcileTrackStorage(tx *sql.Tx, t Track) error {
+	if !storageProjectionReady(tx) {
+		return nil
+	}
+	refs, err := trackStorageRefs(tx, t)
+	if err != nil {
+		return err
+	}
+	rows, err := tx.Query("SELECT asset,kind,bytes,owner FROM browse_storage_refs WHERE resource_type='track' AND resource_id=?", t.ID)
+	if err != nil {
+		return err
+	}
+	stored := map[string]storageReference{}
+	for rows.Next() {
+		var ref storageReference
+		if err := rows.Scan(&ref.asset, &ref.kind, &ref.bytes, &ref.owner); err != nil {
+			rows.Close()
+			return err
+		}
+		stored[ref.asset] = ref
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	current := 0
+	for _, ref := range refs {
+		if ref.bytes <= 0 {
+			continue
+		}
+		current++
+		got, ok := stored[ref.asset]
+		if !ok || got.kind != ref.kind || got.bytes != ref.bytes || got.owner != t.UploadedBy {
+			return replaceStorageRefs(tx, "track", t.ID, t.UploadedBy, refs, false)
+		}
+	}
+	if current != len(stored) {
+		return replaceStorageRefs(tx, "track", t.ID, t.UploadedBy, refs, false)
+	}
+	return nil
 }
 func writePlaylistStorage(tx *sql.Tx, p Playlist) error {
 	if !storageProjectionReady(tx) {
@@ -122,11 +169,11 @@ func writePlaylistStorage(tx *sql.Tx, p Playlist) error {
 func stageStorageRefs(record stagedRecord) []storageReference {
 	refs := []storageReference{}
 	if len(record.Cover) > 0 && record.Track.CoverSource != "embedded" {
-		refs = append(refs, storageReference{"cover:" + hashBytes(record.Cover), "cover", int64(len(record.Cover))})
+		refs = append(refs, storageReference{asset: "cover:" + hashBytes(record.Cover), kind: "cover", bytes: int64(len(record.Cover))})
 	}
 	t := record.Track
 	if t.Lyrics != "" && (t.LyricsSource == "manual" || t.LyricsSource == "sidecar" || t.LyricsSource == "external" || !t.EmbeddedLyrics) {
-		refs = append(refs, storageReference{"lyrics:" + hashBytes([]byte(t.Lyrics)), "lyrics", int64(len(t.Lyrics))})
+		refs = append(refs, storageReference{asset: "lyrics:" + hashBytes([]byte(t.Lyrics)), kind: "lyrics", bytes: int64(len(t.Lyrics))})
 	}
 	return refs
 }

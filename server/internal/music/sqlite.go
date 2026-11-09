@@ -230,6 +230,13 @@ func writeOverrides(tx *sql.Tx, id string, fields map[string]string) error {
 	return nil
 }
 func writeTrack(tx *sql.Tx, track Track) error {
+	return writeTrackWithEnforcement(tx, track, true)
+}
+
+// writeTrackWithEnforcement lets maintenance paths (media scan) reconcile
+// derived sizes without rejecting an already over-quota account; user writes
+// keep enforcing the quota.
+func writeTrackWithEnforcement(tx *sql.Tx, track Track, enforce bool) error {
 	if _, err := uuid.Parse(track.ID); err != nil {
 		return errors.New("track ID must be a UUID")
 	}
@@ -242,7 +249,7 @@ func writeTrack(tx *sql.Tx, track Track) error {
 	if err != nil {
 		return err
 	}
-	return writeTrackStorage(tx, track)
+	return writeTrackStorageWithEnforcement(tx, track, enforce)
 }
 func writePlaylist(tx *sql.Tx, playlist Playlist) error {
 	before, err := readPlaylistFrom(tx, playlist.ID)
