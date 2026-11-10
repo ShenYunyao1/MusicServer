@@ -35,7 +35,11 @@ Windows 客户端在工作区的 `MusicPlayer2/` 独立仓库中维护。以下�
 ## 历史辅助脚本
 
 - [build-player.ps1](build-player.ps1) 保存早期 MSBuild 环境配置，项目路径相对本脚本定位到工作区的 `MusicPlayer2/`。
-- [desktop-test.ps1](desktop-test.ps1) 提供早期 Windows 桌面交互检查。截图输出位于本目录，受 Git 忽略规则保护。
+- [desktop-test.ps1](desktop-test.ps1) 提供早期 Windows 桌面交互检查。截图输出到 `archive/screenshots/`，目录自动创建。
+
+## 本地验证归档
+
+`archive/logs/` 保存播放器构建及桌面测试日志，`archive/screenshots/` 保存播放器截图。归档目录整体由 Git 忽略，文档中保留对应的本地查阅路径。
 
 ## 关联约定
 

@@ -72,13 +72,15 @@ switch ($Action) {
     Refresh { Click-Control 8108 }
     Pause { [void][MusicDesktopTest]::PostMessage($player.MainWindowHandle,273,[IntPtr]32778,[IntPtr]::Zero) }
     Screenshot {
+        $screenshotDirectory = Join-Path $PSScriptRoot 'archive\screenshots'
+        [void](New-Item -ItemType Directory -Path $screenshotDirectory -Force)
         Add-Type -AssemblyName System.Windows.Forms
         Add-Type -AssemblyName System.Drawing
         $bounds=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds
         $bitmap=[System.Drawing.Bitmap]::new($bounds.Width,$bounds.Height)
         $graphics=[System.Drawing.Graphics]::FromImage($bitmap)
         $graphics.CopyFromScreen($bounds.Location,[System.Drawing.Point]::Empty,$bounds.Size)
-        $bitmap.Save((Join-Path $PSScriptRoot 'integration-screen.png'))
+        $bitmap.Save((Join-Path $screenshotDirectory 'integration-screen.png'))
         $graphics.Dispose(); $bitmap.Dispose()
     }
 }

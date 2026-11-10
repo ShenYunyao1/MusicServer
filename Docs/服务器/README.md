@@ -87,3 +87,7 @@
 - [validate-server-v05.py](validate-server-v05.py) 保存 0.5 阶段的隔离验证脚本，其命令行接口对应当时版本。
 
 早期部署记录用于追溯。当前开发与发行范围遵循公共发布流程中的 schema 8 及后续阶段约定。
+
+## 本地验证归档
+
+`archive/screenshots/` 保存服务器网页的历史验证截图，后续日志统一放入 `archive/logs/`。归档目录整体由 Git 忽略，文档中保留对应的本地查阅路径。
