@@ -150,10 +150,10 @@ function displayWorkspacePage(page) {
   document.querySelectorAll('.nav-group[data-admin]').forEach(el=>el.hidden=!isAdministrator());
   $('accountRole').textContent=isAdministrator()?'管理员':'普通用户';
   scheduleCommunityRefresh();
-  document.title=(page==='stats'?'调用统计':titles[page])+' · 音乐服务器';
+  document.title=(page==='stats'?'调用统计':titles[page])+' · 拾律服务器';
   playerTabs.hidden=!['keys','stats'].includes(page)||page==='stats'&&state.statsScope==='admin'; keyTab.classList.toggle('active',page==='keys');statsNav.classList.toggle('active',page==='stats');
   if(page==='stats'){
-    const adminScope=state.statsScope==='admin';document.title=(adminScope?'全站调用统计':'我的调用统计')+' · 音乐服务器';
+    const adminScope=state.statsScope==='admin';document.title=(adminScope?'全站调用统计':'我的调用统计')+' · 拾律服务器';
     statsScopeLabel.textContent=adminScope?'统计范围：'+(state.statsUserID?(state.users||[]).find(u=>u.id===state.statsUserID)?.username||'指定账户':'全部账户'):'统计范围：仅当前账户的播放器 Key';
   }
   document.querySelectorAll('.page > .page-intro h1').forEach(el=>{const section=el.closest('.page');if(section&&titles[section.id.slice(5)])el.textContent=section.id==='page-stats'?'调用统计':titles[section.id.slice(5)]});
@@ -239,7 +239,7 @@ async function restoreWorkspaceRoute() {
   } catch(error) {
     if(generation!==routeGeneration||!state.user)return;
     state.page='unavailable';document.querySelectorAll('.page').forEach(el=>el.classList.remove('active'));
-    playerTabs.hidden=true;routeError.hidden=false;$('routeErrorMessage').textContent=error.message;document.title='无法打开此页面 · 音乐服务器';
+    playerTabs.hidden=true;routeError.hidden=false;$('routeErrorMessage').textContent=error.message;document.title='无法打开此页面 · 拾律服务器';
   }
 }
 window.addEventListener('hashchange',()=>restoreWorkspaceRoute());

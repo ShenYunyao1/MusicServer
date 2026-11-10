@@ -5,6 +5,10 @@ package version
 import "runtime/debug"
 
 const (
+	ProductName = "Pikmelo Server"
+	ChineseName = "拾律服务器"
+	BinaryName  = "pikmelo-server"
+	UpdaterName = "pikmelo-server-updater"
 	// Version is the current music server API and management UI version.
 	Version = "0.21.18"
 	Schema  = 9

@@ -124,8 +124,8 @@ function renderManagedUserPage(){
   const intro=$('page-users').querySelector(':scope > .page-intro');intro.hidden=detail;
   (detail?$('userDetailActions'):intro.querySelector('.actions')).append($('refreshUsers'));
   $('userList').closest('.panel').hidden=detail;$('createUser').hidden=detail;$('storageDeleted').hidden=detail;
-  if(!user){if(state.page==='users')document.title='用户管理 · 音乐服务器';return}
-  if(state.page==='users')document.title=(user.display_name||user.username)+' · 用户管理 · 音乐服务器';$('managedUserName').textContent=user.display_name||user.username;
+  if(!user){if(state.page==='users')document.title='用户管理 · 拾律服务器';return}
+  if(state.page==='users')document.title=(user.display_name||user.username)+' · 用户管理 · 拾律服务器';$('managedUserName').textContent=user.display_name||user.username;
   $('managedUserStatus').textContent='登录名：'+user.username+' · '+(user.enabled?'已启用':'已停用')+(user.must_change_password?' · 首次登录需改密':'')+' · '+emailRequirementLabel(user)+(user.email?' · '+user.email:'');
   const storage=accountStorageCache.get(user.id);$('managedUserStorage').textContent=storage?'已用 '+storageBytes(storage.used_bytes)+' / '+(storage.limit_bytes?storageBytes(storage.limit_bytes):'不限额')+' · 按原始上传者统计':'正在读取账户容量…';
   const actions=$('userDetailActions');actions.replaceChildren($('refreshUsers'));

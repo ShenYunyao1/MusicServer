@@ -92,7 +92,7 @@ function patchCommunityList(container,attribute,changed,render){
 }
 function renderRealtimePublicUnavailable(){
   state.publicDetail=null;$('publicDetail').querySelector('.playlist-tracks')?.sortCleanup?.();
-  const back=routeLink('← 公开歌单','public/playlists'),title=document.createElement('h1'),notice=document.createElement('p');back.classList.add('page-back');title.textContent='歌单暂不可用';notice.className='notice';notice.textContent='歌单可能已转为私有、被删除或作者账户已停用。';$('publicDetail').replaceChildren(back,title,notice);document.title='歌单暂不可用 · 音乐服务器';
+  const back=routeLink('← 公开歌单','public/playlists'),title=document.createElement('h1'),notice=document.createElement('p');back.classList.add('page-back');title.textContent='歌单暂不可用';notice.className='notice';notice.textContent='歌单可能已转为私有、被删除或作者账户已停用。';$('publicDetail').replaceChildren(back,title,notice);document.title='歌单暂不可用 · 拾律服务器';
 }
 function applyCommunityRealtime(entry,changed,deltas={}){
   const pending=entry.sections.get('badge')?.meta.pending||0;invitationBadge.textContent=String(pending);invitationBadge.hidden=!pending;

@@ -73,7 +73,7 @@ async function loadPublicDetail(id){
   const generation=++communityRequest,userID=state.user?.id,route=location.hash;communityLastCheck=Date.now();$('publicBrowse').hidden=true;communityPage.querySelector('.page-intro').hidden=true;$('publicDetail').hidden=false;
   try{const detail=await api('public/playlists/'+encodeURIComponent(id)+'?'+new URLSearchParams(publicDetailRouteValues()));if(generation!==communityRequest||state.user?.id!==userID||state.page!=='public'||state.publicDetailId!==id||route!==location.hash)return;
     renderPublicDetailPage(detail);
-  }catch(error){if(generation===communityRequest){state.publicDetail=null;$('publicDetail').replaceChildren();if(error.status===404){const back=routeLink('← 公开歌单','public/playlists'),title=document.createElement('h1'),notice=document.createElement('p');back.classList.add('page-back');title.textContent='歌单暂不可用';notice.className='notice';notice.textContent='歌单可能已转为私有、被删除或作者账户已停用。';$('publicDetail').append(back,title,notice);document.title='歌单暂不可用 · 音乐服务器'}else throw error}}
+  }catch(error){if(generation===communityRequest){state.publicDetail=null;$('publicDetail').replaceChildren();if(error.status===404){const back=routeLink('← 公开歌单','public/playlists'),title=document.createElement('h1'),notice=document.createElement('p');back.classList.add('page-back');title.textContent='歌单暂不可用';notice.className='notice';notice.textContent='歌单可能已转为私有、被删除或作者账户已停用。';$('publicDetail').append(back,title,notice);document.title='歌单暂不可用 · 拾律服务器'}else throw error}}
   finally{communityLastCheck=Date.now();scheduleCommunityRefresh()}
 }
 async function loadMySubscriptions(){

@@ -32,7 +32,7 @@ function renderReceivedInvitations(data){
   }
   if(!data.items.length)container.innerHTML='<div class="panel empty">暂无收到的分享邀请。</div>';
   $('previousInvitations').disabled=data.offset===0;$('nextInvitations').disabled=data.offset+data.items.length>=data.total;$('invitationCount').textContent='共 '+data.total+' 条';
-  document.title='分享邀请 · 我的歌单 · 音乐服务器';
+  document.title='分享邀请 · 我的歌单 · 拾律服务器';
 }
 async function respondInvitation(i,action){
   if(sharingBusy)return;sharingBusy=true;

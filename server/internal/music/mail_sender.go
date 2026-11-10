@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"musicserver/internal/version"
 )
 
 type mailEnvelope struct {
@@ -19,10 +21,10 @@ type mailEnvelope struct {
 }
 
 func smtpMessage(settings MailSettings, envelope mailEnvelope, id string) []byte {
-	subject := "MusicServer email verification"
+	subject := version.ProductName + " email verification"
 	body := "Your verification code is: " + envelope.Code + "\r\nIt expires in 10 minutes. If you did not request this, ignore this email."
 	if envelope.Test {
-		subject = "MusicServer email delivery test"
+		subject = version.ProductName + " email delivery test"
 		body = "The SMTP service accepted this test email. You can now enable account registration."
 	}
 	// All address/config inputs have already been normalized; id is a UUID.

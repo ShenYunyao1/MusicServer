@@ -115,7 +115,7 @@ function renderPlaylists(){
   $('newPlaylist').hidden=Boolean(detail)||state.subscriptionsTab;
   if(detail){renderPlaylistDetail(detail,state.subscriptionsTab&&state.liveSubscriptionTracksID===detail.id?{tracks:state.liveSubscriptionTracks,page:state.liveSubscriptionPage}:{});return}
   state.playlistDetailId=null;
-  if(state.page==='playlists')document.title='我的歌单 · 音乐服务器';
+  if(state.page==='playlists')document.title='我的歌单 · 拾律服务器';
   const query=$('playlistSearch').value.trim().toLowerCase(),page=!state.subscriptionsTab&&typeof browseOwnPlaylistPage==='function'?browseOwnPlaylistPage():null,playlists=page?page.items:state.playlists.filter(p=>!p.system&&(state.subscriptionsTab?Boolean(p.subscription_status):!p.read_only)&&(p.name+' '+(p.description||'')).toLowerCase().includes(query));
   $('playlistCount').textContent=(page?page.total:playlists.length)+' 个'+(state.subscriptionsTab?'订阅':'歌单 · '+(query?'清空搜索后可拖拽排序':'拖拽调整顺序'));
   const oldCards=new Map([...$('playlistList').querySelectorAll('.playlist-card')].map(card=>[card.dataset.id,card])),visible=new Set(playlists.map(p=>p.id));
@@ -151,7 +151,7 @@ function renderPlaylistDetail(p,config={}){
   if(detail.dataset.signature===signature&&detail.childElementCount){renderPager();return}
   const oldSearch=detail.querySelector('input[aria-label="搜索歌单曲目"]'),focused=oldSearch===document.activeElement;
   detail.dataset.signature=signature;detail.querySelector('.playlist-tracks')?.sortCleanup?.();detail.replaceChildren();
-  if(state.page==='playlists'||state.page==='public'&&config.publicView)document.title=p.name+' · '+(config.publicView?'公开歌单':'我的歌单')+' · 音乐服务器';
+  if(state.page==='playlists'||state.page==='public'&&config.publicView)document.title=p.name+' · '+(config.publicView?'公开歌单':'我的歌单')+' · 拾律服务器';
   if(state.playlistTrackSearchID!==p.id){state.playlistTrackSearchID=p.id;state.playlistTrackQuery=''}
   const intro=document.createElement('div');intro.className='page-intro';intro.innerHTML='<div class="playlist-detail-summary"><span class="cover playlist-detail-cover">♪</span><div><p>我的歌单 / 私人歌单</p><h1>'+txt(p.name)+'</h1><p>'+txt(p.description||'')+'</p></div></div><div class="actions"></div>';
   intro.querySelector('p').textContent=config.publicView?'公开歌单 / 只读查看':readonly?'我的订阅 / 只读歌单':'我的歌单 / '+playlistVisibilityLabel(p);

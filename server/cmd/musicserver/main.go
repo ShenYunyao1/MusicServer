@@ -187,7 +187,7 @@ func main() {
 		}
 	}()
 	commit, modified := version.Source()
-	log.Printf("music server v%s (commit %s, modified=%t) listening on %s, media root %s, SQLite database %s", version.Version, commit, modified, *address, filepath.Clean(*mediaRoot), store.DataPath())
+	log.Printf("%s v%s (commit %s, modified=%t) listening on %s, media root %s, SQLite database %s", version.ProductName, version.Version, commit, modified, *address, filepath.Clean(*mediaRoot), store.DataPath())
 	if authConfig.LANHTTP {
 		_, port, _ := net.SplitHostPort(*address)
 		log.Printf("LAN HTTP enabled. Open http://127.0.0.1:%s/ locally or http://<LAN-IP>:%s/ on your LAN. Press Ctrl+C to stop.", port, port)
