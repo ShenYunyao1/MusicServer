@@ -16,7 +16,7 @@
 - [x] D02 添加健康检查命令和容器更新模式，验证镜像源码身份、网页提示及更新接口边界。
 - [x] D03 编写启动、初始化、备份、升级、回退和迁移指南，增加容器测试与服务端镜像 CI。
 - [x] D04 本机验证实际构建、上传、重建保留数据、schema 8→9 及停机快照回退，完成本地提交。
-- [ ] D05 用户显式要求推送及发行后，核查 Actions、GHCR 镜像身份及正式版本发布结果。
+- [x] D05 用户显式要求推送及发行后，核查 Actions、GHCR 镜像身份及正式版本发布结果。
 
 ## 文件与验证
 
@@ -39,3 +39,21 @@ D01–D03 已完成。Docker Desktop 4.38.0、Engine 27.5.1、Compose 2.32.4 的
 D04 已完成。本机最终镜像为 `pikmelo-server:docker-local`，镜像 ID 为 `sha256:793526180c613a1c20cfcc09fd06cf02a3da33f148c53cc4d3f0439bd4c29de7`，构建源码为 `e8feceb267e5dd2e8629e53fa587ec5906dfbbc1`。实际健康接口的 commit 与该值一致，modified 为 false。最终镜像再次通过真实浏览器、完整容器回归、schema 8→9 和恢复 8 的验收，并从应用完整备份导入新卷，使用自定义数据库／媒体路径验证账户、歌单及原 Key 的媒体授权。所有本次随机测试容器、卷及基线测试镜像均已清理。
 
 命令、发行工具、更新器及版本专项通过，默认更新 API 与撤销会话专项通过，相关 vet、Compose 解析和 actionlint 通过。未运行本地完整跨平台回归，D05 以用户授权推送后的 Actions 为准。Docker 镜像稳定通道独立推进，Docker 专用 Release 使用 `--latest=false`，保护原生更新器的签名平台资产检查入口。
+
+## 正式镜像发行验收
+
+2026-11-10，D05 已完成。用户明确要求发布镜像，已发布 [v0.21.19](https://github.com/ShenYunyao1/Pikmelo-Server/releases/tag/v0.21.19)，对应源码 `12ceba46e76f404bbcd12631a89a9d7e84d72fce`、schema 9 和 Linux amd64。Docker 分支与版本标签均已推送，标签 [Actions 42817706912](https://github.com/ShenYunyao1/Pikmelo-Server/actions/runs/42817706912) 的十项作业全部成功，包含 Windows／Ubuntu Go 与 vet、Linux race／systemd、六组网页及真实容器升级回退。
+
+正式镜像为 `ghcr.io/shenyunyao1/pikmelo-server:0.21.19`，与 Docker 稳定通道 `latest` 指向同一摘要。
+
+```text
+sha256:4a3807a4c64162c0774619c7ce3feb2a360f57129a2a0911d15953f409b83eb8
+```
+
+Release 的 `container-release.json` 为 283 字节，独立下载核验 SHA-256 为 `966363a17e8486c9abd1b2cfc64a069f89d9940b6b0cb5ff499a3e45b2fe9df8`，其版本、schema、提交及镜像摘要与 Registry 一致。使用空 Docker 凭据配置完成匿名拉取，镜像平台、非 root 用户和源码标签均匹配。
+
+镜像来源证明通过 `gh attestation verify` 校验，固定仓库、`refs/tags/v0.21.19`、上述源码提交及 `server-release.yml`，并要求 GitHub 托管 runner。本机旧版 CLI 遇到缓存跨盘重命名错误后，改用已校验官方摘要的隔离 CLI 与缓存完成验证。
+
+再次直接运行上述正式摘要镜像，真实 Chromium、带歌词上传、非 root／只读根、原生更新 API 边界、重建持久化、schema 8→9、故意失败的健康门禁及原镜像／停机快照恢复 8、完整应用备份导入、自定义数据路径及原 Key 媒体读取均通过。随机测试容器与卷已清理，验证产物保存在已忽略的 `server/build/release-verify-0.21.19/`。
+
+Docker Release 已公开，GitHub 原生 latest 仍为 v0.21.18。使用与升级步骤见 [Docker 使用说明](../../server/deploy/docker.md)。

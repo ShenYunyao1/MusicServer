@@ -4,9 +4,15 @@
 
 ## 首次启动
 
-将 `server/compose.yaml` 和 `server/docker.env.example` 放入部署目录，按模板保存 `.env`。正式镜像地址为 `ghcr.io/shenyunyao1/pikmelo-server`，首个正式镜像以 Actions 发布及匿名拉取验收结果为准。
+将 `server/compose.yaml` 和 `server/docker.env.example` 放入部署目录，按模板保存 `.env`。正式镜像地址为 `ghcr.io/shenyunyao1/pikmelo-server`，首个正式版本 [v0.21.19](https://github.com/ShenYunyao1/Pikmelo-Server/releases/tag/v0.21.19) 已通过 Actions、匿名拉取及来源证明验收，支持 Linux amd64、schema 9。
 
-正式镜像发布后，在 Compose 文件所在目录执行以下命令。
+在 `.env` 设置 `PIKMELO_IMAGE=ghcr.io/shenyunyao1/pikmelo-server:0.21.19` 可固定该版本，默认 `latest` 跟随 Docker 稳定通道。需要固定不可变镜像时，填写以下完整引用。
+
+```text
+ghcr.io/shenyunyao1/pikmelo-server@sha256:4a3807a4c64162c0774619c7ce3feb2a360f57129a2a0911d15953f409b83eb8
+```
+
+在 Compose 文件所在目录执行以下命令。
 
 ```sh
 docker compose pull pikmelo
