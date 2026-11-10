@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"musicserver/internal/music"
+	"pikmelo-server/internal/music"
 )
 
 func TestRuntimeDefaultsFollowExecutable(t *testing.T) {

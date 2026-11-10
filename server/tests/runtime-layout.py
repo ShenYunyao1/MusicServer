@@ -17,13 +17,13 @@ import wave
 def main():
     source = Path(__file__).resolve().parents[1]
     expected_version = re.search(r'Version\s*=\s*"([^"]+)"', (source / "internal/version/version.go").read_text(encoding="utf-8")).group(1)
-    binary = Path(os.environ.get("MUSIC_SERVER_TEST_BINARY", source / "build/musicserver.exe"))
+    binary = Path(os.environ.get("MUSIC_SERVER_TEST_BINARY", source / "build/pikmelo-server.exe"))
     directory = Path(tempfile.mkdtemp(prefix="musicserver-layout-"))
     runtime = directory / "server with spaces/build"
     runtime.mkdir(parents=True)
     foreign = directory / "foreign"
     foreign.mkdir()
-    shutil.copy2(binary, runtime / "musicserver.exe")
+    shutil.copy2(binary, runtime / "pikmelo-server.exe")
     shutil.copy2(source / "start.bat", runtime.parent / "start.bat")
     # This file must never be discovered by the default music scan.
     (runtime.parent / "SourceOnly.mp3").write_bytes(b"source directory fixture")
@@ -33,7 +33,7 @@ def main():
         audio.writeframes(bytes(800))
     password = "isolated layout administrator password"
     initialized = subprocess.run(
-        [sys.executable, str(source / "tests/admin-terminal.py"), str(runtime / "musicserver.exe"),
+        [sys.executable, str(source / "tests/admin-terminal.py"), str(runtime / "pikmelo-server.exe"),
          str(runtime / "data/library.sqlite"), "admin"],
         input=password + "\n", capture_output=True, text=True, timeout=35,
     )

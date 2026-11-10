@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"musicserver/internal/diskspace"
+	"pikmelo-server/internal/diskspace"
 )
 
 func TestAccountStorageBoundedAndSelfOnly(t *testing.T) {

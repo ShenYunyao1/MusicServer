@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"musicserver/internal/version"
+	"pikmelo-server/internal/version"
 )
 
 func TestBackupTemporaryCleanupPreservesArchivesAndManualSnapshots(t *testing.T) {

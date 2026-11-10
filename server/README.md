@@ -1,8 +1,10 @@
-# Pikmelo Server · 拾律服务器 0.21.18
+# Pikmelo Server · 拾律服务器 0.21.19
 
 Go 1.26+，本版 SQLite schema 9，HTTP API `/api/v2`，内置中文管理页。支持 Windows 和 Linux。正式版本以 Release 验收为依据。
 
 项目重命名的范围、升级兼容及验收进度见 [重命名计划](../Docs/服务器/Pikmelo服务器重命名计划与进度.md)。
+
+默认 Windows 入口为 `build/pikmelo-server.exe`，Linux 为 `build/pikmelo-server`，独立更新器为 `pikmelo-server-updater`。正式发行同时生成新名称与旧更新器兼容资产，迁移步骤见 [Pikmelo 名称升级指南](deploy/pikmelo-rename.md)。
 
 支持个人“我常听的”、歌词折叠／展开、网页音量衰减和上传目标歌单。曲名单击查看详情，行空白与双击不触发操作。已有 schema 8 升级前先安装正式 **0.21.17 桥接主程序**并手动维护同版本独立 worker，再安装本版；旧账号、Key、UUID、歌单、标签和媒体保留，不需要重导。详见 [升级说明](deploy/schema9-upgrade.md)。已有 schema 9 同格式更新；历史 schema 7 指引仅存档。
 
@@ -127,7 +129,7 @@ MusicPlayer2 服务器适配 0.13.0 显示 `[订阅]`／`[分享]`／`[失效]` 
 
 ## 启动
 
-Windows 使用两个批处理脚本：`build.bat` 执行测试、`go vet` 和编译，固定生成 `build/musicserver.exe`，成功后明确输出 `BUILD SUCCEEDED` 和程序路径；失败输出 `BUILD FAILED` 并返回非零状态。`start.bat` 固定启动该程序，首次启动引导设置管理员密码。从其他目录调用也可；源码更新后先停服再编译。
+Windows 使用两个批处理脚本：`build.bat` 执行测试、`go vet` 和编译，固定生成 `build/pikmelo-server.exe`，成功后明确输出 `BUILD SUCCEEDED` 和程序路径；失败输出 `BUILD FAILED` 并返回非零状态。`start.bat` 固定启动该程序，首次启动引导设置管理员密码。从其他目录调用也可；源码更新后先停服再编译。
 
 两个 BAT 在正常结束或出错后默认暂停，按任意键再关闭，避免双击时错误信息一闪而过；暂停后仍返回原退出码。如果提示数据库已占用，说明已有实例正在使用该数据库，请使用现有服务或先停服再启动。自动化调用可设置环境变量 `MUSIC_SERVER_NO_PAUSE=1` 跳过暂停；PowerShell 下可使用 `$env:MUSIC_SERVER_NO_PAUSE='1'`，CMD 下使用 `set MUSIC_SERVER_NO_PAUSE=1`。
 
@@ -137,7 +139,7 @@ call build.bat
 call start.bat
 ```
 
-首次启动即提供网页初始化，默认账号名为 `admin`，密码在网页输入并确认，至少 12 个字符、最多 1024 字节；不设置默认密码。初始化页需要 `build/data/setup-token` 中的一次性授权码，防止其他访问者抢先创建管理员。也可使用 `/#setup=<授权码>` 一次性链接，网页读取后立即清除地址栏中的授权码；不要转发或记录该链接。初始化完成后删除授权文件，入口关闭，后台扫描自动开始。未完成时重启保留授权，已有管理员时不会重新开放。CLI `build\musicserver.exe admin init` 保留用于提前初始化，`--data` 和 `--username` 均可省略；离线重置仍需终端。自定义用户名为 3–64 个 ASCII 字母、数字、点、短横线或下划线，首字符为字母或数字，忽略大小写。云端首次设置通过 SSH 隧道或 HTTPS 访问，不通过聊天传递密码。
+首次启动即提供网页初始化，默认账号名为 `admin`，密码在网页输入并确认，至少 12 个字符、最多 1024 字节；不设置默认密码。初始化页需要 `build/data/setup-token` 中的一次性授权码，防止其他访问者抢先创建管理员。也可使用 `/#setup=<授权码>` 一次性链接，网页读取后立即清除地址栏中的授权码；不要转发或记录该链接。初始化完成后删除授权文件，入口关闭，后台扫描自动开始。未完成时重启保留授权，已有管理员时不会重新开放。CLI `build\pikmelo-server.exe admin init` 保留用于提前初始化，`--data` 和 `--username` 均可省略；离线重置仍需终端。自定义用户名为 3–64 个 ASCII 字母、数字、点、短横线或下划线，首字符为字母或数字，忽略大小写。云端首次设置通过 SSH 隧道或 HTTPS 访问，不通过聊天传递密码。
 
 程序默认监听 `0.0.0.0:8080`，支持局域网访问。媒体库为 **musicserver.exe 所在目录及其子目录，即 build/**，数据库为 `build/data/library.sqlite`，无需显式传参。音频可直接放在程序旁，建议放入 `build/media/`。数据库目录、`.staging` 和 `.server-archive` 不参与媒体扫描。上传音频保存在 `build/uploads`，备份和更新暂存在 `build/data` 下。源码目录中的音频不会被默认扫描。
 
@@ -165,8 +167,8 @@ server/
 
 ```powershell
 cd server
-go build -trimpath -buildvcs=auto -o ./build/musicserver.exe ./cmd/musicserver
-.\build\musicserver.exe
+go build -trimpath -buildvcs=auto -o ./build/pikmelo-server.exe ./cmd/pikmelo-server
+.\build\pikmelo-server.exe
 ```
 
 本机浏览器打开 `http://127.0.0.1:8080/`；同一局域网的其他设备打开 `http://服务器的局域网IP:8080/`，输入账号密码登录。`0.0.0.0` 是监听地址，访问时使用实际 IP。管理员在“账户管理”创建成员，自定义登录名和显示名；每个账户生成独立临时密码，仅成功创建或重置时显示一次，关闭弹窗即清空。请安全交给本人。成员首次登录必须修改临时密码，完成前不能浏览曲库、上传或使用 Key。初次设置的管理员密码无需重复修改。无交互后台环境也能直接提供网页初始化，不创建默认密码。
@@ -192,7 +194,7 @@ go build -trimpath -buildvcs=auto -o ./build/musicserver.exe ./cmd/musicserver
 忘记密码时停服后在终端执行（可选 `--revoke-keys` 同时撤销该账号播放器凭证）：
 
 ```bat
-build\musicserver.exe admin reset-password
+build\pikmelo-server.exe admin reset-password
 ```
 
 服务和本机管理命令共用 OS 文件锁，服务运行时拒绝 CLI 初始化/重置同一库，进程退出时自动释放锁。CLI 初始化和重置要求真实交互终端，不接受密码参数或重定向密码输入；网页首次初始化不受此终端要求限制。
@@ -352,7 +354,7 @@ Content-Type: application/json
 
 ## 备份、恢复和更新
 
-可选 `package-release.ps1` 复用统一构建入口，生成 `build/musicserver.exe`、`build/musicserver`、独立 `build/musicserver-updater` 和 `build/packages/` 的固定名称包。Windows 包包含程序、build.json 与说明；Linux 包另含独立更新器及部署模板，均不包含数据库、媒体、密码或实际运行配置。包名不随版本变化。本地打包不签名，正式签名包由 GitHub Actions 生成。
+可选 `package-release.ps1` 复用统一构建入口，生成 `build/pikmelo-server.exe`、`build/pikmelo-server`、独立 `build/pikmelo-server-updater` 和 `build/packages/` 的固定名称包。Windows 包包含程序、build.json 与说明；Linux 包另含独立更新器及部署模板，均不包含数据库、媒体、密码或实际运行配置。包名不随版本变化。本地打包不签名，正式签名包由 GitHub Actions 生成。
 
 系统设置 → 备份与恢复可创建完整或仅数据库备份，显示阶段、字节进度，支持取消、下载和删除。完整归档包含一致 SQLite 快照、已入库音频、相关歌词／封面和应用设置，逐文件记录大小及 SHA-256；已缺失文件在清单注明。归档位于数据库旁 `backups/backup-UUID.tar.gz`，不包含程序、暂存、日志、其他备份或未知文件。Nginx、systemd、TLS 私钥、证书及云凭证须独立备份。归档含密码哈希及私人内容，应妥善保管。
 
@@ -360,15 +362,15 @@ Content-Type: application/json
 
 备份压缩期间，永久删除曲目返回 `409 BACKUP_BUSY`，完成后可重试；另一永久删除占用清理锁时返回 `409 MEDIA_CLEANUP_BUSY`。上传发布仍可继续。程序启动、每分钟维护及下一次备份前会清理受管理的 `.backup-snapshot-UUID.sqlite`（含 SQLite 临时伴随文件）、`.backup-config-数字`、`backup-UUID.tar.gz.partial` 和 `.backup-media-数字` 冻结媒体目录，正在备份时不会清理。旧版 `时间戳-UUID.sqlite` 独立快照在网页列为“历史数据库快照”，可先下载留存再显式删除；它不含完整媒体／配置，不能直接当归档恢复。未知文件与目录不会自动删除。
 
-恢复到新的空目录：`musicserver backup restore --file /path/backup-UUID.tar.gz --destination /path/restored`（Windows 使用 `musicserver.exe`）。工具校验路径、类型、大小、摘要、schema 及数据库完整性，拒绝覆盖非空目录。输出 `restored/data/library.sqlite` 和原相对路径媒体；将程序放到 restored 根目录后可按默认路径启动，Linux 须重新配置部署路径和文件权限。恢复保留 UUID、账户、歌单及 Key，撤销旧会话、清除暂存记录、关闭自动备份并重定位媒体根目录。仅数据库备份需另行提供匹配音频。可能恢复旧密码及旧 Key，须核对并按需轮换。schema 1–6 不支持本版恢复，不可直接覆盖运行中的数据库。
+恢复到新的空目录：`pikmelo-server backup restore --file /path/backup-UUID.tar.gz --destination /path/restored`（Windows 使用 `musicserver.exe`）。工具校验路径、类型、大小、摘要、schema 及数据库完整性，拒绝覆盖非空目录。输出 `restored/data/library.sqlite` 和原相对路径媒体；将程序放到 restored 根目录后可按默认路径启动，Linux 须重新配置部署路径和文件权限。恢复保留 UUID、账户、歌单及 Key，撤销旧会话、清除暂存记录、关闭自动备份并重定位媒体根目录。仅数据库备份需另行提供匹配音频。可能恢复旧密码及旧 Key，须核对并按需轮换。schema 1–6 不支持本版恢复，不可直接覆盖运行中的数据库。
 
 恢复目标不能直接是磁盘根目录或独立挂载点，应使用其中的新子目录，例如 `/mnt/music/restored`；临时目录与容量检查均位于该目标的父目录，确保同一文件系统内发布。恢复按规范化目标路径加 OS 排他锁，进程崩溃后锁自动释放；再次恢复到同一目标时，只清理对应目标的 `.musicserver-restore-目标摘要-数字` 暂存目录。零字节 `.musicserver-restorelock-目标摘要.lock` 有意保留，正常使用期间不要删除。旧版未携带目标标识的 `.musicserver-restore-数字` 目录不会自动删除；确认没有恢复进程运行、目录确为失败恢复产物并且不需留存后，可在原目标父目录手工逐一清理，不递归清理其他路径。旧备份格式不兼容与清单损坏分别显示，仍可下载原归档；当前 schema 9 只直接接受 schema 8／9，历史 schema 7 按 [schema 9 升级说明](deploy/schema9-upgrade.md) 隔离处理。
 
-若恢复后不再使用原目标，可运行 `musicserver backup cleanup --parent /path/to/parent` 显式清理该父目录下所有目标的受管理恢复暂存。工具逐个获取目标 OS 锁，跳过正在使用或无法加锁的目录，保留未知目录及零字节锁文件；锁文件不能删除，以免并发恢复锁分裂。
+若恢复后不再使用原目标，可运行 `pikmelo-server backup cleanup --parent /path/to/parent` 显式清理该父目录下所有目标的受管理恢复暂存。工具逐个获取目标 OS 锁，跳过正在使用或无法加锁的目录，保留未知目录及零字节锁文件；锁文件不能删除，以免并发恢复锁分裂。
 
 续传启动仅检查检查点结构、文件长度并截断未确认尾部，不串行重读全部音频；同长度内容损坏在生成预览前的完整分块 SHA-256 校验中拒绝并标为损坏。校验支持取消，损坏／音频验证失败任务重复校验至少间隔 3 秒并返回 `429 UPLOAD_VERIFY_RETRY`／`Retry-After`，空间、容量和权限错误保留原语义；已有有效预览直接恢复，不重读冗余续传文件。真正重新校验仍读取全部内容，不以大小或修改时间代替完整性检查。单次上传读取有 2 分钟空闲期限及 30 分钟总上限，分块续传可跨请求继续。
 
-默认检查公开仓库 `ShenYunyao1/MusicServer`；`update_repository` 可指定检查来源。启动及每 6 小时只检查正式 Release 的签名元数据，不下载、不安装。Windows 支持检查与手工替换。Ubuntu 配置独立 systemd 更新器后，管理员可以显式选择兼容版本，自动完成验证签名与包哈希、停止服务、最终数据库备份、切换程序和重新启动；健康检查失败会恢复旧程序及数据库。当前 schema 8→9 必须先具备正式桥接主程序和独立更新器的能力，并由签名清单明确声明；已锁定正式桥接 0.21.17／37f14b957739386d3dda4d94b0e217e8fc43b1c9，旧 schema 8 先安装桥接主程序并维护同版本独立 worker，再安装本版。其他迁移路径继续拒绝，schema 7 仅保留历史记录。自动安装固定信任官方仓库与内置公钥，不能通过网页改为任意程序源。详细目录、权限、恢复和发布流程见 [Ubuntu 部署说明](deploy/README.md)。
+默认检查公开仓库 `ShenYunyao1/Pikmelo-Server`；`update_repository` 可指定检查来源。启动及每 6 小时只检查正式 Release 的签名元数据，不下载、不安装。Windows 支持检查与手工替换。Ubuntu 配置独立 systemd 更新器后，管理员可以显式选择兼容版本，自动完成验证签名与包哈希、停止服务、最终数据库备份、切换程序和重新启动；健康检查失败会恢复旧程序及数据库。当前 schema 8→9 必须先具备正式桥接主程序和独立更新器的能力，并由签名清单明确声明；已锁定正式桥接 0.21.17／37f14b957739386d3dda4d94b0e217e8fc43b1c9，旧 schema 8 先安装桥接主程序并维护同版本独立 worker，再安装本版。其他迁移路径继续拒绝，schema 7 仅保留历史记录。自动安装固定信任官方仓库与内置公钥，不能通过网页改为任意程序源。详细目录、权限、恢复和发布流程见 [Ubuntu 部署说明](deploy/README.md)。
 
 ## 验证
 
@@ -378,13 +380,13 @@ Content-Type: application/json
 go test ./...
 go vet ./...
 go test -race ./...
-go build -o ./build/musicserver ./cmd/musicserver
+go build -o ./build/pikmelo-server ./cmd/pikmelo-server
 ```
 
 Race 检查需要支持的 C 工具链。隔离浏览器回归 `tests/management-ui.cjs` 自建临时媒体、数据库和子进程，不连接现有服务器：
 
 ```powershell
-$env:MUSIC_SERVER_TEST_BINARY = (Resolve-Path '.\build\musicserver.exe').Path
+$env:MUSIC_SERVER_TEST_BINARY = (Resolve-Path '.\build\pikmelo-server.exe').Path
 $env:MUSIC_SERVER_PLAYWRIGHT = 'playwright'
 $env:MUSIC_SERVER_TEST_PYTHON = 'python'
 node tests/management-ui.cjs

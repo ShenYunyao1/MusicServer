@@ -41,7 +41,7 @@ func TestArchiveRejectsTraversalLinksAndWrongIdentity(t *testing.T) {
 		name    string
 		kind    byte
 		content string
-	}{{"../outside", tar.TypeReg, "x"}, {"/etc/x", tar.TypeReg, "x"}, {"musicserver", tar.TypeSymlink, ""}, {"musicserver-updater", tar.TypeSymlink, ""}, {"build.json", tar.TypeReg, `{"version":"0.0.0"}`}} {
+	}{{"../outside", tar.TypeReg, "x"}, {"/etc/x", tar.TypeReg, "x"}, {"musicserver", tar.TypeSymlink, ""}, {"musicserver-updater", tar.TypeSymlink, ""}, {"pikmelo-server", tar.TypeSymlink, ""}, {"pikmelo-server-updater", tar.TypeSymlink, ""}, {"build.json", tar.TypeReg, `{"version":"0.0.0"}`}} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
 			path := filepath.Join(root, "package.tar.gz")

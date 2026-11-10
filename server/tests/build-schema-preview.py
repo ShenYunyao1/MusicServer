@@ -41,7 +41,7 @@ def build_preview(root, go, version=None):
         overlay = Path(temporary) / "overlay.json"
         overlay.write_text(json.dumps({"Replace": {str(source): str(replacement)}}), encoding="utf-8")
         subprocess.run([go, "build", "-trimpath", "-buildvcs=false", "-overlay", str(overlay),
-                        "-o", str(binary), "./cmd/musicserver"], cwd=root, check=True)
+                        "-o", str(binary), "./cmd/pikmelo-server"], cwd=root, check=True)
     print("TEST PREVIEW ONLY: schema 8, no release VCS identity, " + str(binary))
     return binary
 

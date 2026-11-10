@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"musicserver/internal/activity"
+	"pikmelo-server/internal/activity"
 )
 
 var errBackupBusy = errors.New("another backup task is running")

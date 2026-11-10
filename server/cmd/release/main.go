@@ -13,9 +13,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 
-	"musicserver/internal/update"
-	"musicserver/internal/version"
+	"pikmelo-server/internal/update"
+	"pikmelo-server/internal/version"
 )
 
 func main() {
@@ -72,6 +73,7 @@ func run() error {
 	}
 	m := update.Manifest{Format: 1, Version: version.Version, Commit: commit, Schema: version.Schema,
 		MigrateFrom: version.MigrationSources(version.Schema)}
+	distribution := m
 	identity, _ := json.MarshalIndent(m, "", "  ")
 	files := map[string][]byte{"build.json": identity}
 	capabilities, err := update.ReleaseCapabilities()
@@ -79,6 +81,11 @@ func run() error {
 		return err
 	}
 	files["deploy/updater-capabilities.json"] = capabilities
+	renameGuide, err := os.ReadFile("deploy/pikmelo-rename.md")
+	if err != nil {
+		return err
+	}
+	files["deploy/pikmelo-rename.md"] = renameGuide
 	for _, path := range []string{"README.md", "deploy/README.md", "deploy/install.sh", "deploy/musicserver.service", "deploy/musicserver.env.example", "deploy/musicserver-update.service", "deploy/musicserver-update.path", "deploy/musicserver-update-recovery.timer", "deploy/updater.json.example", "deploy/updater-maintenance.md", "deploy/schema8-upgrade.md", "deploy/schema9-upgrade.md", "deploy/schema9-bridge.json", "deploy/release-notes.md", "deploy/nginx.conf.example", "deploy/musicserver-certbot.service", "deploy/musicserver-certbot.timer", "deploy/renew-nginx.sh"} {
 		info, e := os.Stat(path)
 		if e != nil {
@@ -96,14 +103,26 @@ func run() error {
 	// Sort archive members for reproducible membership; runtime directories are never inputs.
 	for _, platform := range []string{"windows", "linux"} {
 		entries := map[string][]byte{}
+		compatibilityEntries := map[string][]byte{}
 		for k, v := range files {
 			entries[k] = v
+			compatibilityEntries[k] = v
 		}
-		names := []string{"musicserver"}
+		names := []string{version.BinaryName}
 		if platform == "windows" {
-			names = []string{"musicserver.exe"}
+			names = []string{version.BinaryName + ".exe"}
+			start, err := os.ReadFile("start.bat")
+			if err != nil {
+				return err
+			}
+			startScript := strings.ReplaceAll(string(start), "%~dp0build\\", "%~dp0")
+			startScript = strings.ReplaceAll(startScript, `pushd "%~dp0build"`, `pushd "%~dp0"`)
+			startScript = strings.ReplaceAll(startScript, "build\\", "")
+			startScript = strings.ReplaceAll(startScript, "Run build.bat first.", "Extract the complete Pikmelo Server package first.")
+			entries["start.bat"] = []byte(startScript)
+			compatibilityEntries["start.bat"] = []byte(strings.ReplaceAll(startScript, version.BinaryName, "musicserver"))
 		} else {
-			names = append(names, "musicserver-updater")
+			names = append(names, version.UpdaterName)
 		}
 		for _, name := range names {
 			info, e := buildinfo.ReadFile(filepath.Join(*input, name))
@@ -118,44 +137,58 @@ func run() error {
 				return e
 			}
 			entries[name] = data
+			compatibilityEntries["musicserver"+strings.TrimPrefix(name, version.BinaryName)] = data
 		}
-		name := update.PackageName(platform, "amd64")
-		path := filepath.Join(*output, name)
-		if err := archive(path, platform, entries); err != nil {
+		for _, artifact := range []struct {
+			name     string
+			entries  map[string][]byte
+			manifest *update.Manifest
+		}{
+			{update.DistributionPackageName(platform, "amd64"), entries, &distribution},
+			{update.PackageName(platform, "amd64"), compatibilityEntries, &m},
+		} {
+			path := filepath.Join(*output, artifact.name)
+			if err := archive(path, platform, artifact.entries); err != nil {
+				return err
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			sum := sha256.Sum256(data)
+			artifact.manifest.Packages = append(artifact.manifest.Packages, update.Package{Name: artifact.name, OS: platform, Arch: "amd64", Size: int64(len(data)), SHA256: hex.EncodeToString(sum[:])})
+		}
+	}
+	for _, metadata := range []struct {
+		name     string
+		manifest update.Manifest
+	}{{update.DistributionManifestName, distribution}, {update.ManifestName, m}} {
+		data, err := json.MarshalIndent(metadata.manifest, "", "  ")
+		if err != nil {
 			return err
 		}
-		data, e := os.ReadFile(path)
-		if e != nil {
-			return e
-		}
-		sum := sha256.Sum256(data)
-		m.Packages = append(m.Packages, update.Package{Name: name, OS: platform, Arch: "amd64", Size: int64(len(data)), SHA256: hex.EncodeToString(sum[:])})
-	}
-	data, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err = os.WriteFile(filepath.Join(*output, update.ManifestName), data, 0644); err != nil {
-		return err
-	}
-	signaturePath := filepath.Join(*output, update.ManifestName+".sig")
-	if *sign {
-		seed, e := base64.StdEncoding.DecodeString(os.Getenv("UPDATE_SIGNING_KEY"))
-		if e != nil || len(seed) != ed25519.SeedSize {
-			return fmt.Errorf("invalid Actions UPDATE_SIGNING_KEY seed")
-		}
-		key := ed25519.NewKeyFromSeed(seed)
-		public, _ := base64.StdEncoding.DecodeString(update.ReleasePublicKey)
-		if !key.Public().(ed25519.PublicKey).Equal(ed25519.PublicKey(public)) {
-			return fmt.Errorf("signing secret differs from the pinned release public key")
-		}
-		signature := base64.StdEncoding.EncodeToString(ed25519.Sign(key, data))
-		if err = os.WriteFile(signaturePath, []byte(signature), 0644); err != nil {
+		if err = os.WriteFile(filepath.Join(*output, metadata.name), data, 0644); err != nil {
 			return err
 		}
-	} else {
-		if e := os.Remove(signaturePath); e != nil && !os.IsNotExist(e) {
-			return e
+		signaturePath := filepath.Join(*output, metadata.name+".sig")
+		if *sign {
+			seed, e := base64.StdEncoding.DecodeString(os.Getenv("UPDATE_SIGNING_KEY"))
+			if e != nil || len(seed) != ed25519.SeedSize {
+				return fmt.Errorf("invalid Actions UPDATE_SIGNING_KEY seed")
+			}
+			key := ed25519.NewKeyFromSeed(seed)
+			public, _ := base64.StdEncoding.DecodeString(update.ReleasePublicKey)
+			if !key.Public().(ed25519.PublicKey).Equal(ed25519.PublicKey(public)) {
+				return fmt.Errorf("signing secret differs from the pinned release public key")
+			}
+			signature := base64.StdEncoding.EncodeToString(ed25519.Sign(key, data))
+			if err = os.WriteFile(signaturePath, []byte(signature), 0644); err != nil {
+				return err
+			}
+		} else {
+			if e := os.Remove(signaturePath); e != nil && !os.IsNotExist(e) {
+				return e
+			}
 		}
 	}
 	fmt.Println("PACKAGING SUCCEEDED:", *output)

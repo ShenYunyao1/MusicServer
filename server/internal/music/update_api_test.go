@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"musicserver/internal/update"
+	"pikmelo-server/internal/update"
 )
 
 func TestUpdateRepositoryPersistsAndRejectsInvalidURLs(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"musicserver/internal/activity"
+	"pikmelo-server/internal/activity"
 )
 
 func (s *Store) mailCleanupWarning(message string) {

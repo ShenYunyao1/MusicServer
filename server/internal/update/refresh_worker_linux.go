@@ -7,7 +7,7 @@ import (
 	"errors"
 	"os"
 
-	"musicserver/internal/version"
+	"pikmelo-server/internal/version"
 )
 
 const independentWorkerPath = "/usr/local/lib/musicserver/musicserver-updater"

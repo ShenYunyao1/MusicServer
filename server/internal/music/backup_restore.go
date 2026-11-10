@@ -14,8 +14,8 @@ import (
 	"runtime"
 	"strings"
 
-	"musicserver/internal/diskspace"
-	"musicserver/internal/version"
+	"pikmelo-server/internal/diskspace"
+	"pikmelo-server/internal/version"
 )
 
 func readBackupManifest(archive *tar.Reader) (BackupManifest, error) {

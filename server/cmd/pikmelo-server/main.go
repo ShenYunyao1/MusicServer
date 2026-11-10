@@ -13,11 +13,11 @@ import (
 	"syscall"
 	"time"
 
-	"musicserver/internal/activity"
-	"musicserver/internal/music"
-	"musicserver/internal/netlimit"
-	"musicserver/internal/update"
-	"musicserver/internal/version"
+	"pikmelo-server/internal/activity"
+	"pikmelo-server/internal/music"
+	"pikmelo-server/internal/netlimit"
+	"pikmelo-server/internal/update"
+	"pikmelo-server/internal/version"
 )
 
 func main() {

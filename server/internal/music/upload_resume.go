@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"musicserver/internal/activity"
+	"pikmelo-server/internal/activity"
 )
 
 const resumableChunkSize = 4 << 20

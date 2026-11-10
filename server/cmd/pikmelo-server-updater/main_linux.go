@@ -6,7 +6,7 @@ import (
 	"context"
 	"flag"
 	"log"
-	"musicserver/internal/update"
+	"pikmelo-server/internal/update"
 	"time"
 )
 

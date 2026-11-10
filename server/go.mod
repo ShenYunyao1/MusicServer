@@ -1,4 +1,4 @@
-module musicserver
+module pikmelo-server
 
 go 1.26.0
 

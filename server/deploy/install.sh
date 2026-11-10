@@ -6,7 +6,10 @@ prepare_only=${1:-}
 if [[ $EUID != 0 ]]; then echo 'Run with sudo from an extracted, verified release directory.' >&2; exit 1; fi
 if [[ $(uname -s) != Linux || $(uname -m) != x86_64 ]]; then echo 'This release supports Ubuntu Linux amd64.' >&2; exit 1; fi
 cd -- "$(dirname -- "$(readlink -f -- "$0")")/.."
-for required in musicserver musicserver-updater build.json; do [[ -f "$required" && ! -L "$required" ]] || { echo "Missing $required" >&2; exit 1; }; done
+server_binary=pikmelo-server
+worker_binary=pikmelo-server-updater
+if [[ ! -e "$server_binary" ]]; then server_binary=musicserver; worker_binary=musicserver-updater; fi
+for required in "$server_binary" "$worker_binary" build.json; do [[ -f "$required" && ! -L "$required" ]] || { echo "Missing $required" >&2; exit 1; }; done
 if [[ -e /opt/musicserver/current || -L /opt/musicserver/current ]]; then echo 'Already installed. Use the web updater; this bootstrap never replaces existing data.' >&2; exit 1; fi
 command -v ffprobe >/dev/null || { echo 'Install ffmpeg first: sudo apt-get update && sudo apt-get install -y ffmpeg' >&2; exit 1; }
 id musicserver >/dev/null 2>&1 || useradd --system --home-dir /var/lib/musicserver --shell /usr/sbin/nologin musicserver
@@ -17,9 +20,10 @@ install -d -o musicserver -g musicserver -m 0755 /srv/musicserver/media
 install -d -o root -g musicserver -m 2770 /var/lib/musicserver-update/queue
 install -d -o root -g root -m 0700 /var/lib/musicserver-update/backups /var/lib/musicserver-update/downloads
 install -d -m 0755 /opt/musicserver/releases/initial
-install -m 0755 musicserver /opt/musicserver/releases/initial/musicserver
+install -m 0755 "$server_binary" /opt/musicserver/releases/initial/pikmelo-server
+ln /opt/musicserver/releases/initial/pikmelo-server /opt/musicserver/releases/initial/musicserver
 install -m 0644 build.json /opt/musicserver/releases/initial/build.json
-install -m 0755 musicserver-updater /usr/local/lib/musicserver/musicserver-updater
+install -m 0755 "$worker_binary" /usr/local/lib/musicserver/musicserver-updater
 ln -s releases/initial /opt/musicserver/current
 [[ -f /etc/musicserver/musicserver.env ]] || install -o root -g musicserver -m 0640 deploy/musicserver.env.example /etc/musicserver/musicserver.env
 [[ -f /etc/musicserver/updater.json ]] || install -m 0644 deploy/updater.json.example /etc/musicserver/updater.json

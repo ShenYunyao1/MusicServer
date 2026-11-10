@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"musicserver/internal/activity"
+	"pikmelo-server/internal/activity"
 )
 
 type mailRuntime struct {

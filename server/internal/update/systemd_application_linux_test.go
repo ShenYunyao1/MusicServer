@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"musicserver/internal/version"
+	"pikmelo-server/internal/version"
 )
 
 // Exercise the actual application's startup migration under a restricted,

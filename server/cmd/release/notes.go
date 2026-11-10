@@ -7,13 +7,15 @@ import (
 	"io"
 	"regexp"
 	"strings"
+
+	"pikmelo-server/internal/version"
 )
 
 func validateReleaseNotes(data []byte, release string, schema int) error {
 	notes := strings.TrimSpace(string(data))
 	heading, _, _ := strings.Cut(notes, "\n")
-	if strings.TrimSpace(heading) != "# MusicServer v"+release {
-		return fmt.Errorf("formal release notes heading must be # MusicServer v%s", release)
+	if strings.TrimSpace(heading) != "# "+version.ProductName+" v"+release {
+		return fmt.Errorf("formal release notes heading must be # %s v%s", version.ProductName, release)
 	}
 	if regexp.MustCompile(`(?i)\b(unreleased|draft|development)\b|草稿|尚未正式发行|下一版开发说明|待发布`).MatchString(notes) {
 		return fmt.Errorf("formal release notes contain development placeholders")

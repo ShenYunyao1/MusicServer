@@ -1,7 +1,7 @@
 package main
 
 import (
-	"musicserver/internal/music"
+	"pikmelo-server/internal/music"
 	"path/filepath"
 	"testing"
 )

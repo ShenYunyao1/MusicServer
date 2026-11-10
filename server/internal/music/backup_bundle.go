@@ -20,8 +20,8 @@ import (
 	"unicode"
 
 	"github.com/google/uuid"
-	"musicserver/internal/activity"
-	"musicserver/internal/version"
+	"pikmelo-server/internal/activity"
+	"pikmelo-server/internal/version"
 )
 
 const maxBackupManifest = 16 << 20

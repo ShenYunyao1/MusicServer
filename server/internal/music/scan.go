@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"musicserver/internal/activity"
+	"pikmelo-server/internal/activity"
 )
 
 type scanCandidate struct {

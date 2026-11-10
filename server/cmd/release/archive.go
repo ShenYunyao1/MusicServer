@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"pikmelo-server/internal/version"
 )
 
 func archive(path, platform string, entries map[string][]byte) error {
@@ -40,7 +42,7 @@ func archive(path, platform string, entries map[string][]byte) error {
 		t := tar.NewWriter(gz)
 		for _, name := range names {
 			mode := int64(0644)
-			if name == "musicserver" || name == "musicserver-updater" || strings.HasSuffix(name, ".sh") {
+			if name == "musicserver" || name == "musicserver-updater" || name == version.BinaryName || name == version.UpdaterName || strings.HasSuffix(name, ".sh") {
 				mode = 0755
 			}
 			h := &tar.Header{Name: name, Size: int64(len(entries[name])), Mode: mode, ModTime: time.Unix(0, 0)}

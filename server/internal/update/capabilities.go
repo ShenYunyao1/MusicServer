@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"musicserver/internal/version"
+	"pikmelo-server/internal/version"
 )
 
 const capabilitiesName = "capabilities.json"

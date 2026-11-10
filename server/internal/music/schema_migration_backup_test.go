@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"testing"
 
-	"musicserver/internal/diskspace"
+	"pikmelo-server/internal/diskspace"
 )
 
 func migrationBackupFiles(t *testing.T, s *Store) []string {

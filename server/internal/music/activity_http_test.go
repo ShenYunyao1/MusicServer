@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"musicserver/internal/activity"
+	"pikmelo-server/internal/activity"
 )
 
 func TestSystemLogsAreAdminOnlyAndNeverContainCredentials(t *testing.T) {

@@ -22,11 +22,11 @@ foreach ($name in @('GOROOT','GOTOOLCHAIN','GOCACHE','GOPATH','GOENV','GOOS','GO
 Push-Location $PSScriptRoot
 try {
 	$buildDirectory = Join-Path $PSScriptRoot 'build'
-	$binaryName = if ($Target -eq 'windows') { 'musicserver.exe' } else { 'musicserver' }
+	$binaryName = if ($Target -eq 'windows') { 'pikmelo-server.exe' } else { 'pikmelo-server' }
 	$outputPath = Join-Path $buildDirectory $binaryName
 	if ($Target -eq 'windows') {
-		$running = Get-Process -Name musicserver -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $outputPath }
-		if ($running) { throw 'Stop build\musicserver.exe before building. Runtime data will be retained.' }
+		$running = Get-Process -Name pikmelo-server -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $outputPath }
+		if ($running) { throw 'Stop build\pikmelo-server.exe before building. Runtime data will be retained.' }
 	}
     $env:GOROOT = $GoRoot
     $env:GOTOOLCHAIN = 'local'
@@ -46,7 +46,7 @@ try {
     New-Item -ItemType Directory -Path $buildDirectory -Force | Out-Null
     $env:GOOS = $Target
     Write-Host "[3/3] Building $Target/amd64 -> build\$binaryName..." -ForegroundColor Cyan
-    & $go build -trimpath -buildvcs=auto -o $outputPath ./cmd/musicserver
+    & $go build -trimpath -buildvcs=auto -o $outputPath ./cmd/pikmelo-server
     if ($LASTEXITCODE -ne 0) { throw 'Go build failed' }
     Write-Host ''
     Write-Host 'BUILD SUCCEEDED' -ForegroundColor Green

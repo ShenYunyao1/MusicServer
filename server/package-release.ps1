@@ -21,7 +21,7 @@ try {
     $env:CGO_ENABLED='0'
     $go=Join-Path $GoRoot 'bin/go.exe'
     $env:GOOS='linux'
-    & $go build -trimpath -buildvcs=true -o build/musicserver-updater ./cmd/musicserver-updater
+    & $go build -trimpath -buildvcs=true -o build/pikmelo-server-updater ./cmd/pikmelo-server-updater
     if ($LASTEXITCODE -ne 0) { throw 'Linux updater build failed' }
     $env:GOOS='windows'
     & $go run -buildvcs=true ./cmd/release

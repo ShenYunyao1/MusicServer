@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"musicserver/internal/version"
+	"pikmelo-server/internal/version"
 )
 
 type mailEnvelope struct {

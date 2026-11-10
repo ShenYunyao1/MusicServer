@@ -1,5 +1,5 @@
 [Unit]
-Description=Check MusicServer certificate renewal every six hours
+Description=Check Pikmelo Server certificate renewal every six hours
 
 [Timer]
 OnCalendar=*-*-* 00,06,12,18:00:00

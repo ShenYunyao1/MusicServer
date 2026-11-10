@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"musicserver/internal/activity"
+	"pikmelo-server/internal/activity"
 )
 
 type countedUploadBody struct {

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"musicserver/internal/activity"
+	"pikmelo-server/internal/activity"
 
 	"github.com/google/uuid"
 )

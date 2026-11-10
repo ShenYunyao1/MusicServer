@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"musicserver/internal/diskspace"
+	"pikmelo-server/internal/diskspace"
 )
 
 func resumeCall(api *API, user User, method, path string, body []byte, offset string) *httptest.ResponseRecorder {

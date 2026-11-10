@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"musicserver/internal/version"
+	"pikmelo-server/internal/version"
 )
 
 type sqliteMigration struct {

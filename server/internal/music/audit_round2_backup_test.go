@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"musicserver/internal/diskspace"
+	"pikmelo-server/internal/diskspace"
 )
 
 func TestRound2BackupSpaceChecksAreBoundedByBytes(t *testing.T) {

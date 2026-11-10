@@ -7,7 +7,7 @@ import (
 	"github.com/google/uuid"
 	"log"
 	_ "modernc.org/sqlite"
-	"musicserver/internal/version"
+	"pikmelo-server/internal/version"
 	"net/url"
 	"os"
 	"path/filepath"

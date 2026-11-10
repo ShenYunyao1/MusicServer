@@ -1,9 +1,15 @@
-# MusicServer v0.21.18
-<!-- musicserver-release: {"version":"0.21.18","schema":9,"status":"stable"} -->
+# Pikmelo Server v0.21.19
+<!-- musicserver-release: {"version":"0.21.19","schema":9,"status":"stable"} -->
 
-本版启用 schema 9 和个人“我常听的”，并包含累计审查修复。保留现有账号、密码、Key、曲目 UUID、歌单、标签和媒体，不需要重新导入。已有 schema 8 必须先安装正式桥接 **v0.21.17**，并按下方步骤维护独立更新器，再安装本版。已有 schema 9 可同格式更新；首次安装直接创建 schema 9，统计从启用后开始。
+本版将服务器统一命名为 **Pikmelo Server · 拾律服务器**，源码模块和程序使用 `pikmelo-server`，保留现有账号、密码、Key、曲目 UUID、歌单、标签和媒体。已有 schema 8 必须先安装正式桥接 **v0.21.17**，并按下方步骤维护独立更新器，再安装本版。已有 schema 9 可同格式更新；首次安装直接创建 schema 9。
 
 ## 功能和修复
+
+- 网页、邮件、命令提示、构建入口及仓库使用新名称。Windows 新名称 ZIP 包含 `pikmelo-server.exe` 和 `start.bat`，解压到运行目录后双击启动。已有安装先备份并停止程序，保留原数据和媒体目录。
+- 正式发行提供两套平台包及各自的签名清单，共八个资产。`musicserver-*` 和 `release-manifest.json` 供已发行更新器衔接，新名称包由 `pikmelo-server-release-manifest.json` 验证。Linux 安装沿用现有受管目录、systemd 单元和独立 worker 路径，提取后为受管主程序和 worker 建立新旧入口。详见 [名称升级指南](pikmelo-rename.md)。
+- 核对增量同步协议及累计审计修复，保留旧凭据、上传队列、邮件派生密钥和恢复标记的持久化标识。
+
+## 既有能力与累计修复
 
 - 新增“我常听的”页面，按本账户的有效播放次数排序，支持全部／近 7 天／近 30 天、搜索和分页。播放上报复核身份及曲目权限，防重复计次，其他账户无法读取个人统计。
 
@@ -23,7 +29,7 @@
 sudo ./musicserver-updater -config /etc/musicserver/updater.json -refresh-worker 0.21.17
 ```
 
-4. 核对 `/var/lib/musicserver-update/capabilities.json` 的版本为 **0.21.17**、提交为 **37f14b957739386d3dda4d94b0e217e8fc43b1c9**，包含 schema 8、9 及 8→9 迁移能力；确认恢复 timer／path 正常。之后检查并确认安装本版 **0.21.18 / schema 9**。启动前保留独立旧库快照，迁移或健康失败时恢复旧程序及旧库；不支持直接将 schema 9 数据降级。
+4. 核对 `/var/lib/musicserver-update/capabilities.json` 的版本为 **0.21.17**、提交为 **37f14b957739386d3dda4d94b0e217e8fc43b1c9**，包含 schema 8、9 及 8→9 迁移能力；确认恢复 timer／path 正常。之后检查并确认安装本版 **0.21.19 / schema 9**。启动前保留独立旧库快照，迁移或健康失败时恢复旧程序及旧库；不支持直接将 schema 9 数据降级。
 
 不修改能力文件来伪造支持，不用 schema 9 程序直接替换 schema 8 worker。维护失败保留诊断和旧 worker。具体见随包 `deploy/schema9-upgrade.md` 与 `deploy/updater-maintenance.md`。
 

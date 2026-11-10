@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"musicserver/internal/activity"
+	"pikmelo-server/internal/activity"
 )
 
 func TestAuditKnownEndpointMethods(t *testing.T) {

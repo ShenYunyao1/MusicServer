@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"musicserver/internal/version"
+	"pikmelo-server/internal/version"
 )
 
 // CleanupCache only unlinks recognized download files from version directories.

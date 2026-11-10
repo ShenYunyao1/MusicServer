@@ -1,7 +1,7 @@
 package update
 
 import (
-	"musicserver/internal/version"
+	"pikmelo-server/internal/version"
 	"os"
 	"path/filepath"
 	"testing"

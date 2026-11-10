@@ -6,7 +6,7 @@ import (
 	"flag"
 	"fmt"
 
-	"musicserver/internal/music"
+	"pikmelo-server/internal/music"
 )
 
 func backupCommand(args []string) error {

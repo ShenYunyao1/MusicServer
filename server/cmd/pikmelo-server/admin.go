@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"os"
 
-	"musicserver/internal/music"
+	"pikmelo-server/internal/music"
 
 	"golang.org/x/term"
 )
@@ -38,7 +38,7 @@ var readConsolePassword = func() (string, error) {
 
 func adminCommand(args []string) error {
 	if len(args) == 0 || (args[0] != "init" && args[0] != "reset-password") {
-		return errors.New("usage: musicserver admin init|reset-password [--data <database>] [--media-root <directory>] [--username admin] [--revoke-keys]")
+		return errors.New("usage: pikmelo-server admin init|reset-password [--data <database>] [--media-root <directory>] [--username admin] [--revoke-keys]")
 	}
 	defaults, err := executableDefaults()
 	if err != nil {

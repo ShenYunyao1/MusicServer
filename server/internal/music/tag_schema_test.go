@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"musicserver/internal/version"
+	"pikmelo-server/internal/version"
 )
 
 func TestTagSchemaMigrationSeedsAndEnforcesRelationalBoundaries(t *testing.T) {

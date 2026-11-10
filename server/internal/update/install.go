@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"musicserver/internal/version"
+	"pikmelo-server/internal/version"
 )
 
 var jobID = regexp.MustCompile(`^[a-f0-9]{32}$`)
@@ -488,16 +488,17 @@ func ExtractRelease(archive, dest string, expected Manifest) error {
 		if h.Typeflag == tar.TypeDir && name == "deploy/" {
 			continue
 		}
-		allowed := name == "musicserver" || name == "musicserver-updater" || name == "build.json" || name == "README.md" || strings.HasPrefix(name, "deploy/") && !strings.Contains(strings.TrimPrefix(name, "deploy/"), "/") && !strings.Contains(name, "..")
+		binary := name == "musicserver" || name == "musicserver-updater" || name == version.BinaryName || name == version.UpdaterName
+		allowed := binary || name == "build.json" || name == "README.md" || strings.HasPrefix(name, "deploy/") && !strings.Contains(strings.TrimPrefix(name, "deploy/"), "/") && !strings.Contains(name, "..")
 		if !allowed || seen[name] || h.Typeflag != tar.TypeReg || h.Size < 0 || h.Size > maxPackageSize {
 			return fmt.Errorf("unsafe release archive member %q", name)
 		}
 		seen[name] = true
-		if name != "musicserver" && name != "musicserver-updater" && name != "build.json" {
+		if !binary && name != "build.json" {
 			continue
 		}
 		mode := os.FileMode(0644)
-		if name == "musicserver" || name == "musicserver-updater" {
+		if binary {
 			mode = 0755
 		}
 		out, e := os.OpenFile(filepath.Join(dest, name), os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
@@ -521,7 +522,7 @@ func ExtractRelease(archive, dest string, expected Manifest) error {
 			return ce
 		}
 	}
-	if !seen["musicserver"] || !seen["build.json"] {
+	if (!seen["musicserver"] && !seen[version.BinaryName]) || !seen["build.json"] {
 		return errors.New("release archive is incomplete")
 	}
 	var build Manifest
@@ -534,6 +535,25 @@ func ExtractRelease(archive, dest string, expected Manifest) error {
 	}
 	if build.Version != expected.Version || build.Commit != expected.Commit || build.Schema != expected.Schema || !slices.Equal(build.MigrateFrom, expected.MigrateFrom) {
 		return errors.New("archive build identity differs from signed manifest")
+	}
+	if seen["musicserver"] && seen[version.UpdaterName] || seen[version.BinaryName] && seen["musicserver-updater"] {
+		return errors.New("release archive mixes executable naming families")
+	}
+	// Signed archives contain one naming family. Locally created hard links keep
+	// both existing service units and new branded entry points usable.
+	for _, pair := range [][2]string{{"musicserver", version.BinaryName}, {"musicserver-updater", version.UpdaterName}} {
+		if seen[pair[0]] && seen[pair[1]] {
+			return errors.New("release archive mixes executable naming families")
+		}
+		source, target := pair[0], pair[1]
+		if !seen[source] {
+			source, target = target, source
+		}
+		if seen[source] {
+			if err := os.Link(filepath.Join(dest, source), filepath.Join(dest, target)); err != nil {
+				return fmt.Errorf("create release executable alias: %w", err)
+			}
+		}
 	}
 	return syncDir(dest)
 }

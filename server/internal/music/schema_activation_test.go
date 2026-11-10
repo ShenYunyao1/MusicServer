@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	"musicserver/internal/version"
+	"pikmelo-server/internal/version"
 )
 
 func TestSchemaActivationNormalStartupMigratesOldDatabaseWithSnapshot(t *testing.T) {

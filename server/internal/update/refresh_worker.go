@@ -13,7 +13,7 @@ import (
 	"slices"
 	"strings"
 
-	"musicserver/internal/version"
+	"pikmelo-server/internal/version"
 )
 
 type workerRefreshOptions struct {

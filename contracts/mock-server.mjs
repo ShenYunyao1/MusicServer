@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Dependency-free mock of the MusicServer incremental sync protocol. It is a
+// Dependency-free mock of the Pikmelo Server incremental sync protocol. It is a
 // reference implementation for clients and the counterpart of verify.mjs; it
 // is not the production server.
 
@@ -479,7 +479,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const port = Number(flag === -1 ? (process.env.MOCK_PORT ?? 8787) : process.argv[flag + 1]);
   const mock = createMockServer();
   mock.server.listen(port, '127.0.0.1', () => {
-    console.log(`mock MusicServer protocol on http://127.0.0.1:${mock.server.address().port}`);
+    console.log(`mock Pikmelo Server protocol on http://127.0.0.1:${mock.server.address().port}`);
     console.log(`library auth: Authorization: Bearer ${LIBRARY_KEY}`);
     console.log(`community cookie: ${SESSION_COOKIE}; CSRF: ${CSRF}`);
   });

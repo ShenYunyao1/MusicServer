@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"musicserver/internal/version"
+	"pikmelo-server/internal/version"
 )
 
 func tagTestAuth(t *testing.T, s *Store, username string) authContext {

@@ -1,5 +1,5 @@
 [Unit]
-Description=MusicServer music library service
+Description=Pikmelo Server music library service
 Wants=network-online.target
 After=network-online.target
 

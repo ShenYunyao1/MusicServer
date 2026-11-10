@@ -13,14 +13,20 @@ import (
 	"runtime"
 	"strings"
 
-	"musicserver/internal/version"
+	"pikmelo-server/internal/version"
 )
 
-const Repository = "https://github.com/ShenYunyao1/MusicServer"
+const Repository = "https://github.com/ShenYunyao1/Pikmelo-Server"
+const LegacyRepository = "https://github.com/ShenYunyao1/MusicServer"
+
+func officialRepository(repository string) bool {
+	return repository == Repository || repository == LegacyRepository
+}
 
 // The corresponding private seed exists only in the repository's Actions secret.
 const ReleasePublicKey = "y9th8IYGEvvdkvagc6sldsk8JopF1TDNhlqWGZPLXcw="
 const ManifestName = "release-manifest.json"
+const DistributionManifestName = "pikmelo-server-release-manifest.json"
 
 type Package struct {
 	Name   string `json:"name"`
@@ -55,24 +61,33 @@ func VerifyManifest(data, signature, key []byte) (Manifest, error) {
 	}
 	seen := map[string]bool{}
 	for _, p := range result.Packages {
-		if (p.OS != "windows" && p.OS != "linux") || (p.Arch != "amd64" && p.Arch != "arm64") || p.Name != PackageName(p.OS, p.Arch) || p.Size <= 0 || p.Size > maxPackageSize || seen[p.Name] {
+		platform := p.OS + "/" + p.Arch
+		if (p.OS != "windows" && p.OS != "linux") || (p.Arch != "amd64" && p.Arch != "arm64") || (p.Name != PackageName(p.OS, p.Arch) && p.Name != DistributionPackageName(p.OS, p.Arch)) || p.Size <= 0 || p.Size > maxPackageSize || seen[platform] {
 			return result, errors.New("invalid release manifest package")
 		}
 		digest, e := hex.DecodeString(p.SHA256)
 		if e != nil || len(digest) != 32 {
 			return result, errors.New("invalid manifest package digest")
 		}
-		seen[p.Name] = true
+		seen[platform] = true
 	}
 	return result, nil
 }
 
 func PackageName(platform, arch string) string {
+	return packageNameWithPrefix("musicserver", platform, arch)
+}
+
+func DistributionPackageName(platform, arch string) string {
+	return packageNameWithPrefix(version.BinaryName, platform, arch)
+}
+
+func packageNameWithPrefix(prefix, platform, arch string) string {
 	extension := ".tar.gz"
 	if platform == "windows" {
 		extension = ".zip"
 	}
-	return "musicserver-" + platform + "-" + arch + extension
+	return prefix + "-" + platform + "-" + arch + extension
 }
 func (m Manifest) Platform(platform, arch string) (Package, error) {
 	for _, p := range m.Packages {

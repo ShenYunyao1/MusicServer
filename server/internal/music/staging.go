@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"musicserver/internal/activity"
+	"pikmelo-server/internal/activity"
 )
 
 const uploadStageTTL = 30 * time.Minute

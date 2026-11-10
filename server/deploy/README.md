@@ -1,11 +1,11 @@
-# Ubuntu 部署与自动更新
+# Pikmelo Server Ubuntu 安装与自动更新
 
-适用 Ubuntu 22.04/24.04、Linux amd64、systemd。数据库使用 schema 8；已知 schema 7 原库经预检、旧格式快照及事务迁移后继续使用，不清库。已有安装必须先按 [schema 8 手动升级步骤](schema8-upgrade.md) 完成桥接主程序和独立更新器维护；首次安装可直接使用本版。
+适用 Ubuntu 22.04/24.04、Linux amd64、systemd。当前数据库为 schema 9，已有 schema 8 按 [schema 9 升级步骤](schema9-upgrade.md) 完成桥接主程序及独立更新器维护。项目改名和既有目录的对应关系见 [名称升级指南](pikmelo-rename.md)。
 
 ## 首次安装
 
 1. Ubuntu 安装 `ffmpeg`（提供 `ffprobe`）和 `curl`，运行服务器不需要安装 Go。
-2. 从本项目正式 Release 下载 `musicserver-linux-amd64.tar.gz`、`release-manifest.json` 和 `release-manifest.json.sig`。先验证签名及包 SHA-256，再解压；不要以 root 身份直接解压未经验证的网络文件。
+2. 从本项目正式 Release 下载 `pikmelo-server-linux-amd64.tar.gz`、`pikmelo-server-release-manifest.json` 和对应 `.sig`。先验证签名及包 SHA-256，再解压。
 3. 在普通用户的临时目录解压，执行 `sudo bash deploy/install.sh`。安装脚本拒绝覆盖已有 `/opt/musicserver/current`，启动服务后在网页设置管理员密码。
 4. 在 `/etc/musicserver/musicserver.env` 设置 `MUSIC_SERVER_PUBLIC_URL=https://你的域名`，配置 HTTPS 反向代理至 `127.0.0.1:8080`，重启 `musicserver.service`。公网只开放 SSH 与 HTTPS，8080 保持回环监听。
 
@@ -100,10 +100,10 @@ cat /var/lib/musicserver-update/job.json
 
 更新器的停机数据库快照不包含音频、暂存及 Nginx／systemd／TLS 系统文件。0.18.0 起网页“备份与恢复”另提供包含已入库音频及应用设置的完整归档，并可用 `musicserver backup restore --file ... --destination 新的空目录` 校验恢复；恢复后需核对目录和服务账户权限再启动。自动完整备份默认关闭，启用后仅按策略清理自动归档；手动归档须显式删除。网页容量页可清理应用持有的旧更新下载缓存，保留当前／待更新／回退版本；root 更新器自己的下载、已安装程序和停机快照仍需按容量归档，至少保留 current、上一个成功版本及回退数据库。安装器及应用检查可用空间，外部进程同时占盘仍可能导致失败。
 
-Windows 用于本地开发，支持检查发行版本；自动停机安装限 Linux systemd。Windows 手工更新须停止服务、备份 `build/data` 和媒体，再替换固定 `build/musicserver.exe`，不能覆盖运行数据。
+Windows 用于本地开发，支持检查发行版本；自动停机安装限 Linux systemd。Windows 手工更新须停止服务、备份 `build/data` 和媒体，再替换固定 `build/pikmelo-server.exe` 及配套启动脚本，按名称升级指南保留运行数据。
 
 ## 发布
 
 本地完成测试、提交后推送 main，Actions 在 Windows 和 Ubuntu 上运行 Go 测试；Ubuntu 额外验证 race、实际隔离 systemd 服务的安装、数据库回退和中断恢复。main 或手动触发只生成可下载的签名构建产物；推送与代码版本一致的 `vX.Y.Z` 标签才发布正式 Release。先创建草稿，资产全部上传后再公开，避免检查到半成品。
 
-固定资产名：`musicserver-windows-amd64.zip`、`musicserver-linux-amd64.tar.gz`、`release-manifest.json`、`release-manifest.json.sig`。清单包含版本、提交、schema、平台、大小和 SHA-256。SHA-256 校验完整性，Ed25519 签名验证发行密钥持有者；仓库或签名 Secret 被控制仍需吊销并轮换信任，签名不替代功能测试。
+正式发行共八个资产，新名称与旧更新器兼容包各有两个平台包、清单和签名，完整列表见 [名称升级指南](pikmelo-rename.md)。清单包含版本、提交、schema、平台、大小和 SHA-256。SHA-256 校验完整性，Ed25519 签名验证发行密钥持有者；仓库或签名 Secret 被控制仍需吊销并轮换信任，签名不替代功能测试。

@@ -9,7 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"musicserver/internal/version"
+	"pikmelo-server/internal/version"
 	"net/http"
 	"net/http/httptest"
 	"os"

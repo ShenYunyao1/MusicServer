@@ -19,7 +19,7 @@ import (
 
 	"golang.org/x/sys/unix"
 	_ "modernc.org/sqlite"
-	"musicserver/internal/version"
+	"pikmelo-server/internal/version"
 )
 
 func LoadInstaller(configPath string) (*Installer, error) {

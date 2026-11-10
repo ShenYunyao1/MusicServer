@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"musicserver/internal/update"
+	"pikmelo-server/internal/update"
 )
 
 func TestSchemaNineFormalReleaseRequiresSignedCapableBridge(t *testing.T) {

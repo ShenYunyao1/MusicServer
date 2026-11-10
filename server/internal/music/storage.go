@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"musicserver/internal/diskspace"
+	"pikmelo-server/internal/diskspace"
 )
 
 var errStorageLow = errors.New("磁盘可用空间不足，请释放空间或调整预留空间后重试")

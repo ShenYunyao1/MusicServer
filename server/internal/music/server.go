@@ -17,8 +17,8 @@ import (
 	"sync"
 	"time"
 
-	"musicserver/internal/update"
-	"musicserver/internal/version"
+	"pikmelo-server/internal/update"
+	"pikmelo-server/internal/version"
 )
 
 //go:embed index.html

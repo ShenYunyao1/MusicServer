@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Executable contract for the MusicServer incremental sync protocol.
+// Executable contract for the Pikmelo Server incremental sync protocol.
 //
 //   node contracts/verify.mjs
 //

@@ -1,5 +1,5 @@
 [Unit]
-Description=MusicServer verified release installer
+Description=Pikmelo Server verified release installer
 Wants=network-online.target
 After=network-online.target
 

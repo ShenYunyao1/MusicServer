@@ -22,10 +22,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"musicserver/internal/activity"
-	"musicserver/internal/diskspace"
-	"musicserver/internal/update"
-	"musicserver/internal/version"
+	"pikmelo-server/internal/activity"
+	"pikmelo-server/internal/diskspace"
+	"pikmelo-server/internal/update"
+	"pikmelo-server/internal/version"
 )
 
 var audioExtensions = map[string]bool{".aac": true, ".flac": true, ".m4a": true, ".mp3": true, ".oga": true, ".ogg": true, ".opus": true, ".wav": true, ".wma": true}

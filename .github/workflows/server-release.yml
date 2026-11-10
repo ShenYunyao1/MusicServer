@@ -1,4 +1,4 @@
-name: Server tests and release
+name: Pikmelo Server tests and release
 
 on:
   push:
@@ -83,7 +83,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           (cd "$GITHUB_WORKSPACE/schema8-baseline/server" && CGO_ENABLED=0 go build -trimpath -buildvcs=true -o "$GITHUB_WORKSPACE/server/build/schema-current/baseline/musicserver" ./cmd/musicserver)
-          CGO_ENABLED=0 go build -trimpath -buildvcs=true -o build/schema-current/musicserver ./cmd/musicserver
+          CGO_ENABLED=0 go build -trimpath -buildvcs=true -o build/schema-current/musicserver ./cmd/pikmelo-server
           export MUSIC_SERVER_BASELINE_BINARY="$PWD/build/schema-current/baseline/musicserver"
           export MUSIC_SERVER_CANDIDATE_BINARY="$PWD/build/schema-current/musicserver"
           export MUSIC_SERVER_BASELINE_VERSION=0.21.12
@@ -161,7 +161,7 @@ jobs:
         # A real output sink is required by Firefox MediaElementSource/WebAudio.
         # Without one the runner reports OnMediaSinkAudioError and resume stalls.
         # The null sink consumes real decoded audio; playback assertions stay intact.
-        run: go build -trimpath -buildvcs=true -o build/musicserver ./cmd/musicserver
+        run: go build -trimpath -buildvcs=true -o build/musicserver ./cmd/pikmelo-server
         env:
           CGO_ENABLED: '0'
       - name: Start isolated browser audio output
@@ -308,7 +308,7 @@ jobs:
         id: candidate
         working-directory: server-source/server
         run: |
-          go build -trimpath -buildvcs=true -o build/musicserver.exe ./cmd/musicserver
+          go build -trimpath -buildvcs=true -o build/musicserver.exe ./cmd/pikmelo-server
           if ($LASTEXITCODE -ne 0) { throw 'Candidate server build failed' }
           $candidateVersion = go run ./cmd/release -version
           if ($LASTEXITCODE -ne 0) { throw 'Cannot read candidate identity' }
@@ -353,9 +353,9 @@ jobs:
       - name: Build fixed-name binaries
         run: |
           mkdir -p build
-          GOOS=windows GOARCH=amd64 go build -trimpath -buildvcs=true -o build/musicserver.exe ./cmd/musicserver
-          GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=true -o build/musicserver ./cmd/musicserver
-          GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=true -o build/musicserver-updater ./cmd/musicserver-updater
+          GOOS=windows GOARCH=amd64 go build -trimpath -buildvcs=true -o build/pikmelo-server.exe ./cmd/pikmelo-server
+          GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=true -o build/pikmelo-server ./cmd/pikmelo-server
+          GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=true -o build/pikmelo-server-updater ./cmd/pikmelo-server-updater
         env:
           CGO_ENABLED: '0'
       - name: Package (sign formal tags only)
@@ -382,20 +382,35 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           go run ./cmd/verify-release -dir build/packages
-          MUSIC_SERVER_RELEASE_ARCHIVE="$PWD/build/packages/musicserver-linux-amd64.tar.gz" go test ./internal/update -run '^TestPublishedLinuxArchive$' -count=1
+          for archive in musicserver-linux-amd64.tar.gz pikmelo-server-linux-amd64.tar.gz; do
+            MUSIC_SERVER_RELEASE_ARCHIVE="$PWD/build/packages/$archive" go test ./internal/update -run '^TestPublishedLinuxArchive$' -count=1
+          done
+      - name: Checkout immutable pre-brand schema-9 updater
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/checkout@v4
+        with:
+          ref: ccb32b3c8efd88edb3ae1e4522701d83fa35ebf4 # v0.21.18
+          path: server/build/pre-brand-baseline
+          persist-credentials: false
+          sparse-checkout: server
+      - name: Verify compatibility assets with released updater code
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: server/build/pre-brand-baseline/server
+        run: |
+          MUSIC_SERVER_RELEASE_ARCHIVE="$GITHUB_WORKSPACE/server/build/packages/musicserver-linux-amd64.tar.gz" go test ./internal/update -run '^TestPublishedLinuxArchive$' -count=1
       - name: Verify unsigned development packages
         if: "!startsWith(github.ref, 'refs/tags/v')"
         run: python tests/verify-development-packages.py build/packages --commit "$GITHUB_SHA" --version "$(go run ./cmd/release -version)"
       - uses: actions/upload-artifact@v4
         with:
-          name: musicserver-packages
+          name: pikmelo-server-packages
           path: server/build/packages/*
           if-no-files-found: error
           retention-days: 14
       - name: Publish complete Release
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          gh release create "$GITHUB_REF_NAME" build/packages/* --verify-tag --draft --title "MusicServer $GITHUB_REF_NAME" --notes-file deploy/release-notes.md
+          gh release create "$GITHUB_REF_NAME" build/packages/* --verify-tag --draft --title "Pikmelo Server $GITHUB_REF_NAME" --notes-file deploy/release-notes.md
           gh release edit "$GITHUB_REF_NAME" --draft=false --latest
         env:
           GH_TOKEN: ${{ github.token }}

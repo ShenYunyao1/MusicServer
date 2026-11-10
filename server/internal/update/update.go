@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	"musicserver/internal/version"
+	"pikmelo-server/internal/version"
 )
 
 const maxPackageSize = 512 << 20
@@ -182,7 +182,7 @@ func (m *Manager) Status() Status {
 			}
 		}
 	}
-	status.CanInstall = runtime.GOOS == "linux" && m.queueDir != "" && m.workerState != "" && status.Repository == Repository && status.Compatible && m.plan != nil
+	status.CanInstall = runtime.GOOS == "linux" && m.queueDir != "" && m.workerState != "" && officialRepository(status.Repository) && status.Compatible && m.plan != nil
 	if status.JobID != "" && m.workerState != "" {
 		var job Job
 		if data, err := os.ReadFile(m.workerState); err == nil && json.Unmarshal(data, &job) == nil && job.ID == status.JobID {
@@ -342,7 +342,7 @@ func (m *Manager) request(ctx context.Context, address string, asset bool) (*htt
 	if err != nil {
 		return nil, err
 	}
-	request.Header.Set("User-Agent", "musicserver/"+version.Version)
+	request.Header.Set("User-Agent", version.BinaryName+"/"+version.Version)
 	if asset {
 		request.Header.Set("Accept", "application/octet-stream")
 	} else {
@@ -528,7 +528,7 @@ func (m *Manager) Apply(expected string) error {
 	capabilities := m.readCapabilitySnapshot()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.closed || runtime.GOOS != "linux" || m.queueDir == "" || m.workerState == "" || m.repository() != Repository {
+	if m.closed || runtime.GOOS != "linux" || m.queueDir == "" || m.workerState == "" || !officialRepository(m.repository()) {
 		return errors.New("automatic installation requires the Ubuntu systemd updater; Windows supports release checks and manual installation")
 	}
 	if m.plan == nil {

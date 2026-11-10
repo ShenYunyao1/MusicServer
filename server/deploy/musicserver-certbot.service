@@ -1,5 +1,5 @@
 [Unit]
-Description=Renew MusicServer HTTPS certificates
+Description=Renew Pikmelo Server HTTPS certificates
 Wants=network-online.target
 After=network-online.target nginx.service
 

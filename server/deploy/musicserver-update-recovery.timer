@@ -1,5 +1,5 @@
 [Unit]
-Description=Recover interrupted MusicServer upgrades
+Description=Recover interrupted Pikmelo Server upgrades
 
 [Timer]
 OnBootSec=30s

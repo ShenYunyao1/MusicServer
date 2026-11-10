@@ -56,7 +56,7 @@ def main():
     build = '"' + str(directory / "build.bat") + '"'
     run_case(directory, start, 1, output="is missing")
     (directory / "build").mkdir()
-    shutil.copy2(source / "build/musicserver.exe", directory / "build/musicserver.exe")
+    shutil.copy2(source / "build/pikmelo-server.exe", directory / "build/pikmelo-server.exe")
     run_case(directory, start + " -h", 0, output="Usage of")
     run_case(directory, start + " -unknown-option", 2, output="flag provided but not defined")
     run_case(directory, start + " -h", 0, pause=False)

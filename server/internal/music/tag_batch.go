@@ -10,7 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"musicserver/internal/activity"
+	"pikmelo-server/internal/activity"
 
 	"github.com/google/uuid"
 )

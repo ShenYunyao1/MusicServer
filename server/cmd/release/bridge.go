@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"strings"
 
-	"musicserver/internal/update"
+	"pikmelo-server/internal/update"
 )
 
 // A schema-9 release needs an older signed schema-8 bridge. Branch artifacts

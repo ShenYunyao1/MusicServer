@@ -10,7 +10,7 @@ import (
 	"errors"
 	"image"
 	"io"
-	"musicserver/internal/diskspace"
+	"pikmelo-server/internal/diskspace"
 	"net/http"
 	"path/filepath"
 	"reflect"

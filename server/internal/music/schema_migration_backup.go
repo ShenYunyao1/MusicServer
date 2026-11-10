@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"musicserver/internal/version"
+	"pikmelo-server/internal/version"
 )
 
 // prepareSQLiteMigrationBackup runs before any startup migration. Even a
