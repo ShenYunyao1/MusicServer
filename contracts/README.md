@@ -1,6 +1,6 @@
 # 增量同步协议可执行契约
 
-本目录是 [`Docs/协议/增量同步协议-v1.md`](../Docs/协议/增量同步协议-v1.md) 的可执行部分：JSON Schema、示例报文、SSE 示例帧、零依赖 mock server 和自检脚本。
+本目录是 [`Docs/服务器/协议/增量同步协议-v1.md`](../Docs/服务器/协议/增量同步协议-v1.md) 的可执行部分：JSON Schema、示例报文、SSE 示例帧、零依赖 mock server 和自检脚本。
 
 ## 运行
 
