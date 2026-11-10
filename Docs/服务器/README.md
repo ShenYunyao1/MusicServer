@@ -6,6 +6,8 @@
 
 ## 使用、构建与更新
 
+- [Docker 容器化与命令行升级计划](Docker容器化与命令行升级计划.md)
+- [Docker 运行、备份与升级说明](../../server/deploy/docker.md)
 - [Pikmelo Server 重命名计划与进度](Pikmelo服务器重命名计划与进度.md)
 - [服务器 README](../../server/README.md)
 - [服务器编译与运行目录规范](服务器编译与运行目录规范.md)

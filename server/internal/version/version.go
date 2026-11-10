@@ -2,7 +2,15 @@
 // and its HTTP API.
 package version
 
-import "runtime/debug"
+import (
+	"encoding/hex"
+	"runtime/debug"
+	"strings"
+)
+
+// Container builds omit .git from the build context and supply source identity
+// explicitly. Ordinary Git builds continue to use Go's own VCS metadata.
+var buildCommit, buildModified string
 
 const (
 	ProductName = "Pikmelo Server"
@@ -27,5 +35,18 @@ func Source() (commit string, modified bool) {
 			}
 		}
 	}
+	if commit == "unknown" && buildCommit != "" {
+		return containerSource(buildCommit, buildModified)
+	}
 	return
+}
+
+func containerSource(commit, modified string) (string, bool) {
+	if len(commit) != 40 || commit != strings.ToLower(commit) || (modified != "true" && modified != "false") {
+		return "unknown", true
+	}
+	if _, err := hex.DecodeString(commit); err != nil {
+		return "unknown", true
+	}
+	return commit, modified == "true"
 }

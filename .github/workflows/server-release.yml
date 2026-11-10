@@ -1,8 +1,8 @@
-name: Pikmelo Server tests and release
+name: Pikmelo Server Docker tests and release
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'codex/docker-compose']
     tags: ['v*']
     paths: ['server/**', 'contracts/**', 'Docs/服务器/协议/**', '.github/workflows/server-release.yml']
   pull_request:
@@ -254,91 +254,15 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  player-compatibility:
-    runs-on: windows-2022
-    timeout-minutes: 25
-    strategy:
-      fail-fast: false
-      matrix:
-        player: [33da837016e01419db3200bb0adcc58aae179c56, f36c07dbe7f3890080b0290dd4ad32bb7729711d]
-    defaults:
-      run:
-        shell: pwsh
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          path: server-source
-      - name: Checkout accepted native player
-        uses: actions/checkout@v4
-        with:
-          repository: ShenYunyao1/MusicPlayer-for-Windows
-          ref: ${{ matrix.player }}
-          path: player
-          persist-credentials: false
-      - name: Checkout administrator provisioning fixture
-        uses: actions/checkout@v4
-        with:
-          repository: ShenYunyao1/MusicPlayer-for-Windows
-          ref: 917f43c4b2ca95c34f5e65816c25fcd6d1ab6b2c
-          path: player-fixture
-          sparse-checkout: UnitTest/remote_server_integration.py
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
-      - name: Use current account provisioning with the pinned native code
-        run: |
-          Copy-Item -LiteralPath 'player-fixture/UnitTest/remote_server_integration.py' -Destination 'player/UnitTest/remote_server_integration.py'
-          "fixture=917f43c4b2ca95c34f5e65816c25fcd6d1ab6b2c" >> $env:GITHUB_STEP_SUMMARY
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.26.x'
-          cache-dependency-path: server-source/server/go.sum
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Install native integration dependencies
-        timeout-minutes: 5
-        run: |
-          python -m pip install pywinpty==2.0.15
-          if ($LASTEXITCODE -ne 0) { throw 'pywinpty installation failed' }
-          if (!(Get-Command ffprobe -ErrorAction SilentlyContinue)) {
-            choco install ffmpeg -y --no-progress
-            if ($LASTEXITCODE -ne 0) { throw 'ffmpeg installation failed' }
-          }
-      - name: Build this candidate server
-        id: candidate
-        working-directory: server-source/server
-        run: |
-          go build -trimpath -buildvcs=true -o build/musicserver.exe ./cmd/pikmelo-server
-          if ($LASTEXITCODE -ne 0) { throw 'Candidate server build failed' }
-          $candidateVersion = go run ./cmd/release -version
-          if ($LASTEXITCODE -ne 0) { throw 'Cannot read candidate identity' }
-          $candidateBinary = '../server-source/server/build/musicserver.exe'
-          $candidateSchema = [regex]::Match((Get-Content -Raw internal/version/version.go), '(?m)^\s*Schema\s*=\s*([89])\s*$').Groups[1].Value
-          if (!$candidateSchema) { throw 'Candidate must declare schema 8 or 9' }
-          "version=$candidateVersion" >> $env:GITHUB_OUTPUT
-          "schema=$candidateSchema" >> $env:GITHUB_OUTPUT
-          "binary=$candidateBinary" >> $env:GITHUB_OUTPUT
-          "server=$(git rev-parse HEAD)" >> $env:GITHUB_STEP_SUMMARY
-          "player=${{ matrix.player }}" >> $env:GITHUB_STEP_SUMMARY
-          "schema=$candidateSchema (current candidate without overlay)" >> $env:GITHUB_STEP_SUMMARY
-        env:
-          CGO_ENABLED: '0'
-      - name: Real WinHTTP TLS, cache and two-ended integration
-        working-directory: player
-        run: |
-          ./UnitTest/run-remote-library-cache-tests.ps1 -Python python `
-            -ServerBinary '${{ steps.candidate.outputs.binary }}' `
-            -ServerSource '../server-source/server' `
-            -ExpectedServerVersion '${{ steps.candidate.outputs.version }}' `
-            -ExpectedServerSchema ${{ steps.candidate.outputs.schema }}
-
-  package:
-    timeout-minutes: 15
-    needs: [test, web, player-compatibility]
-    if: github.event_name != 'pull_request'
+  container:
     runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    needs: [test, web]
     permissions:
       contents: write
+      packages: write
+      attestations: write
+      id-token: write
     defaults:
       run:
         working-directory: server
@@ -350,75 +274,86 @@ jobs:
         with:
           go-version: '1.26.x'
           cache-dependency-path: server/go.sum
-      - name: Build fixed-name binaries
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: server/tests/package-lock.json
+      - name: Prepare real browser
         run: |
-          mkdir -p build
-          GOOS=windows GOARCH=amd64 go build -trimpath -buildvcs=true -o build/pikmelo-server.exe ./cmd/pikmelo-server
-          GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=true -o build/pikmelo-server ./cmd/pikmelo-server
-          GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=true -o build/pikmelo-server-updater ./cmd/pikmelo-server-updater
-        env:
-          CGO_ENABLED: '0'
-      - name: Package (sign formal tags only)
+          npm ci --prefix tests --ignore-scripts --no-audit --no-fund
+          (cd tests && npx playwright install --with-deps chromium)
+      - name: Build source-identified image
         run: |
-          VERSION=$(go run -buildvcs=true ./cmd/release -version)
+          VERSION=$(go run ./cmd/release -version)
           if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "v$VERSION" ]]; then echo 'Tag differs from code version'; exit 1; fi
-          FORMAL=()
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            FORMAL=(-formal -sign)
-            SCHEMA=$(sed -nE 's/^[[:space:]]*Schema[[:space:]]*=[[:space:]]*([0-9]+).*$/\1/p' internal/version/version.go)
-            if [[ "$SCHEMA" == 9 ]]; then
-              BRIDGE_TAG=$(jq -er '.tag | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))' deploy/schema9-bridge.json)
-              BRIDGE_COMMIT=$(jq -er '.commit | select(test("^[a-f0-9]{40}$"))' deploy/schema9-bridge.json)
-              test "$(git rev-list -n 1 "$BRIDGE_TAG")" = "$BRIDGE_COMMIT"
-              gh release view "$BRIDGE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease | jq -e '.isDraft == false and .isPrerelease == false'
-              gh release download "$BRIDGE_TAG" --repo "$GITHUB_REPOSITORY" --dir build/schema8-bridge --pattern 'release-manifest.json*' --pattern 'musicserver-linux-amd64.tar.gz' --pattern 'musicserver-windows-amd64.zip'
-            fi
-          fi
-          go run -buildvcs=true ./cmd/release "${FORMAL[@]}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+          docker compose config --quiet
+          docker build --build-arg VCS_REF="$GITHUB_SHA" --build-arg VCS_MODIFIED=false --build-arg IMAGE_VERSION="$VERSION" -t pikmelo-server:ci .
+      - name: Real schema upgrade and rollback acceptance
+        run: |
+          GOOS=linux CGO_ENABLED=0 python tests/build-schema-preview.py --version 0.21.18
+          python tests/docker-smoke.py --image pikmelo-server:ci --schema8-binary build/schema-preview/musicserver --commit "$GITHUB_SHA" --browser-test
+      - name: Validate formal release notes
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: go test ./cmd/release -run '^TestCurrentReleaseNotesMatchProductIdentity$' -count=1
+      - name: Log in to GHCR
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish immutable tested image
+        id: image
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          python - <<'PY'
+          import os, urllib.error, urllib.request
+          url = os.environ['GITHUB_API_URL'] + '/repos/' + os.environ['GITHUB_REPOSITORY'] + '/releases/tags/' + os.environ['GITHUB_REF_NAME']
+          request = urllib.request.Request(url, headers={'Authorization': 'Bearer '+os.environ['GH_TOKEN'], 'Accept': 'application/vnd.github+json'})
+          try:
+              with urllib.request.urlopen(request, timeout=20):
+                  raise SystemExit('Release already exists; preserve its image identity and use a new version.')
+          except urllib.error.HTTPError as error:
+              if error.code != 404:
+                  raise
+          PY
+          docker tag pikmelo-server:ci "$IMAGE_NAME:$VERSION"
+          docker push "$IMAGE_NAME:$VERSION"
+          DIGEST=$(docker image inspect "$IMAGE_NAME:$VERSION" --format '{{index .RepoDigests 0}}')
+          test "${DIGEST%@*}" = "$IMAGE_NAME"
+          echo "IMAGE_DIGEST=$DIGEST" >> "$GITHUB_ENV"
+          echo "digest=${DIGEST#*@}" >> "$GITHUB_OUTPUT"
         env:
-          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
           GH_TOKEN: ${{ github.token }}
-      - name: Verify signed packages and installer extraction
+      - name: Attest tested image provenance
         if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          expected=(
-            pikmelo-server-windows-amd64.zip pikmelo-server-linux-amd64.tar.gz
-            pikmelo-server-release-manifest.json pikmelo-server-release-manifest.json.sig
-            musicserver-windows-amd64.zip musicserver-linux-amd64.tar.gz
-            release-manifest.json release-manifest.json.sig
-          )
-          for asset in "${expected[@]}"; do test -s "build/packages/$asset"; done
-          test "$(find build/packages -mindepth 1 -maxdepth 1 | wc -l)" -eq "${#expected[@]}"
-          go run ./cmd/verify-release -dir build/packages
-          for archive in musicserver-linux-amd64.tar.gz pikmelo-server-linux-amd64.tar.gz; do
-            MUSIC_SERVER_RELEASE_ARCHIVE="$PWD/build/packages/$archive" go test ./internal/update -run '^TestPublishedLinuxArchive$' -count=1
-          done
-      - name: Checkout immutable pre-brand schema-9 updater
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: actions/checkout@v4
+        uses: actions/attest@v4
         with:
-          ref: ccb32b3c8efd88edb3ae1e4522701d83fa35ebf4 # v0.21.18
-          path: server/build/pre-brand-baseline
-          persist-credentials: false
-          sparse-checkout: server
-      - name: Verify compatibility assets with released updater code
-        if: startsWith(github.ref, 'refs/tags/v')
-        working-directory: server/build/pre-brand-baseline/server
-        run: |
-          MUSIC_SERVER_RELEASE_ARCHIVE="$GITHUB_WORKSPACE/server/build/packages/musicserver-linux-amd64.tar.gz" go test ./internal/update -run '^TestPublishedLinuxArchive$' -count=1
-      - name: Verify unsigned development packages
-        if: "!startsWith(github.ref, 'refs/tags/v')"
-        run: python tests/verify-development-packages.py build/packages --commit "$GITHUB_SHA" --version "$(go run ./cmd/release -version)"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: pikmelo-server-packages
-          path: server/build/packages/*
-          if-no-files-found: error
-          retention-days: 14
-      - name: Publish complete Release
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+      - name: Publish Docker release identity
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          gh release create "$GITHUB_REF_NAME" build/packages/* --verify-tag --draft --title "Pikmelo Server $GITHUB_REF_NAME" --notes-file deploy/release-notes.md
+          python - <<'PY'
+          import json, os, pathlib, re
+          source = pathlib.Path('internal/version/version.go').read_text()
+          schema = int(re.search(r'(?m)^\s*Schema\s*=\s*(\d+)', source)[1])
+          assert re.fullmatch(r'[a-f0-9]{40}', os.environ['GITHUB_SHA'])
+          assert re.fullmatch(r'ghcr\.io/[a-z0-9_.-]+/[a-z0-9_.-]+@sha256:[a-f0-9]{64}', os.environ['IMAGE_DIGEST'])
+          metadata = dict(format=1, kind='docker', version=os.environ['VERSION'], schema=schema,
+              commit=os.environ['GITHUB_SHA'], image=os.environ['IMAGE_DIGEST'], platform='linux/amd64')
+          pathlib.Path('build/container-release.json').write_text(json.dumps(metadata, indent=2)+'\n')
+          PY
+          gh release create "$GITHUB_REF_NAME" build/container-release.json --verify-tag --draft --title "Pikmelo Server $GITHUB_REF_NAME (Docker)" --notes-file deploy/release-notes.md
+          docker tag pikmelo-server:ci "$IMAGE_NAME:latest"
+          docker push "$IMAGE_NAME:latest"
           gh release edit "$GITHUB_REF_NAME" --draft=false --latest
         env:
           GH_TOKEN: ${{ github.token }}

@@ -22,6 +22,16 @@
     try {
       const s = await api('admin/update');
       selected = s;
+      if (s.state === 'external') {
+        $('updateStatus').textContent = `Docker 管理 · 当前 ${s.current_version} · 数据库 schema ${s.schema}`;
+        $('updatePackage').textContent = '升级前停止服务并备份数据卷，再通过 Docker Compose 拉取镜像、重建和检查健康。';
+        notes.textContent = 'docker compose pull pikmelo\ndocker compose up -d --no-build --wait pikmelo\n\n完整的停机备份与回退步骤见 Docker 使用说明。';
+        install.hidden = true;
+        releaseLink.hidden = true;
+        $('checkUpdate').hidden = true;
+        return s;
+      }
+      $('checkUpdate').hidden = false;
       const names = {disabled:'未配置更新仓库',checking:'正在检查',current:'当前已是最新版本',available:'发现新版本',incompatible:'当前更新路径不兼容',queued:'更新已排队',downloading:'下载并验证签名',stopping:'正在停止服务',backing_up:'正在备份数据库',switching:'正在切换程序',starting:'正在启动服务',verifying:'正在检查新版本',completed:'更新成功',rolled_back:'更新失败，已恢复原版本',failed:'更新失败，原版本保留',recovery_failed:'恢复失败，需要管理员处理',error:'检查失败'};
       $('updateStatus').textContent = `${names[s.state] || s.state} · 当前 ${s.current_version}${s.latest_version ? ' · 最新 ' + s.latest_version : ''}${s.message ? ' · ' + s.message : ''}`;
       $('updatePackage').textContent = [s.schema ? `数据库 schema ${s.schema}` : '', s.commit ? `提交 ${s.commit.slice(0, 12)}` : '', s.backup_path ? '备份：' + s.backup_path : '', !s.can_install ? '此环境支持检查更新；自动安装需在 Ubuntu 配置独立更新服务。' : '安装期间会短暂停机，完成后可能需要重新登录。'].filter(Boolean).join(' · ');

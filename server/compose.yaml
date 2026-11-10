@@ -1,0 +1,43 @@
+name: pikmelo
+
+services:
+  pikmelo:
+    image: ${PIKMELO_IMAGE:-ghcr.io/shenyunyao1/pikmelo-server:latest}
+    build:
+      context: .
+      args:
+        VCS_REF: ${PIKMELO_BUILD_COMMIT:-unknown}
+        VCS_MODIFIED: ${PIKMELO_BUILD_MODIFIED:-true}
+        IMAGE_VERSION: ${PIKMELO_BUILD_VERSION:-local}
+    command:
+      - -addr
+      - 0.0.0.0:8080
+      - -data
+      - ${PIKMELO_DATABASE:-/data/data/library.sqlite}
+      - -media-root
+      - ${PIKMELO_MEDIA_ROOT:-/data/media}
+    ports:
+      - "${PIKMELO_BIND_ADDRESS:-127.0.0.1}:${PIKMELO_PORT:-8080}:8080"
+    environment:
+      MUSIC_SERVER_PUBLIC_URL: ${PIKMELO_PUBLIC_URL:-}
+    volumes:
+      - data:/data
+      - temporary:/tmp
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 2m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  data:
+    name: ${PIKMELO_DATA_VOLUME:-pikmelo-data}
+  temporary:
+    name: ${PIKMELO_DATA_VOLUME:-pikmelo-data}-tmp

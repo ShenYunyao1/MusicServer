@@ -27,7 +27,7 @@ func backupCommand(args []string) error {
 		return nil
 	}
 	if len(args) == 0 || args[0] != "restore" {
-		return errors.New("usage: musicserver backup restore --file <backup.tar.gz> --destination <new-empty-directory>")
+		return errors.New("usage: pikmelo-server backup restore --file <backup.tar.gz> --destination <new-empty-directory>")
 	}
 	flags := flag.NewFlagSet("backup restore", flag.ContinueOnError)
 	file := flags.String("file", "", "complete or database-only backup archive")

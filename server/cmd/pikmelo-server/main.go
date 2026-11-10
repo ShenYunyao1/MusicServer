@@ -21,6 +21,15 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		if len(os.Args) != 2 {
+			log.Fatal("usage: pikmelo-server healthcheck")
+		}
+		if err := checkHealth("http://127.0.0.1:8080/api/v2/health"); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	defaults, err := executableDefaults()
 	if err != nil {
 		log.Fatal(err)
@@ -146,7 +155,11 @@ func main() {
 		}
 		return repo
 	})
-	updater.ConfigureInstaller(os.Getenv("MUSIC_SERVER_UPDATE_QUEUE"), os.Getenv("MUSIC_SERVER_UPDATE_STATE"))
+	if os.Getenv("PIKMELO_DEPLOYMENT") == "docker" {
+		updater.ConfigureContainer()
+	} else {
+		updater.ConfigureInstaller(os.Getenv("MUSIC_SERVER_UPDATE_QUEUE"), os.Getenv("MUSIC_SERVER_UPDATE_STATE"))
+	}
 	defer updater.Close()
 	handler.SetUpdater(updater)
 	updateContext, stopUpdates := context.WithCancel(context.Background())

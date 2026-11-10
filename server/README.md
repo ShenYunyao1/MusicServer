@@ -1,5 +1,13 @@
 # Pikmelo Server · 拾律服务器 0.21.19
 
+## Docker 分支入口
+
+`codex/docker-compose` 分支提供容器化与 Docker 命令升级。运行、数据卷、备份和回退步骤见 [Docker 使用说明](deploy/docker.md)，实施与验收见 [容器化计划](../Docs/服务器/Docker容器化与命令行升级计划.md)。本分支的发行对象为 GHCR 镜像及 `container-release.json`，完整容器验收通过后由版本标签触发正式发布。
+
+以下章节同时保留通用 API、功能及早期原生运行记录。
+
+## 通用功能与原生运行参考
+
 Go 1.26+，本版 SQLite schema 9，HTTP API `/api/v2`，内置中文管理页。支持 Windows 和 Linux。正式版本以 Release 验收为依据。
 
 项目重命名的范围、升级兼容及验收进度见 [重命名计划](../Docs/服务器/Pikmelo服务器重命名计划与进度.md)。

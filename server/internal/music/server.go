@@ -605,6 +605,10 @@ func (a *API) adminUpdate(response http.ResponseWriter, request *http.Request) {
 			return
 		}
 		if !a.updater.Trigger() {
+			if status := a.updater.Status(); status.State == "external" {
+				writeError(response, http.StatusConflict, "UPDATE_EXTERNALLY_MANAGED", status.Message)
+				return
+			}
 			writeError(response, http.StatusConflict, "UPDATE_BUSY", "update check is already running")
 			return
 		}

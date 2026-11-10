@@ -79,6 +79,7 @@ type Manager struct {
 	cancel           context.CancelFunc
 	workers          sync.WaitGroup
 	closed           bool
+	container        bool
 }
 
 func NewManager(dir string, repository func() string) *Manager {
@@ -155,6 +156,9 @@ func ValidateRepository(raw string) error {
 }
 
 func (m *Manager) Status() Status {
+	if status, external := m.containerStatus(); external {
+		return status
+	}
 	capabilities := m.readCapabilitySnapshot()
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -204,7 +208,7 @@ func (m *Manager) Status() Status {
 func (m *Manager) begin() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.closed || m.status.State == "checking" || m.status.State == "downloading" || m.jobActiveLocked() {
+	if m.closed || m.container || m.status.State == "checking" || m.status.State == "downloading" || m.jobActiveLocked() {
 		return false
 	}
 	m.status.State = "checking"
@@ -263,6 +267,9 @@ func (m *Manager) Trigger() bool {
 }
 
 func (m *Manager) Start(ctx context.Context) {
+	if _, external := m.containerStatus(); external {
+		return
+	}
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()
@@ -525,6 +532,9 @@ func (m *Manager) jobActiveLocked() bool {
 
 // Apply queues only a version, never a shell command or a caller-supplied path.
 func (m *Manager) Apply(expected string) error {
+	if _, external := m.containerStatus(); external {
+		return errors.New(containerUpdateMessage)
+	}
 	capabilities := m.readCapabilitySnapshot()
 	m.mu.Lock()
 	defer m.mu.Unlock()
