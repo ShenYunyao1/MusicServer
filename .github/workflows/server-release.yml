@@ -381,6 +381,14 @@ jobs:
       - name: Verify signed packages and installer extraction
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
+          expected=(
+            pikmelo-server-windows-amd64.zip pikmelo-server-linux-amd64.tar.gz
+            pikmelo-server-release-manifest.json pikmelo-server-release-manifest.json.sig
+            musicserver-windows-amd64.zip musicserver-linux-amd64.tar.gz
+            release-manifest.json release-manifest.json.sig
+          )
+          for asset in "${expected[@]}"; do test -s "build/packages/$asset"; done
+          test "$(find build/packages -mindepth 1 -maxdepth 1 | wc -l)" -eq "${#expected[@]}"
           go run ./cmd/verify-release -dir build/packages
           for archive in musicserver-linux-amd64.tar.gz pikmelo-server-linux-amd64.tar.gz; do
             MUSIC_SERVER_RELEASE_ARCHIVE="$PWD/build/packages/$archive" go test ./internal/update -run '^TestPublishedLinuxArchive$' -count=1
