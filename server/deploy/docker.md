@@ -105,11 +105,13 @@ docker run --rm --network none --mount type=volume,src=pikmelo-import-data,dst=/
 
 使用备份所在目录的绝对路径替换 `BACKUP_DIRECTORY`。导入完成后设置 `PIKMELO_DATA_VOLUME=pikmelo-import-data`、`PIKMELO_DATABASE=/data/imported/data/library.sqlite`、`PIKMELO_MEDIA_ROOT=/data/imported`，再通过 Compose 启动。
 
-完整应用备份恢复会按既有规则清理旧会话、关闭自动备份并重置邮件服务状态，恢复后重新核对这些设置。跨系统的 ffprobe 路径使用容器内 `ffprobe`，曲目继续按相对媒体路径读取。已有部署保留到导入与业务验收完成。
+完整应用备份恢复会按既有规则清理旧会话、关闭自动备份并重置邮件服务状态，恢复后重新核对这些设置。在网页服务器设置中将音频信息工具路径留空或设置为容器内 `ffprobe`，曲目继续按相对媒体路径读取。已有部署保留到导入与业务验收完成。
 
 ## 构建与发行验证
 
 本分支的服务端 CI 验证 Go／vet、网页、镜像及实际容器升级回退，版本标签与源码版本一致时发布 GHCR 版本镜像、稳定通道和 GitHub Release。Release 的 `container-release.json` 记录版本、schema、源码提交及镜像摘要，流水线同时生成镜像来源证明。
+
+Docker 镜像的 `latest` 为独立稳定通道。Docker 专用 GitHub Release 使用 `--latest=false`，原生安装的更新器通过原生稳定 Release 获取其签名平台资产。仓库版本标签是全局唯一的，后续发行使用新的源码版本和标签。
 
 本地运行容器回归可执行以下命令，测试使用独立项目和随机卷名，完成后清理本次创建的容器与卷。
 

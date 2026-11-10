@@ -92,7 +92,8 @@ def wait_health(base, schema):
 def main(args):
     project = 'pikmelo-test-' + uuid.uuid4().hex[:12]
     data, backup, restored = [project + suffix for suffix in ('-data', '-backup', '-restored')]
-    volumes = [data, data + '-tmp', backup, restored, restored + '-tmp']
+    imported = project + '-imported'
+    volumes = [data, data + '-tmp', backup, restored, restored + '-tmp', imported, imported + '-tmp']
     environment = dict(os.environ, PIKMELO_IMAGE=args.image, PIKMELO_DATA_VOLUME=data, PIKMELO_PORT='0')
     fixture_image = 'pikmelo-server:fixture-' + uuid.uuid4().hex[:12]
     baseline = args.image
@@ -112,8 +113,8 @@ def main(args):
         base = 'http://127.0.0.1:' + port
         return base, wait_health(base, schema), result
 
-    def helper(*command, mounts):
-        arguments = ['run', '--rm', '--network', 'none', '--user', '0']
+    def helper(*command, mounts, user='0'):
+        arguments = ['run', '--rm', '--network', 'none', '--user', user]
         for mount in mounts:
             arguments += ['--mount', mount]
         return docker(*arguments, '--entrypoint', command[0], args.image, *command[1:])
@@ -191,8 +192,24 @@ def main(args):
             'interval': '1s', 'start_period': '1s', 'timeout': '5s', 'retries': 30}}}}), encoding='utf-8')
         environment['PIKMELO_DATA_VOLUME'] = restored
         base, _, _ = start(baseline, initial_schema)
-        verify(base, initial_schema, track, playlist, key, content)
+        client = verify(base, initial_schema, track, playlist, key, content)
         print('PASS failed health gate and rollback using old image plus restored pre-upgrade volume')
+        client.call('admin/backups', 'POST', {'include_media': True})
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            job = client.call('admin/backups')['job']
+            if job['state'] in ['completed', 'failed', 'cancelled']:
+                break
+            time.sleep(.1)
+        assert job['state'] == 'completed', job.get('error', 'backup timed out')
+        compose('stop')
+        helper('pikmelo-server', 'backup', 'restore', '--file', '/source/data/backups/' + job['archive']['name'],
+            '--destination', '/data/imported', user='10001:10001', mounts=[
+                f'type=volume,src={restored},dst=/source,readonly', f'type=volume,src={imported},dst=/data'])
+        environment.update(PIKMELO_DATA_VOLUME=imported, PIKMELO_DATABASE='/data/imported/data/library.sqlite', PIKMELO_MEDIA_ROOT='/data/imported')
+        base, _, _ = start(args.image, 9)
+        verify(base, 9, track, playlist, key, content)
+        print('PASS full application-backup import, custom data paths and retained playback authorization')
     except Exception:
         print(compose('exec', '-T', 'pikmelo', 'df', '-B1', '/data', '/tmp', check=False).stdout)
         print(compose('logs', '--tail', '60', check=False).stdout)
